@@ -9,6 +9,7 @@ use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 
+#[derive(Debug)]
 pub enum GeneratorError {
 	ParseError(PErrorType<String>),
 	TypeCheckError(TypeCheckError),
@@ -63,11 +64,11 @@ pub trait Language {
 
 	type OptionsBuilder;
 	type Options;
-	fn empty_options(&self) -> Self::OptionsBuilder;
-	fn add_option(&self, builder: &mut Self::OptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError>;
-	fn finalize_options(&self, builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError>;
+	fn empty_options() -> Self::OptionsBuilder;
+	fn add_option(builder: &mut Self::OptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError>;
+	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError>;
 	
-	fn generate<Output : for<'a> OutputHandler<'a>>(&self, model: model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError>;
+	fn generate<Output : for<'a> OutputHandler<'a>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError>;
 }
 
 

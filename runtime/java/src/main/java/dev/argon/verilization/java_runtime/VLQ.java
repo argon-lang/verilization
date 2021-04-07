@@ -6,7 +6,7 @@ import java.math.BigInteger;
 public abstract class VLQ {
 	private VLQ() {}
 
-	private final class Encoder {
+	private static final class Encoder {
 		public Encoder(FormatWriter writer) {
 			this.writer = writer;
 		}

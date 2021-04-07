@@ -1,6 +1,6 @@
 import {Codec, FormatWriter, FormatReader, StandardCodecs} from "@verilization/runtime";
-import * as sym_struct_versions_Referenced from "./Referenced.js";
 import * as sym_struct_versions_Addition from "./Addition.js";
+import * as sym_struct_versions_Referenced from "./Referenced.js";
 export interface V1 {
 	readonly n: number;
 	readonly m: bigint;

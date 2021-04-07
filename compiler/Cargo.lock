@@ -111,17 +111,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877630b3de15c0b64cc52f659345724fbf6bdad9bd9566699fc53688f3c34a34"
 
 [[package]]
-name = "plugin-serialization"
-version = "0.1.0"
-dependencies = [
- "nom",
- "num-bigint",
- "num-traits",
- "pathdiff",
- "verilization-runtime",
-]
-
-[[package]]
 name = "radium"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -144,6 +133,17 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
+name = "verilization-compiler"
+version = "0.1.0"
+dependencies = [
+ "nom",
+ "num-bigint",
+ "num-traits",
+ "pathdiff",
+ "verilization-runtime",
+]
 
 [[package]]
 name = "verilization-runtime"

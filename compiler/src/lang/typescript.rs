@@ -12,8 +12,8 @@ pub struct TSOptionsBuilder {
 }
 
 pub struct TSOptions {
-	output_dir: OsString,
-	package_mapping: HashMap<model::PackageName, OsString>,
+	pub output_dir: OsString,
+	pub package_mapping: HashMap<model::PackageName, OsString>,
 }
 
 
@@ -449,20 +449,18 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 
 pub struct TypeScriptLanguage {}
 
-pub const TYPESCRIPT_LANGUAGE: TypeScriptLanguage = TypeScriptLanguage {};
-
 impl Language for TypeScriptLanguage {
 	type OptionsBuilder = TSOptionsBuilder;
 	type Options = TSOptions;
 
-	fn empty_options(&self) -> TSOptionsBuilder {
+	fn empty_options() -> TSOptionsBuilder {
 		TSOptionsBuilder {
 			output_dir: None,
 			package_mapping: HashMap::new(),
 		}
 	}
 
-	fn add_option(&self, builder: &mut TSOptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError> {
+	fn add_option(builder: &mut TSOptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError> {
 		if name == "out_dir" {
 			if builder.output_dir.is_some() {
 				return Err(GeneratorError::from("Output directory already specified"))
@@ -484,7 +482,7 @@ impl Language for TypeScriptLanguage {
 		}
 	}
 
-	fn finalize_options(&self, builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
+	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
 		let output_dir = builder.output_dir.ok_or("Output directory not specified")?;
 		Ok(TSOptions {
 			output_dir: output_dir,
@@ -492,7 +490,7 @@ impl Language for TypeScriptLanguage {
 		})
 	}
 
-	fn generate<Output: for<'a> OutputHandler<'a>>(&self, model: model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
+	fn generate<Output: for<'a> OutputHandler<'a>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
 		let mut const_gen = TSConstGenerator {
 			options: &options,
 			output: output,

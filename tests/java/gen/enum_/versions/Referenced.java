@@ -13,6 +13,7 @@ public abstract class Referenced {
 			@Override
 			public V1 read(dev.argon.verilization.java_runtime.FormatReader reader) throws java.io.IOException {
 				java.math.BigInteger tag = dev.argon.verilization.java_runtime.StandardCodecs.natCodec.read(reader);
+				if(tag.compareTo(java.math.BigInteger.valueOf(java.lang.Integer.MAX_VALUE)) > 0) throw new java.lang.ArithmeticException();
 				switch(tag.intValue()) {
 					case 0:
 						return new V1.x(reader.readInt());
@@ -48,6 +49,7 @@ public abstract class Referenced {
 			@Override
 			public V2 read(dev.argon.verilization.java_runtime.FormatReader reader) throws java.io.IOException {
 				java.math.BigInteger tag = dev.argon.verilization.java_runtime.StandardCodecs.natCodec.read(reader);
+				if(tag.compareTo(java.math.BigInteger.valueOf(java.lang.Integer.MAX_VALUE)) > 0) throw new java.lang.ArithmeticException();
 				switch(tag.intValue()) {
 					case 0:
 						return new V2.x(reader.readLong());
@@ -88,6 +90,7 @@ public abstract class Referenced {
 			@Override
 			public V3 read(dev.argon.verilization.java_runtime.FormatReader reader) throws java.io.IOException {
 				java.math.BigInteger tag = dev.argon.verilization.java_runtime.StandardCodecs.natCodec.read(reader);
+				if(tag.compareTo(java.math.BigInteger.valueOf(java.lang.Integer.MAX_VALUE)) > 0) throw new java.lang.ArithmeticException();
 				switch(tag.intValue()) {
 					case 0:
 						return new V3.x(reader.readLong());
@@ -128,6 +131,7 @@ public abstract class Referenced {
 			@Override
 			public V4 read(dev.argon.verilization.java_runtime.FormatReader reader) throws java.io.IOException {
 				java.math.BigInteger tag = dev.argon.verilization.java_runtime.StandardCodecs.natCodec.read(reader);
+				if(tag.compareTo(java.math.BigInteger.valueOf(java.lang.Integer.MAX_VALUE)) > 0) throw new java.lang.ArithmeticException();
 				switch(tag.intValue()) {
 					case 0:
 						return new V4.x(reader.readLong());

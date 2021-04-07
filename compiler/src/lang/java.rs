@@ -16,8 +16,8 @@ pub struct JavaOptionsBuilder {
 }
 
 pub struct JavaOptions {
-	output_dir: OsString,
-	package_mapping: PackageMap,
+	pub output_dir: OsString,
+	pub package_mapping: PackageMap,
 }
 
 
@@ -518,7 +518,7 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 		writeln!(state.file, "\t\t\t@Override")?;
 		writeln!(state.file, "\t\t\tpublic V{} read({}.FormatReader reader) throws java.io.IOException {{", version, RUNTIME_PACKAGE)?;
 		writeln!(state.file, "\t\t\t\tjava.math.BigInteger tag = {}.StandardCodecs.natCodec.read(reader);", RUNTIME_PACKAGE)?;
-		writeln!(state.file, "\t\t\t\tif(tag.compareTo(java.math.BigInteger.valueOf(java.lang.Integer.MAX_VALUE)) > 0) throw new OverflowException();")?;
+		writeln!(state.file, "\t\t\t\tif(tag.compareTo(java.math.BigInteger.valueOf(java.lang.Integer.MAX_VALUE)) > 0) throw new java.lang.ArithmeticException();")?;
 		writeln!(state.file, "\t\t\t\tswitch(tag.intValue()) {{")?;
 		for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
 			writeln!(state.file, "\t\t\t\t\tcase {}:", index)?;
@@ -575,20 +575,18 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 
 pub struct JavaLanguage {}
 
-pub const JAVA_LANGUAGE: JavaLanguage = JavaLanguage {};
-
 impl Language for JavaLanguage {
 	type OptionsBuilder = JavaOptionsBuilder;
 	type Options = JavaOptions;
 
-	fn empty_options(&self) -> JavaOptionsBuilder {
+	fn empty_options() -> JavaOptionsBuilder {
 		JavaOptionsBuilder {
 			output_dir: None,
 			package_mapping: HashMap::new(),
 		}
 	}
 
-	fn add_option(&self, builder: &mut JavaOptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError> {
+	fn add_option(builder: &mut JavaOptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError> {
 		if name == "out_dir" {
 			if builder.output_dir.is_some() {
 				return Err(GeneratorError::from("Output directory already specified"))
@@ -612,7 +610,7 @@ impl Language for JavaLanguage {
 		}
 	}
 
-	fn finalize_options(&self, builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
+	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
 		let output_dir = builder.output_dir.ok_or("Output directory not specified")?;
 		Ok(JavaOptions {
 			output_dir: output_dir,
@@ -620,7 +618,7 @@ impl Language for JavaLanguage {
 		})
 	}
 
-	fn generate<Output : for<'a> OutputHandler<'a>>(&self, model: model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
+	fn generate<Output : for<'a> OutputHandler<'a>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
 		let mut const_gen = JavaConstGenerator {
 			options: &options,
 			output: output,

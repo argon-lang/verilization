@@ -1,6 +1,6 @@
 import {Codec, FormatWriter, FormatReader, StandardCodecs} from "@verilization/runtime";
-import * as sym_enum_versions_Addition from "./Addition.js";
 import * as sym_enum_versions_Referenced from "./Referenced.js";
+import * as sym_enum_versions_Addition from "./Addition.js";
 export type V1 = { readonly tag: "n", readonly n: number, }
 	| { readonly tag: "m", readonly m: bigint, }
 	| { readonly tag: "r", readonly r: sym_enum_versions_Referenced.V1, };

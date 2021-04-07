@@ -2,6 +2,7 @@ use num_bigint::{ BigUint, BigInt };
 use num_traits::One;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::iter::FromIterator;
 
 /// A dot-separated package.
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -19,6 +20,12 @@ impl PackageName {
 				else {
 					pkg.split(".").map(str::to_string).collect()
 				},
+		}
+	}
+
+	pub fn from_parts(parts: &[&str]) -> PackageName {
+		PackageName {
+			package: Vec::from_iter(parts.iter().map(|x| x.to_string())),
 		}
 	}
 }

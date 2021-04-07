@@ -16,8 +16,8 @@ pub struct ScalaOptionsBuilder {
 }
 
 pub struct ScalaOptions {
-	output_dir: OsString,
-	package_mapping: PackageMap,
+	pub output_dir: OsString,
+	pub package_mapping: PackageMap,
 }
 
 
@@ -68,36 +68,31 @@ fn write_package<F : Write>(f: &mut F, package_mapping: &PackageMap, package: &m
 	Ok(())
 }
 
-fn write_type<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, t: &model::Type, erased: bool) -> Result<(), GeneratorError> {
+fn write_type<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
 	Ok(match t {
 		// Map built-in types to the equivalent Java type.
 		model::Type::Nat | model::Type::Int => write!(f, "scala.math.BigInt")?,
 		
 
-        model::Type::U8 | model::Type::I8 if erased => write!(f, "scala.Byte")?,
-		model::Type::U8 | model::Type::I8 => write!(f, "byte")?,
+        model::Type::U8 | model::Type::I8 => write!(f, "scala.Byte")?,
 		
-        model::Type::U16 | model::Type::I16 if erased => write!(f, "scala.Short")?,
-        model::Type::U16 | model::Type::I16 => write!(f, "short")?,
+        model::Type::U16 | model::Type::I16 => write!(f, "scala.Short")?,
 
-		model::Type::U32 | model::Type::I32 if erased => write!(f, "scala.Int")?,
-		model::Type::U32 | model::Type::I32 => write!(f, "int")?,
+		model::Type::U32 | model::Type::I32 => write!(f, "scala.Int")?,
 
-		model::Type::U64 | model::Type::I64 if erased => write!(f, "scala.Long")?,
-		model::Type::U64 | model::Type::I64 => write!(f, "long")?,
+		model::Type::U64 | model::Type::I64 => write!(f, "scala.Long")?,
 
 		model::Type::String => write!(f, "scala.String")?,
 
 
 		model::Type::List(inner) => {
 			write!(f, "zio.Chunk[")?;
-			write_type(f, package_mapping, version, inner, true)?;
+			write_type(f, package_mapping, version, inner)?;
 			write!(f, "]")?;
 		},
-
 		model::Type::Option(inner) => {
 			write!(f, "scala.Option[")?;
-			write_type(f, package_mapping, version, inner, true)?;
+			write_type(f, package_mapping, version, inner)?;
 			write!(f, "]")?;
 		},
 
@@ -131,8 +126,7 @@ enum ConvertParam {
 fn write_version_convert<'a, F : Write>(f: &mut F, package_mapping: &PackageMap, prev_ver: &BigUint, version: &BigUint, field_type: &model::Type, param: ConvertParam) -> Result<(), GeneratorError> {
 	match field_type {
 		model::Type::Defined(_) => {
-			write_type(f, package_mapping, version, field_type, false)?;
-			write!(f, ".V{}", version)?;
+			write_type(f, package_mapping, version, field_type)?;
 			match param {
 				ConvertParam::FunctionObject => write!(f, "::")?,
 				ConvertParam::Expression(_) => write!(f, ".")?,
@@ -210,7 +204,7 @@ fn write_codec<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &Big
 			write!(f, ")")?
 		},
 		model::Type::Defined(_) => {
-			write_type(f, package_mapping, version, t, false)?;
+			write_type(f, package_mapping, version, t)?;
 			write!(f, ".codec")?;
 		},
 	}
@@ -256,7 +250,7 @@ impl <'model, Output: for<'a> OutputHandler<'a>> model::ConstantDefinitionHandle
 
         writeln!(file, "object {} {{", name.name)?;
         write!(file, "\tval value: ")?;
-        write_type(&mut file, &self.options.package_mapping, latest_version, &constant.value_type, false)?;
+        write_type(&mut file, &self.options.package_mapping, latest_version, &constant.value_type)?;
         write!(file, " = ")?;
 		write_constant_value(&mut file, &constant.value)?;
 		writeln!(file, ";")?;
@@ -305,7 +299,7 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 
 		for (field_name, field) in &type_definition.fields {
 			write!(state.file, "\t\t{}: ", field_name)?;
-			write_type(&mut state.file, &state.options.package_mapping, version, &field.field_type, false)?;
+			write_type(&mut state.file, &state.options.package_mapping, version, &field.field_type)?;
 			writeln!(state.file, ",")?;
 		}
 
@@ -315,7 +309,7 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 
 
 		if !state.versions.is_empty() {
-			writeln!(state.file, "\t\tdef fromV{}(prev: V{}): V{} =", prev_ver, version, prev_ver)?;
+			writeln!(state.file, "\t\tdef fromV{}(prev: V{}): V{} =", prev_ver, prev_ver, version)?;
 			if !explicit_version {
 				if type_definition.fields.is_empty() {
 					writeln!(state.file, "\t\t\tV{}()", version)?;
@@ -335,11 +329,10 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 				write_qual_name(&mut state.file, &state.options.package_mapping, struct_name)?;
 				writeln!(state.file, "_Conversions.v{}ToV{}(prev);", prev_ver, version)?;
 			}
-			writeln!(state.file, "\t\t}}")?;
 		}
 
-		writeln!(state.file, "\t\tval codec: {}.Codec[V{}] = new {}.Codec<V{}> {{", RUNTIME_PACKAGE, version, RUNTIME_PACKAGE, version)?;
-		writeln!(state.file, "\t\t\toverride def read[R, E]({}.FormatReader reader): ZIO[R, E, V{}] =", RUNTIME_PACKAGE, version)?;
+		writeln!(state.file, "\t\tval codec: {}.Codec[V{}] = new {}.Codec[V{}] {{", RUNTIME_PACKAGE, version, RUNTIME_PACKAGE, version)?;
+		writeln!(state.file, "\t\t\toverride def read[R, E](reader: {}.FormatReader[R, E]): zio.ZIO[R, E, V{}] =", RUNTIME_PACKAGE, version)?;
 		if type_definition.fields.is_empty() {
 			writeln!(state.file, "\t\t\tzio.IO.succeed(V{}())", version)?;
 		}
@@ -358,7 +351,7 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 		}
 
 
-		writeln!(state.file, "\t\t\toverride def write[R, E]({}.FormatWriter writer, V{} value): ZIO[R, E, Unit] = ", RUNTIME_PACKAGE, version)?;
+		writeln!(state.file, "\t\t\toverride def write[R, E](writer: {}.FormatWriter[R, E], value: V{}): zio.ZIO[R, E, Unit] = ", RUNTIME_PACKAGE, version)?;
 		if type_definition.fields.is_empty() {
 			writeln!(state.file, "\t\t\t\tzio.IO.unit")?;
 		}
@@ -416,13 +409,13 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 
 		for (field_name, field) in &type_definition.fields {
 			write!(state.file, "\t\tfinal case class {}({}: ", field_name, field_name)?;
-			write_type(&mut state.file, &state.options.package_mapping, version, &field.field_type, false)?;
+			write_type(&mut state.file, &state.options.package_mapping, version, &field.field_type)?;
 			writeln!(state.file, ") extends V{}", version)?;
 		}
 
 
 		if !state.versions.is_empty() {
-			writeln!(state.file, "\t\tdef fromV{}(prev: V{}): V{} =", prev_ver, version, prev_ver)?;
+			writeln!(state.file, "\t\tdef fromV{}(prev: V{}): V{} =", prev_ver, prev_ver, version)?;
 			if !explicit_version {
 				if type_definition.fields.is_empty() {
 					writeln!(state.file, "\t\t\tthrow new IllegalArgumentException();")?;
@@ -442,38 +435,39 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 				write_qual_name(&mut state.file, &state.options.package_mapping, enum_name)?;
 				writeln!(state.file, "_Conversions.v{}ToV{}(prev);", prev_ver, version)?;
 			}
-			writeln!(state.file, "\t\t}}")?;
 		}
 
 
 
-		writeln!(state.file, "\t\tval codec: {}.Codec[V{}] = new {}.Codec<V{}> {{", RUNTIME_PACKAGE, version, RUNTIME_PACKAGE, version)?;
-		writeln!(state.file, "\t\t\toverride def read[R, E]({}.FormatReader reader): ZIO[R, E, V{}] =", RUNTIME_PACKAGE, version)?;
+		writeln!(state.file, "\t\tval codec: {}.Codec[V{}] = new {}.Codec[V{}] {{", RUNTIME_PACKAGE, version, RUNTIME_PACKAGE, version)?;
+		writeln!(state.file, "\t\t\toverride def read[R, E](reader: {}.FormatReader[R, E]): zio.ZIO[R, E, V{}] =", RUNTIME_PACKAGE, version)?;
 		writeln!(state.file, "\t\t\t\t{}.StandardCodecs.natCodec.read(reader).flatMap {{", RUNTIME_PACKAGE)?;
-		for (index, (_, field)) in type_definition.fields.iter().enumerate() {
+		for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
 			writeln!(state.file, "\t\t\t\t\tcase {}.Util.BigIntValue({}) =>", RUNTIME_PACKAGE, index)?;
 			write!(state.file, "\t\t\t\t\t\t")?;
 			write_value_read(&mut state.file, &state.options.package_mapping, version, &field.field_type)?;
-			writeln!(state.file, "")?;
+			write!(state.file, ".map(")?;
+			write_qual_name(&mut state.file, &state.options.package_mapping, enum_name)?;
+			writeln!(state.file, ".V{}.{}.apply)", version, field_name)?;
 		}
-		writeln!(state.file, "\t\t\t\tcase _ => zio.IO.die(new IOException(\"Invalid tag number.\"))")?;
+		writeln!(state.file, "\t\t\t\t\tcase _ => zio.IO.die(new java.lang.RuntimeException(\"Invalid tag number.\"))")?;
 		writeln!(state.file, "\t\t\t\t}}")?;
 
 
-		writeln!(state.file, "\t\t\toverride def write[R, E]({}.FormatWriter writer, V{} value): ZIO[R, E, Unit] = ", RUNTIME_PACKAGE, version)?;
+		writeln!(state.file, "\t\t\toverride def write[R, E](writer: {}.FormatWriter[R, E], value: V{}): zio.ZIO[R, E, Unit] = ", RUNTIME_PACKAGE, version)?;
 		if type_definition.fields.is_empty() {
 			writeln!(state.file, "\t\t\t\tzio.IO.die(new IllegalArgumentException())")?;
 		}
 		else {
 			writeln!(state.file, "\t\t\t\tvalue match {{")?;
 			for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
-				writeln!(state.file, "\t\t\t\tcase value: V{}.{} =>", version, field_name)?;
-				writeln!(state.file, "\t\t\t\t\tfor {{")?;
-				writeln!(state.file, "\t\t\t\t\t\t_ <- {}.StandardCodecs.natCodec.write(writer, {})", RUNTIME_PACKAGE, index)?;
-				write!(state.file, "\t\t\t\t\t\t_ <- ")?;
+				writeln!(state.file, "\t\t\t\t\tcase value: V{}.{} =>", version, field_name)?;
+				writeln!(state.file, "\t\t\t\t\t\tfor {{")?;
+				writeln!(state.file, "\t\t\t\t\t\t\t_ <- {}.StandardCodecs.natCodec.write(writer, {})", RUNTIME_PACKAGE, index)?;
+				write!(state.file, "\t\t\t\t\t\t\t_ <- ")?;
 				write_value_write(&mut state.file, &state.options.package_mapping, version, &field.field_type, format!("value.{}", field_name))?;
 				writeln!(state.file, "")?;
-				writeln!(state.file, "}} yield ()")?;
+				writeln!(state.file, "\t\t\t\t\t\t}} yield ()")?;
 			}
 			writeln!(state.file, "\t\t\t\t}}")?;
 		}
@@ -497,20 +491,18 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 
 pub struct ScalaLanguage {}
 
-pub const SCALA_LANGUAGE: ScalaLanguage = ScalaLanguage {};
-
 impl Language for ScalaLanguage {
 	type OptionsBuilder = ScalaOptionsBuilder;
 	type Options = ScalaOptions;
 
-	fn empty_options(&self) -> ScalaOptionsBuilder {
+	fn empty_options() -> ScalaOptionsBuilder {
 		ScalaOptionsBuilder {
 			output_dir: None,
 			package_mapping: HashMap::new(),
 		}
 	}
 
-	fn add_option(&self, builder: &mut ScalaOptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError> {
+	fn add_option(builder: &mut ScalaOptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError> {
 		if name == "out_dir" {
 			if builder.output_dir.is_some() {
 				return Err(GeneratorError::from("Output directory already specified"))
@@ -534,7 +526,7 @@ impl Language for ScalaLanguage {
 		}
 	}
 
-	fn finalize_options(&self, builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
+	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
 		let output_dir = builder.output_dir.ok_or("Output directory not specified")?;
 		Ok(ScalaOptions {
 			output_dir: output_dir,
@@ -542,7 +534,7 @@ impl Language for ScalaLanguage {
 		})
 	}
 
-	fn generate<Output : for<'a> OutputHandler<'a>>(&self, model: model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
+	fn generate<Output : for<'a> OutputHandler<'a>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
 		let mut const_gen = ScalaConstGenerator {
 			options: &options,
 			output: output,

@@ -13,6 +13,7 @@ public abstract class Addition {
 			@Override
 			public V4 read(dev.argon.verilization.java_runtime.FormatReader reader) throws java.io.IOException {
 				java.math.BigInteger tag = dev.argon.verilization.java_runtime.StandardCodecs.natCodec.read(reader);
+				if(tag.compareTo(java.math.BigInteger.valueOf(java.lang.Integer.MAX_VALUE)) > 0) throw new java.lang.ArithmeticException();
 				switch(tag.intValue()) {
 					case 0:
 						return new V4.stuff(reader.readInt());

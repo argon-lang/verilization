@@ -2,7 +2,7 @@ use crate::model::{Type, QualifiedName, Verilization, VersionedTypeDefinition, T
 use num_bigint::BigUint;
 use std::collections::HashSet;
 
-
+#[derive(Debug)]
 pub enum TypeCheckError {
     TypeNotDefined(QualifiedName),
     TypeAddedInNewerVersion(QualifiedName, BigUint),

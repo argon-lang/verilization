@@ -8,7 +8,7 @@ object Util {
 
 
     object BigIntValue {
-        def unapply(n.BigInt): Option[Int] =
+        def unapply(n: BigInt): Option[Int] =
             if(n < Int.MinValue || n > Int.MaxValue) None
             else Some(n.toInt)
     }

@@ -14,7 +14,7 @@ use nom::{
 	error::{ParseError, ErrorKind},
 };
 
-
+#[derive(Debug)]
 pub enum PErrorType<I> {
 	ParseError(I, ErrorKind),
 	DuplicateVersion(I, String, BigUint),
