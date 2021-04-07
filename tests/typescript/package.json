@@ -1,0 +1,14 @@
+{
+  "name": "verilization-typescript-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsc --project tsconfig.json"
+  },
+  "dependencies": {
+    "@verilization/runtime": "file:../../runtime/typescript"
+  },
+  "devDependencies": {
+    "typescript": "^4.2.3"
+  }
+}

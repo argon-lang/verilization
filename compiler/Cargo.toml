@@ -1,0 +1,15 @@
+[package]
+name = "verilization-compiler"
+version = "0.1.0"
+authors = ["argon-dev <argon@argon.dev>"]
+edition = "2018"
+
+[dependencies]
+nom = "6.1.2"
+num-bigint = "0.4.0"
+num-traits = "0.2.14"
+pathdiff = "0.2.0"
+
+[dev-dependencies]
+verilization-runtime = { path = "../runtime/rust" }
+

@@ -1,0 +1,34 @@
+version 4;
+package struct.versions;
+
+
+struct Main {
+    version 1 {
+        n: i32;
+        m: i64;
+        r: struct.versions.Referenced;
+    }
+
+    version 4 {
+        n: i32;
+        m: i64;
+        r: struct.versions.Referenced;
+        addition: struct.versions.Addition;
+    }
+}
+
+struct Referenced {
+    version 1 {
+        x: i32;
+    }
+    version 2 {
+        x: i64;
+    }
+}
+
+struct Addition {
+    version 4 {
+        stuff: i32;
+    }
+}
+

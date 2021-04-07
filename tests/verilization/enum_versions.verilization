@@ -1,0 +1,34 @@
+version 4;
+package enum.versions;
+
+
+enum Main {
+    version 1 {
+        n: i32;
+        m: i64;
+        r: enum.versions.Referenced;
+    }
+
+    version 4 {
+        n: i32;
+        m: i64;
+        r: enum.versions.Referenced;
+        addition: enum.versions.Addition;
+    }
+}
+
+enum Referenced {
+    version 1 {
+        x: i32;
+    }
+    version 2 {
+        x: i64;
+    }
+}
+
+enum Addition {
+    version 4 {
+        stuff: i32;
+    }
+}
+

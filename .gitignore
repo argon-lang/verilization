@@ -1,0 +1,8 @@
+# Rust
+target/
+
+# TypeScript
+node_modules/
+gen/**/*.ts
+!gen/**/*.conv.ts
+bin/
