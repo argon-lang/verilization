@@ -1,6 +1,9 @@
-# Rust
 target/
 
-# TypeScript
 node_modules/
 bin/
+
+tests/java/gen
+tests/scala/gen
+
+
