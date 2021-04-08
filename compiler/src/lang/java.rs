@@ -636,4 +636,8 @@ impl Language for JavaLanguage {
 		Ok(())
 	}
 
+	fn write_codec<F: Write>(file: &mut F, options: &Self::Options, version: &BigUint, _type_name: Option<&model::QualifiedName>, t: &model::Type) -> Result<(), GeneratorError> {
+		write_codec(file, &options.package_mapping, version, t)
+	}
+
 }

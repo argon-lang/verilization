@@ -63,7 +63,7 @@ fn write_imports<F : Write>(f: &mut F, options: &TSOptions, name: &model::Qualif
 	Ok(())
 }
 
-fn write_type<F : Write>(f: &mut F, version: &BigUint, type_name: &model::QualifiedName, t: &model::Type) -> Result<(), GeneratorError> {
+fn write_type<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&model::QualifiedName>, t: &model::Type) -> Result<(), GeneratorError> {
 	Ok(match t {
 		// Map built-in types to the equivalent JS type.
 		model::Type::Nat |
@@ -108,7 +108,7 @@ fn write_type<F : Write>(f: &mut F, version: &BigUint, type_name: &model::Qualif
 		},
 
 		// This is a value of the current type, so we don't need a qualifier.
-		model::Type::Defined(t) if t == type_name => write!(f, "V{}", version)?,
+		model::Type::Defined(t) if type_name.filter(|t2| t == *t2).is_some() => write!(f, "V{}", version)?,
 
 		model::Type::Defined(t) => {
 			write_import_name(f, t)?;
@@ -166,7 +166,7 @@ fn write_version_convert<F : Write, E : Into<GeneratorError>>(f: &mut F, prev_ve
 
 		model::Type::Option(inner) if requires_conversion(inner) => {
 			write!(f, "(function(value: ")?;
-			write_type(f, prev_ver, type_name, field_type)?;
+			write_type(f, prev_ver, Some(type_name), field_type)?;
 			write!(f, ") {{ if(value !== null) return ")?;
 			write_version_convert(f, prev_ver, version, type_name, inner, write_version_convert_option_inner)?;
 			write!(f, "; else return null; }})(")?;
@@ -182,7 +182,7 @@ fn write_version_convert<F : Write, E : Into<GeneratorError>>(f: &mut F, prev_ve
 }
 
 
-fn write_codec<F : Write>(f: &mut F, version: &BigUint, type_name: &model::QualifiedName, t: &model::Type) -> Result<(), GeneratorError> {
+fn write_codec<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&model::QualifiedName>, t: &model::Type) -> Result<(), GeneratorError> {
 	match t {
 		model::Type::Nat => write!(f, "StandardCodecs.nat")?,
 		model::Type::Int => write!(f, "StandardCodecs.int")?,
@@ -238,7 +238,7 @@ impl <'model, 'opt, Output: for<'a> OutputHandler<'a>> model::ConstantDefinition
 		write_imports(&mut file, self.options, name, referenced_types)?;
 
 		write!(file, "const {}: ", name.name)?;
-		write_type(&mut file, latest_version, name, &constant.value_type)?;
+		write_type(&mut file, latest_version, None, &constant.value_type)?;
 		write!(file, " = ")?;
 		write_constant_value(&mut file, &constant.value)?;
 		writeln!(file, ";")?;
@@ -279,7 +279,7 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 		writeln!(state.file, "export interface V{} {{", version)?;
 		for (field_name, field) in &type_definition.fields {
 			write!(state.file, "\treadonly {}: ", field_name)?;
-			write_type(&mut state.file, version, struct_name, &field.field_type)?;
+			write_type(&mut state.file, version, Some(struct_name), &field.field_type)?;
 			writeln!(state.file, ";")?;
 		}
 		writeln!(state.file, "}}")?;
@@ -313,7 +313,7 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 		writeln!(state.file, "\t\t\treturn {{")?;
 		for (field_name, field) in &type_definition.fields {
 			write!(state.file, "\t\t\t\t{}: await ", field_name)?;
-			write_codec(&mut state.file, version, struct_name, &field.field_type)?;
+			write_codec(&mut state.file, version, Some(struct_name), &field.field_type)?;
 			writeln!(state.file, ".read(reader),")?;
 		}
 		writeln!(state.file, "\t\t\t}};")?;
@@ -322,7 +322,7 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 		writeln!(state.file, "\t\tasync write(writer: FormatWriter, value: V{}): Promise<void> {{", version)?;
 		for (field_name, field) in &type_definition.fields {
 			write!(state.file, "\t\t\tawait ")?;
-			write_codec(&mut state.file, version, struct_name, &field.field_type)?;
+			write_codec(&mut state.file, version, Some(struct_name), &field.field_type)?;
 			writeln!(state.file, ".write(writer, value.{});", field_name)?;
 		}
 		writeln!(state.file, "\t\t}},")?;
@@ -371,7 +371,7 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 					is_first = false;
 				}
 				write!(state.file, "{{ readonly tag: \"{}\", readonly {}: ", field_name, field_name)?;
-				write_type(&mut state.file, version, enum_name, &field.field_type)?;
+				write_type(&mut state.file, version, Some(enum_name), &field.field_type)?;
 				write!(state.file, ", }}")?;
 			}
 
@@ -410,7 +410,7 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 		writeln!(state.file, "\t\t\tswitch(tag) {{")?;
 		for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
 			write!(state.file, "\t\t\t\tcase {}n: return {{ tag: \"{}\", \"{}\": await ", index, field_name, field_name)?;
-			write_codec(&mut state.file, version, enum_name, &field.field_type)?;
+			write_codec(&mut state.file, version, Some(enum_name), &field.field_type)?;
 			writeln!(state.file, ".read(reader) }};")?;
 		}
 		writeln!(state.file, "\t\t\t\tdefault: throw new Error(\"Unknown tag\");")?;
@@ -423,7 +423,7 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 			writeln!(state.file, "\t\t\t\tcase \"{}\":", field_name)?;
 			writeln!(state.file, "\t\t\t\t\tawait StandardCodecs.nat.write(writer, {}n);", index)?;
 			write!(state.file, "\t\t\t\t\tawait ")?;
-			write_codec(&mut state.file, version, enum_name, &field.field_type)?;
+			write_codec(&mut state.file, version, Some(enum_name), &field.field_type)?;
 			writeln!(state.file, ".write(writer, value.{});", field_name)?;
 			writeln!(state.file, "\t\t\t\t\tbreak;")?;
 		}
@@ -508,4 +508,8 @@ impl Language for TypeScriptLanguage {
 		Ok(())
 	}
 
+
+	fn write_codec<F: Write>(file: &mut F, _options: &Self::Options, version: &BigUint, type_name: Option<&model::QualifiedName>, t: &model::Type) -> Result<(), GeneratorError> {
+		write_codec(file, version, type_name, t)
+	}
 }
