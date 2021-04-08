@@ -7,26 +7,18 @@ use num_traits::ToPrimitive;
 pub trait FormatReader {
     type Error;
     fn read_u8(&mut self) -> Result<u8, Self::Error>;
-    fn read_i8(&mut self) -> Result<i8, Self::Error>;
     fn read_u16(&mut self) -> Result<u16, Self::Error>;
-    fn read_i16(&mut self) -> Result<i16, Self::Error>;
     fn read_u32(&mut self) -> Result<u32, Self::Error>;
-    fn read_i32(&mut self) -> Result<i32, Self::Error>;
     fn read_u64(&mut self) -> Result<u64, Self::Error>;
-    fn read_i64(&mut self) -> Result<i64, Self::Error>;
     fn read_bytes(&mut self, count: usize) -> Result<Vec<u8>, Self::Error>;
 }
 
 pub trait FormatWriter {
     type Error;
     fn write_u8(&mut self, value: u8) -> Result<(), Self::Error>;
-    fn write_i8(&mut self, value: i8) -> Result<(), Self::Error>;
     fn write_u16(&mut self, value: u16) -> Result<(), Self::Error>;
-    fn write_i16(&mut self, value: i16) -> Result<(), Self::Error>;
     fn write_u32(&mut self, value: u32) -> Result<(), Self::Error>;
-    fn write_i32(&mut self, value: i32) -> Result<(), Self::Error>;
     fn write_u64(&mut self, value: u64) -> Result<(), Self::Error>;
-    fn write_i64(&mut self, value: i64) -> Result<(), Self::Error>;
     fn write_bytes(data: &Vec<u8>) -> Result<(), Self::Error>;
 }
 
@@ -68,11 +60,11 @@ impl VerilizationCodec for u8 {
 
 impl VerilizationCodec for i8 {
     fn read_verilization<R : FormatReader>(reader: &mut R) -> Result<Self, R::Error> {
-        reader.read_i8()
+        Ok(reader.read_u8()? as i8)
     }
 
     fn write_verilization<W : FormatWriter>(&self, writer: &mut W) -> Result<(), W::Error> {
-        writer.write_i8(*self)
+        writer.write_u8(*self as u8)
     }
 }
 
@@ -88,11 +80,11 @@ impl VerilizationCodec for u16 {
 
 impl VerilizationCodec for i16 {
     fn read_verilization<R : FormatReader>(reader: &mut R) -> Result<Self, R::Error> {
-        reader.read_i16()
+        Ok(reader.read_u16()? as i16)
     }
 
     fn write_verilization<W : FormatWriter>(&self, writer: &mut W) -> Result<(), W::Error> {
-        writer.write_i16(*self)
+        writer.write_u16(*self as u16)
     }
 }
 
@@ -108,11 +100,11 @@ impl VerilizationCodec for u32 {
 
 impl VerilizationCodec for i32 {
     fn read_verilization<R : FormatReader>(reader: &mut R) -> Result<Self, R::Error> {
-        reader.read_i32()
+        Ok(reader.read_u32()? as i32)
     }
 
     fn write_verilization<W : FormatWriter>(&self, writer: &mut W) -> Result<(), W::Error> {
-        writer.write_i32(*self)
+        writer.write_u32(*self as u32)
     }
 }
 
@@ -128,11 +120,11 @@ impl VerilizationCodec for u64 {
 
 impl VerilizationCodec for i64 {
     fn read_verilization<R : FormatReader>(reader: &mut R) -> Result<Self, R::Error> {
-        reader.read_i64()
+        Ok(reader.read_u64()? as i64)
     }
 
     fn write_verilization<W : FormatWriter>(&self, writer: &mut W) -> Result<(), W::Error> {
-        writer.write_i64(*self)
+        writer.write_u64(*self as u64)
     }
 }
 
@@ -159,7 +151,7 @@ impl <T: VerilizationCodec> VerilizationCodec for Vec<T> {
 
 impl <T: VerilizationCodec> VerilizationCodec for Option<T> {
     fn read_verilization<R : FormatReader>(reader: &mut R) -> Result<Self, R::Error> {
-        let b = reader.read_i8()?;
+        let b = reader.read_u8()?;
         if b != 0 {
             Ok(Some(T::read_verilization(reader)?))
         }
