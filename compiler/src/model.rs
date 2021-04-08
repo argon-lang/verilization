@@ -134,16 +134,15 @@ pub trait ConstantDefinitionHandler<E> {
 	fn constant(&mut self, latest_version: &BigUint, name: &QualifiedName, constant: &Constant, referenced_types: HashSet<&QualifiedName>) -> Result<(), E>;
 }
 
-pub trait TypeDefinitionHandler<'model, 'state, E> {
-	type StructHandlerState;
-	fn begin_struct(&'state mut self, struct_name: &'model QualifiedName, referenced_types: HashSet<&'model QualifiedName>) -> Result<Self::StructHandlerState, E> where 'model : 'state;
-	fn versioned_struct(state: &mut Self::StructHandlerState, explicit_version: bool, struct_name: &'model QualifiedName, version: &BigUint, type_definition: &'model VersionedTypeDefinition) -> Result<(), E> where 'model : 'state;
-	fn end_struct(state: Self::StructHandlerState, struct_name: &'model QualifiedName) -> Result<(), E> where 'model : 'state;
+pub trait TypeDefinitionHandlerState<'model, 'state, Outer, E> : Sized where Outer : TypeDefinitionHandler<'model, 'state, E> {
+	fn begin(outer: &'state mut Outer, type_name: &'model QualifiedName, referenced_types: HashSet<&'model QualifiedName>) -> Result<Self, E> where 'model : 'state;
+	fn versioned_type(&mut self, explicit_version: bool, type_name: &'model QualifiedName, version: &BigUint, type_definition: &'model VersionedTypeDefinition) -> Result<(), E> where 'model : 'state;
+	fn end(self, type_name: &'model QualifiedName) -> Result<(), E> where 'model : 'state;
+}
 
-	type EnumHandlerState;
-	fn begin_enum(&'state mut self, name: &'model QualifiedName, referenced_types: HashSet<&'model QualifiedName>) -> Result<Self::EnumHandlerState, E> where 'model : 'state;
-	fn versioned_enum(state: &mut Self::EnumHandlerState, explicit_version: bool, enum_name: &'model QualifiedName, version: &BigUint, type_definition: &'model VersionedTypeDefinition) -> Result<(), E> where 'model : 'state;
-	fn end_enum(state: Self::EnumHandlerState, name: &'model QualifiedName) -> Result<(), E> where 'model : 'state;
+pub trait TypeDefinitionHandler<'model, 'state, E> : Sized {
+	type StructHandlerState : TypeDefinitionHandlerState<'model, 'state, Self, E>;
+	type EnumHandlerState : TypeDefinitionHandlerState<'model, 'state, Self, E>;
 }
 
 
@@ -250,50 +249,35 @@ impl Verilization {
 		let latest_version = &self.metadata.latest_version;
 
 		for (name, t) in &self.type_definitions {
+
+			fn handle_type<'model, 'state, E, Handler : TypeDefinitionHandler<'model, 'state, E>, State : TypeDefinitionHandlerState<'model, 'state, Handler, E>>(handler: &'state mut Handler, latest_version: &BigUint, name: &'model QualifiedName, type_versions: &'model HashMap<BigUint, VersionedTypeDefinition>) -> Result<(), E> where 'model : 'state {
+				let referenced_types = find_referenced_types(type_versions);
+				let mut state = State::begin(handler, name, referenced_types)?;
+				
+				let mut version = BigUint::one();
+				let mut last_seen_version = None;
+				while version <= *latest_version {
+					
+					if let Some(ver_struct) = type_versions.get(&version) {
+						state.versioned_type(true, name, &version, &ver_struct)?;
+						last_seen_version = Some(ver_struct);
+					}
+					else if let Some(ver_struct) = last_seen_version {
+						state.versioned_type(false, name, &version, &ver_struct)?;
+					}
+					
+					version = version + BigUint::one();
+				}
+
+				state.end(name)?;
+
+				Ok(())
+			}
+
+
 			match t {
-				TypeDefinition::StructType(struct_def) => {
-					let referenced_types = find_referenced_types(&struct_def.versions);
-					let mut state = handler.begin_struct(&name, referenced_types)?;
-					
-					let mut version: BigUint = One::one();
-					let mut last_seen_version = None;
-					while version <= *latest_version {
-						
-						if let Some(ver_struct) = struct_def.versions.get(&version) {
-							Handler::versioned_struct(&mut state, true, &name, &version, &ver_struct)?;
-							last_seen_version = Some(ver_struct);
-						}
-						else if let Some(ver_struct) = last_seen_version {
-							Handler::versioned_struct(&mut state, false, &name, &version, &ver_struct)?;
-						}
-						
-						version = version + <BigUint as One>::one();
-					}
-
-					Handler::end_struct(state, &name)?
-				},
-
-				TypeDefinition::EnumType(enum_def) => {
-					let referenced_types = find_referenced_types(&enum_def.versions);
-					let mut state = handler.begin_enum(&name, referenced_types)?;
-					
-					let mut version: BigUint = One::one();
-					let mut last_seen_version = None;
-					while version <= *latest_version {
-						
-						if let Some(ver_enum) = enum_def.versions.get(&version) {
-							Handler::versioned_enum(&mut state, true, &name, &version, &ver_enum)?;
-							last_seen_version = Some(ver_enum);
-						}
-						else if let Some(ver_enum) = last_seen_version {
-							Handler::versioned_enum(&mut state, false, &name, &version, &ver_enum)?;
-						}
-						
-						version = version + <BigUint as One>::one();
-					}
-
-					Handler::end_enum(state, &name)?
-				},
+				TypeDefinition::StructType(struct_def) => handle_type::<_, _, Handler::StructHandlerState>(handler, latest_version, &name, &struct_def.versions)?,
+				TypeDefinition::EnumType(enum_def) => handle_type::<_, _, Handler::EnumHandlerState>(handler, latest_version, &name, &enum_def.versions)?,
 			}
 		}
 

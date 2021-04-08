@@ -1,4 +1,4 @@
-use crate::model::{Type, QualifiedName, Verilization, VersionedTypeDefinition, TypeDefinitionHandler};
+use crate::model::{Type, QualifiedName, Verilization, VersionedTypeDefinition, TypeDefinitionHandler, TypeDefinitionHandlerState};
 use num_bigint::BigUint;
 use std::collections::HashSet;
 
@@ -32,50 +32,31 @@ fn check_type(verilization: &Verilization, version: &BigUint, t: &Type) -> Resul
     }
 }
 
+impl <'model, 'state> TypeDefinitionHandlerState<'model, 'state, TypeCheck<'model>, TypeCheckError> for TypeCheck<'model> {
+    fn begin(outer: &'state mut TypeCheck<'model>, _type_name: &QualifiedName, _referenced_types: HashSet<&QualifiedName>) -> Result<Self, TypeCheckError> {
+        Ok(TypeCheck {
+            verilization: outer.verilization,
+        })
+    }
+
+	fn versioned_type(&mut self, _explicit_version: bool, _type_name: &QualifiedName, version: &BigUint, type_definition: &VersionedTypeDefinition) -> Result<(), TypeCheckError> {
+
+        for (_, field) in &type_definition.fields {
+            check_type(self.verilization, version, &field.field_type)?
+        }
+
+        Ok(())
+    }
+	
+    fn end(self, _struct_name: &QualifiedName) -> Result<(), TypeCheckError> {
+        Ok(())
+    }
+
+}
+
 impl <'model, 'state> TypeDefinitionHandler<'model, 'state, TypeCheckError> for TypeCheck<'model> {
     type StructHandlerState = TypeCheck<'model>;
-	
-    fn begin_struct(&'state mut self, _struct_name: &QualifiedName, _referenced_types: HashSet<&QualifiedName>) -> Result<Self::StructHandlerState, TypeCheckError> {
-        Ok(TypeCheck {
-            verilization: self.verilization,
-        })
-    }
-
-	fn versioned_struct(state: &mut Self::StructHandlerState, _explicit_version: bool, _struct_name: &QualifiedName, version: &BigUint, type_definition: &VersionedTypeDefinition) -> Result<(), TypeCheckError> {
-
-        for (_, field) in &type_definition.fields {
-            check_type(state.verilization, version, &field.field_type)?
-        }
-
-        Ok(())
-    }
-	
-    fn end_struct(_state: Self::StructHandlerState, _struct_name: &QualifiedName) -> Result<(), TypeCheckError> {
-        Ok(())
-    }
-	
-
     type EnumHandlerState = TypeCheck<'model>;
-
-    fn begin_enum(&'state mut self, _enum_name: &QualifiedName, _referenced_types: HashSet<&QualifiedName>) -> Result<Self::StructHandlerState, TypeCheckError> {
-        Ok(TypeCheck {
-            verilization: self.verilization,
-        })
-    }
-
-	fn versioned_enum(state: &mut Self::StructHandlerState, _explicit_version: bool, _enum_name: &QualifiedName, version: &BigUint, type_definition: &VersionedTypeDefinition) -> Result<(), TypeCheckError> {
-
-        for (_, field) in &type_definition.fields {
-            check_type(state.verilization, version, &field.field_type)?
-        }
-
-        Ok(())
-    }
-	
-    fn end_enum(_state: Self::StructHandlerState, _enum_name: &QualifiedName) -> Result<(), TypeCheckError> {
-        Ok(())
-    }
-
 }
 
 

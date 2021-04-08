@@ -291,285 +291,295 @@ struct JavaTypeGenerator<'model, Output> {
 	output: &'model mut Output,
 }
 
-struct JavaTypeGeneratorState<'model, 'state, Output: OutputHandler<'state>> {
+struct JavaStructType {}
+struct JavaEnumType {}
+
+struct JavaTypeGeneratorState<'model, 'state, Output: OutputHandler<'state>, Extra> {
 	options: &'model JavaOptions,
 	file: Output::FileHandle,
 	versions: HashSet<BigUint>,
+	_extra: Extra,
 }
 
-impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandler<'model, 'state, GeneratorError> for JavaTypeGenerator<'model, Output> {
-	type StructHandlerState = JavaTypeGeneratorState<'model, 'state, Output>;
-
-	fn begin_struct(&'state mut self, struct_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self::StructHandlerState, GeneratorError> where 'model : 'state {
-		let mut file = open_java_file(self.options, self.output, struct_name)?;
+impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandlerState<'model, 'state, JavaTypeGenerator<'model, Output>, GeneratorError> for JavaTypeGeneratorState<'model, 'state, Output, JavaStructType> {
+	fn begin(outer: &'state mut JavaTypeGenerator<'model, Output>, struct_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> where 'model : 'state {
+		let mut file = open_java_file(outer.options, outer.output, struct_name)?;
 
 
-		write_package(&mut file, &self.options.package_mapping, &struct_name.package)?;
+		write_package(&mut file, &outer.options.package_mapping, &struct_name.package)?;
 		writeln!(file, "public abstract class {} {{", struct_name.name)?;
 		writeln!(file, "\tprivate {}() {{}}", struct_name.name)?;
 
 		Ok(JavaTypeGeneratorState {
-			options: self.options,
+			options: outer.options,
 			file: file,
 			versions: HashSet::new(),
+			_extra: JavaStructType {},
 		})
 	}
 
-	fn versioned_struct(state: &mut Self::StructHandlerState, explicit_version: bool, struct_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn versioned_type(&mut self, explicit_version: bool, struct_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 
 		let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, version.clone()) - 1;
 		let prev_ver = prev_ver.magnitude();
 
-		writeln!(state.file, "\tpublic static final class V{} extends {} {{", version, struct_name.name)?;
+		writeln!(self.file, "\tpublic static final class V{} extends {} {{", version, struct_name.name)?;
 
-		write!(state.file, "\t\tpublic V{}(", version)?;
+		write!(self.file, "\t\tpublic V{}(", version)?;
 		{
 			let mut iter = type_definition.fields.iter();
 			let mut next_field = iter.next();
 			while let Some((field_name, field)) = next_field {
 				next_field = iter.next();
 
-				writeln!(state.file, "")?;
-				write!(state.file, "\t\t\t")?;
-				write_type(&mut state.file, &state.options.package_mapping, version, &field.field_type, false)?;
-				write!(state.file, " {}", field_name)?;
+				writeln!(self.file, "")?;
+				write!(self.file, "\t\t\t")?;
+				write_type(&mut self.file, &self.options.package_mapping, version, &field.field_type, false)?;
+				write!(self.file, " {}", field_name)?;
 				if next_field.is_some() {
-					write!(state.file, ",")?;
+					write!(self.file, ",")?;
 				}
 			}
 		}
 		if !type_definition.fields.is_empty() {
-			writeln!(state.file, "")?;
-			write!(state.file, "\t\t")?;
+			writeln!(self.file, "")?;
+			write!(self.file, "\t\t")?;
 		}
 
-		writeln!(state.file, ") {{")?;
+		writeln!(self.file, ") {{")?;
 		for (field_name, _) in &type_definition.fields {
-			writeln!(state.file, "\t\t\tthis.{} = {};", field_name, field_name)?;
+			writeln!(self.file, "\t\t\tthis.{} = {};", field_name, field_name)?;
 		}
 
-		writeln!(state.file, "\t\t}}")?;
+		writeln!(self.file, "\t\t}}")?;
 
 		for (field_name, field) in &type_definition.fields {
-			write!(state.file, "\t\tpublic final ")?;
-			write_type(&mut state.file, &state.options.package_mapping, version, &field.field_type, false)?;
-			writeln!(state.file, " {};", field_name)?;
+			write!(self.file, "\t\tpublic final ")?;
+			write_type(&mut self.file, &self.options.package_mapping, version, &field.field_type, false)?;
+			writeln!(self.file, " {};", field_name)?;
 		}
 
 
 
 
-		if !state.versions.is_empty() {
-			writeln!(state.file, "\t\tpublic static V{} fromV{}(V{} prev) {{", version, prev_ver, prev_ver)?;
+		if !self.versions.is_empty() {
+			writeln!(self.file, "\t\tpublic static V{} fromV{}(V{} prev) {{", version, prev_ver, prev_ver)?;
 			if !explicit_version {
-				write!(state.file, "\t\t\treturn new V{}(", version)?;
+				write!(self.file, "\t\t\treturn new V{}(", version)?;
 				{
 					let mut iter = type_definition.fields.iter();
 					let mut next_field = iter.next();
 					while let Some((field_name, field)) = next_field {
 						next_field = iter.next();
 
-						writeln!(state.file, "")?;
-						write!(state.file, "\t\t\t\t")?;
-						write_version_convert(&mut state.file, &state.options.package_mapping, prev_ver, version, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
+						writeln!(self.file, "")?;
+						write!(self.file, "\t\t\t\t")?;
+						write_version_convert(&mut self.file, &self.options.package_mapping, prev_ver, version, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
 						if next_field.is_some() {
-							write!(state.file, ",")?;
+							write!(self.file, ",")?;
 						}
 					}
 				}
 				if !type_definition.fields.is_empty() {
-					writeln!(state.file, "")?;
-					write!(state.file, "\t\t\t")?;
+					writeln!(self.file, "")?;
+					write!(self.file, "\t\t\t")?;
 				}
-				writeln!(state.file, ");")?;
+				writeln!(self.file, ");")?;
 			}
 			else {
-				write!(state.file, "\t\t\treturn ")?;
-				write_qual_name(&mut state.file, &state.options.package_mapping, struct_name)?;
-				writeln!(state.file, "_Conversions.v{}ToV{}(prev);", prev_ver, version)?;
+				write!(self.file, "\t\t\treturn ")?;
+				write_qual_name(&mut self.file, &self.options.package_mapping, struct_name)?;
+				writeln!(self.file, "_Conversions.v{}ToV{}(prev);", prev_ver, version)?;
 			}
-			writeln!(state.file, "\t\t}}")?;
+			writeln!(self.file, "\t\t}}")?;
 		}
 
-		writeln!(state.file, "\t\tprivate static final class CodecImpl implements {}.Codec<V{}> {{", RUNTIME_PACKAGE, version)?;
-		writeln!(state.file, "\t\t\t@Override")?;
-		writeln!(state.file, "\t\t\tpublic V{} read({}.FormatReader reader) throws java.io.IOException {{", version, RUNTIME_PACKAGE)?;
-		write!(state.file, "\t\t\t\treturn new V{}(", version)?;
+		writeln!(self.file, "\t\tprivate static final class CodecImpl implements {}.Codec<V{}> {{", RUNTIME_PACKAGE, version)?;
+		writeln!(self.file, "\t\t\t@Override")?;
+		writeln!(self.file, "\t\t\tpublic V{} read({}.FormatReader reader) throws java.io.IOException {{", version, RUNTIME_PACKAGE)?;
+		write!(self.file, "\t\t\t\treturn new V{}(", version)?;
 		{
 			let mut iter = type_definition.fields.iter();
 			let mut next_field = iter.next();
 			while let Some((_, field)) = next_field {
 				next_field = iter.next();
 
-				writeln!(state.file, "")?;
-				write!(state.file, "\t\t\t\t\t")?;
-				write_value_read(&mut state.file, &state.options.package_mapping, version, &field.field_type)?;
+				writeln!(self.file, "")?;
+				write!(self.file, "\t\t\t\t\t")?;
+				write_value_read(&mut self.file, &self.options.package_mapping, version, &field.field_type)?;
 				
 				if next_field.is_some() {
-					write!(state.file, ",")?;
+					write!(self.file, ",")?;
 				}
 			}
 		}
 		if !type_definition.fields.is_empty() {
-			writeln!(state.file, "")?;
-			write!(state.file, "\t\t\t\t")?;
+			writeln!(self.file, "")?;
+			write!(self.file, "\t\t\t\t")?;
 		}
-		writeln!(state.file, ");")?;
-		writeln!(state.file, "\t\t\t}}")?;
-		writeln!(state.file, "\t\t\tpublic void write({}.FormatWriter writer, V{} value) throws java.io.IOException {{", RUNTIME_PACKAGE, version)?;
+		writeln!(self.file, ");")?;
+		writeln!(self.file, "\t\t\t}}")?;
+		writeln!(self.file, "\t\t\tpublic void write({}.FormatWriter writer, V{} value) throws java.io.IOException {{", RUNTIME_PACKAGE, version)?;
 		for (field_name, field) in &type_definition.fields {
-			write!(state.file, "\t\t\t\t")?;
-			write_value_write(&mut state.file, &state.options.package_mapping, version, &field.field_type, format!("value.{}", field_name))?;
-			writeln!(state.file, ";")?;
+			write!(self.file, "\t\t\t\t")?;
+			write_value_write(&mut self.file, &self.options.package_mapping, version, &field.field_type, format!("value.{}", field_name))?;
+			writeln!(self.file, ";")?;
 		}
-		writeln!(state.file, "\t\t\t}}")?;
-		writeln!(state.file, "\t\t}}")?;
+		writeln!(self.file, "\t\t\t}}")?;
+		writeln!(self.file, "\t\t}}")?;
 
-		writeln!(state.file, "\t\tpublic static final {}.Codec<V{}> codec = new CodecImpl();", RUNTIME_PACKAGE, version)?;
+		writeln!(self.file, "\t\tpublic static final {}.Codec<V{}> codec = new CodecImpl();", RUNTIME_PACKAGE, version)?;
 
 
 
-		writeln!(state.file, "\t}}")?;
+		writeln!(self.file, "\t}}")?;
 
-		state.versions.insert(version.clone());
+		self.versions.insert(version.clone());
 
 		Ok(())
 	}
 	
-	fn end_struct(mut state: Self::StructHandlerState, _struct_name: &model::QualifiedName) -> Result<(), GeneratorError> {
-		writeln!(state.file, "}}")?;
+	fn end(mut self, _struct_name: &model::QualifiedName) -> Result<(), GeneratorError> {
+		writeln!(self.file, "}}")?;
 		Ok(())
 	}
 
+}
 
 
-	
-	type EnumHandlerState = JavaTypeGeneratorState<'model, 'state, Output>;
+impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandlerState<'model, 'state, JavaTypeGenerator<'model, Output>, GeneratorError> for JavaTypeGeneratorState<'model, 'state, Output, JavaEnumType> {
 
-	fn begin_enum(&'state mut self, enum_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self::EnumHandlerState, GeneratorError> {
-		let mut file = open_java_file(self.options, self.output, enum_name)?;
+	fn begin(outer: &'state mut JavaTypeGenerator<'model, Output>, enum_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
+		let mut file = open_java_file(outer.options, outer.output, enum_name)?;
 
 
-		write_package(&mut file, &self.options.package_mapping, &enum_name.package)?;
+		write_package(&mut file, &outer.options.package_mapping, &enum_name.package)?;
 		writeln!(file, "public abstract class {} {{", enum_name.name)?;
 		writeln!(file, "\tprivate {}() {{}}", enum_name.name)?;
 
 		Ok(JavaTypeGeneratorState {
-			options: self.options,
+			options: outer.options,
 			file: file,
 			versions: HashSet::new(),
+			_extra: JavaEnumType {},
 		})
 	}
 
-	fn versioned_enum(state: &mut Self::EnumHandlerState, explicit_version: bool, enum_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn versioned_type(&mut self, explicit_version: bool, enum_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 
 		let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, version.clone()) - 1;
 		let prev_ver = prev_ver.magnitude();
 
-		writeln!(state.file, "\tpublic static abstract class V{} extends {} {{", version, enum_name.name)?;
+		writeln!(self.file, "\tpublic static abstract class V{} extends {} {{", version, enum_name.name)?;
 
-		writeln!(state.file, "\t\tprivate V{}() {{}}", version)?;
+		writeln!(self.file, "\t\tprivate V{}() {{}}", version)?;
 
 		for (field_name, field) in &type_definition.fields {
-			writeln!(state.file, "\t\tpublic static final class {} extends V{} {{", field_name, version)?;
-			write!(state.file, "\t\t\tpublic {}(", field_name)?;
-			write_type(&mut state.file, &state.options.package_mapping, version, &field.field_type, false)?;
-			writeln!(state.file, " {}) {{", field_name)?;
-			writeln!(state.file, "\t\t\t\tthis.{} = {};", field_name, field_name)?;
-			writeln!(state.file, "\t\t\t}}")?;
-			write!(state.file, "\t\t\tpublic final ")?;
-			write_type(&mut state.file, &state.options.package_mapping, version, &field.field_type, false)?;
-			writeln!(state.file, " {};", field_name)?;
-			writeln!(state.file, "\t\t}}")?;
+			writeln!(self.file, "\t\tpublic static final class {} extends V{} {{", field_name, version)?;
+			write!(self.file, "\t\t\tpublic {}(", field_name)?;
+			write_type(&mut self.file, &self.options.package_mapping, version, &field.field_type, false)?;
+			writeln!(self.file, " {}) {{", field_name)?;
+			writeln!(self.file, "\t\t\t\tthis.{} = {};", field_name, field_name)?;
+			writeln!(self.file, "\t\t\t}}")?;
+			write!(self.file, "\t\t\tpublic final ")?;
+			write_type(&mut self.file, &self.options.package_mapping, version, &field.field_type, false)?;
+			writeln!(self.file, " {};", field_name)?;
+			writeln!(self.file, "\t\t}}")?;
 		}
 
 
 
-		if !state.versions.is_empty() {
-			writeln!(state.file, "\t\tpublic static V{} fromV{}(V{} prev) {{", version, prev_ver, prev_ver)?;
+		if !self.versions.is_empty() {
+			writeln!(self.file, "\t\tpublic static V{} fromV{}(V{} prev) {{", version, prev_ver, prev_ver)?;
 			if !explicit_version {
-				write!(state.file, "\t\t\t")?;
+				write!(self.file, "\t\t\t")?;
 				for (field_name, field) in &type_definition.fields {
-					writeln!(state.file, "if(prev instanceof V{}.{}) {{", prev_ver, field_name)?;
-					write!(state.file, "\t\t\t\treturn new V{}.{}(", version, field_name)?;
-					write_version_convert(&mut state.file, &state.options.package_mapping, prev_ver, version, &field.field_type, ConvertParam::Expression(format!("((V{}.{})prev).{}", prev_ver, field_name, field_name)))?;
-					writeln!(state.file, ");")?;
-					writeln!(state.file, "\t\t\t}}")?;
-					write!(state.file, "\t\t\telse ")?;
+					writeln!(self.file, "if(prev instanceof V{}.{}) {{", prev_ver, field_name)?;
+					write!(self.file, "\t\t\t\treturn new V{}.{}(", version, field_name)?;
+					write_version_convert(&mut self.file, &self.options.package_mapping, prev_ver, version, &field.field_type, ConvertParam::Expression(format!("((V{}.{})prev).{}", prev_ver, field_name, field_name)))?;
+					writeln!(self.file, ");")?;
+					writeln!(self.file, "\t\t\t}}")?;
+					write!(self.file, "\t\t\telse ")?;
 				}
 				if !type_definition.fields.is_empty() {
-					writeln!(state.file, "{{")?;
-					write!(state.file, "\t")?;
+					writeln!(self.file, "{{")?;
+					write!(self.file, "\t")?;
 				}
-				writeln!(state.file, "\t\t\tthrow new IllegalArgumentException();")?;
+				writeln!(self.file, "\t\t\tthrow new IllegalArgumentException();")?;
 				if !type_definition.fields.is_empty() {
-					writeln!(state.file, "\t\t\t}}")?;
+					writeln!(self.file, "\t\t\t}}")?;
 				}
 			}
 			else {
-				write!(state.file, "\t\t\treturn ")?;
-				write_qual_name(&mut state.file, &state.options.package_mapping, enum_name)?;
-				writeln!(state.file, "_Conversions.v{}ToV{}(prev);", prev_ver, version)?;
+				write!(self.file, "\t\t\treturn ")?;
+				write_qual_name(&mut self.file, &self.options.package_mapping, enum_name)?;
+				writeln!(self.file, "_Conversions.v{}ToV{}(prev);", prev_ver, version)?;
 			}
-			writeln!(state.file, "\t\t}}")?;
+			writeln!(self.file, "\t\t}}")?;
 		}
 
-		writeln!(state.file, "\t\tprivate static final class CodecImpl implements {}.Codec<V{}> {{", RUNTIME_PACKAGE, version)?;
-		writeln!(state.file, "\t\t\t@Override")?;
-		writeln!(state.file, "\t\t\tpublic V{} read({}.FormatReader reader) throws java.io.IOException {{", version, RUNTIME_PACKAGE)?;
-		writeln!(state.file, "\t\t\t\tjava.math.BigInteger tag = {}.StandardCodecs.natCodec.read(reader);", RUNTIME_PACKAGE)?;
-		writeln!(state.file, "\t\t\t\tif(tag.compareTo(java.math.BigInteger.valueOf(java.lang.Integer.MAX_VALUE)) > 0) throw new java.lang.ArithmeticException();")?;
-		writeln!(state.file, "\t\t\t\tswitch(tag.intValue()) {{")?;
+		writeln!(self.file, "\t\tprivate static final class CodecImpl implements {}.Codec<V{}> {{", RUNTIME_PACKAGE, version)?;
+		writeln!(self.file, "\t\t\t@Override")?;
+		writeln!(self.file, "\t\t\tpublic V{} read({}.FormatReader reader) throws java.io.IOException {{", version, RUNTIME_PACKAGE)?;
+		writeln!(self.file, "\t\t\t\tjava.math.BigInteger tag = {}.StandardCodecs.natCodec.read(reader);", RUNTIME_PACKAGE)?;
+		writeln!(self.file, "\t\t\t\tif(tag.compareTo(java.math.BigInteger.valueOf(java.lang.Integer.MAX_VALUE)) > 0) throw new java.lang.ArithmeticException();")?;
+		writeln!(self.file, "\t\t\t\tswitch(tag.intValue()) {{")?;
 		for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
-			writeln!(state.file, "\t\t\t\t\tcase {}:", index)?;
-			write!(state.file, "\t\t\t\t\t\treturn new V{}.{}(", version, field_name)?;
-			write_value_read(&mut state.file, &state.options.package_mapping, version, &field.field_type)?;
-			writeln!(state.file, ");")?;
+			writeln!(self.file, "\t\t\t\t\tcase {}:", index)?;
+			write!(self.file, "\t\t\t\t\t\treturn new V{}.{}(", version, field_name)?;
+			write_value_read(&mut self.file, &self.options.package_mapping, version, &field.field_type)?;
+			writeln!(self.file, ");")?;
 		}
-		writeln!(state.file, "\t\t\t\t\tdefault:")?;
-		writeln!(state.file, "\t\t\t\t\t\tthrow new java.io.IOException(\"Invalid tag number.\");")?;
-		writeln!(state.file, "\t\t\t\t}}")?;
-		writeln!(state.file, "\t\t\t}}")?;
-		writeln!(state.file, "\t\t\t@Override")?;
-		writeln!(state.file, "\t\t\tpublic void write({}.FormatWriter writer, V{} value) throws java.io.IOException {{", RUNTIME_PACKAGE, version)?;
-		write!(state.file, "\t\t\t\t")?;
+		writeln!(self.file, "\t\t\t\t\tdefault:")?;
+		writeln!(self.file, "\t\t\t\t\t\tthrow new java.io.IOException(\"Invalid tag number.\");")?;
+		writeln!(self.file, "\t\t\t\t}}")?;
+		writeln!(self.file, "\t\t\t}}")?;
+		writeln!(self.file, "\t\t\t@Override")?;
+		writeln!(self.file, "\t\t\tpublic void write({}.FormatWriter writer, V{} value) throws java.io.IOException {{", RUNTIME_PACKAGE, version)?;
+		write!(self.file, "\t\t\t\t")?;
 		for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
-			writeln!(state.file, "if(value instanceof V{}.{}) {{", version, field_name)?;
-			write!(state.file, "\t\t\t\t\t{}.StandardCodecs.natCodec.write(writer, java.math.BigInteger.valueOf({}))", RUNTIME_PACKAGE, index)?;
-			writeln!(state.file, ";")?;
-			write!(state.file, "\t\t\t\t\t")?;
-			write_value_write(&mut state.file, &state.options.package_mapping, version, &field.field_type, format!("((V{}.{})value).{}", version, field_name, field_name))?;
-			writeln!(state.file, ";")?;
-			writeln!(state.file, "\t\t\t\t}}")?;
-			write!(state.file, "\t\t\t\telse ")?;
+			writeln!(self.file, "if(value instanceof V{}.{}) {{", version, field_name)?;
+			write!(self.file, "\t\t\t\t\t{}.StandardCodecs.natCodec.write(writer, java.math.BigInteger.valueOf({}))", RUNTIME_PACKAGE, index)?;
+			writeln!(self.file, ";")?;
+			write!(self.file, "\t\t\t\t\t")?;
+			write_value_write(&mut self.file, &self.options.package_mapping, version, &field.field_type, format!("((V{}.{})value).{}", version, field_name, field_name))?;
+			writeln!(self.file, ";")?;
+			writeln!(self.file, "\t\t\t\t}}")?;
+			write!(self.file, "\t\t\t\telse ")?;
 		}
 		if !type_definition.fields.is_empty() {
-			writeln!(state.file, "{{")?;
-			write!(state.file, "\t")?;
+			writeln!(self.file, "{{")?;
+			write!(self.file, "\t")?;
 		}
-		writeln!(state.file, "\t\t\t\tthrow new IllegalArgumentException();")?;
+		writeln!(self.file, "\t\t\t\tthrow new IllegalArgumentException();")?;
 		if !type_definition.fields.is_empty() {
-			writeln!(state.file, "\t\t\t\t}}")?;
+			writeln!(self.file, "\t\t\t\t}}")?;
 		}
 
-		writeln!(state.file, "\t\t\t}}")?;
-		writeln!(state.file, "\t\t}}")?;
+		writeln!(self.file, "\t\t\t}}")?;
+		writeln!(self.file, "\t\t}}")?;
 
-		writeln!(state.file, "\t\tpublic static final {}.Codec<V{}> codec = new CodecImpl();", RUNTIME_PACKAGE, version)?;
+		writeln!(self.file, "\t\tpublic static final {}.Codec<V{}> codec = new CodecImpl();", RUNTIME_PACKAGE, version)?;
 
 
 
-		writeln!(state.file, "\t}}")?;
+		writeln!(self.file, "\t}}")?;
 
-		state.versions.insert(version.clone());
+		self.versions.insert(version.clone());
 
 		Ok(())	
 	}
 
-	fn end_enum(mut state: Self::EnumHandlerState, _name: &model::QualifiedName) -> Result<(), GeneratorError> {
-		writeln!(state.file, "}}")?;
+	fn end(mut self, _name: &model::QualifiedName) -> Result<(), GeneratorError> {
+		writeln!(self.file, "}}")?;
 		Ok(())
 	}
+}
+
+
+impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandler<'model, 'state, GeneratorError> for JavaTypeGenerator<'model, Output> {
+	type StructHandlerState = JavaTypeGeneratorState<'model, 'state, Output, JavaStructType>;
+	type EnumHandlerState = JavaTypeGeneratorState<'model, 'state, Output, JavaEnumType>;
 }
 
 
