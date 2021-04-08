@@ -276,97 +276,62 @@ struct ScalaTypeGeneratorState<'model, 'state, Output: OutputHandler<'state>, Ex
 	_extra: Extra,
 }
 
-impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandlerState<'model, 'state, ScalaTypeGenerator<'model, Output>, GeneratorError> for ScalaTypeGeneratorState<'model, 'state, Output, ScalaStructType> {
-	fn begin(outer: &'state mut ScalaTypeGenerator<'model, Output>, struct_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
-		let mut file = open_scala_file(outer.options, outer.output, struct_name)?;
+trait ScalaExtraGeneratorOps {
+	fn create_extra() -> Self;
+	fn write_versioned_type<F: Write>(f: &mut F, options: &ScalaOptions, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_versioned_type_object_data<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_from_prev_version<F: Write>(f: &mut F, options: &ScalaOptions, prev_ver: &BigUint, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_codec_read<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_codec_write<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+}
+
+impl <'model, 'state, Output: for<'a> OutputHandler<'a>, Extra: ScalaExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, ScalaTypeGenerator<'model, Output>, GeneratorError> for ScalaTypeGeneratorState<'model, 'state, Output, Extra> {
+	fn begin(outer: &'state mut ScalaTypeGenerator<'model, Output>, type_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
+		let mut file = open_scala_file(outer.options, outer.output, type_name)?;
 
 
-		write_package(&mut file, &outer.options.package_mapping, &struct_name.package)?;
-		writeln!(file, "sealed abstract class {}", struct_name.name)?;
-		writeln!(file, "object {} {{", struct_name.name)?;
+		write_package(&mut file, &outer.options.package_mapping, &type_name.package)?;
+		writeln!(file, "sealed abstract class {}", type_name.name)?;
+		writeln!(file, "object {} {{", type_name.name)?;
 
 		Ok(ScalaTypeGeneratorState {
 			options: outer.options,
 			file: file,
 			versions: HashSet::new(),
-			_extra: ScalaStructType {},
+			_extra: Extra::create_extra(),
 		})
 	}
 
-	fn versioned_type(&mut self, explicit_version: bool, struct_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn versioned_type(&mut self, explicit_version: bool, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 
 		let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, version.clone()) - 1;
 		let prev_ver = prev_ver.magnitude();
 
-		writeln!(self.file, "\tfinal case class V{}(", version)?;
-
-		for (field_name, field) in &type_definition.fields {
-			write!(self.file, "\t\t{}: ", field_name)?;
-			write_type(&mut self.file, &self.options.package_mapping, version, &field.field_type)?;
-			writeln!(self.file, ",")?;
-		}
-
-		writeln!(self.file, "\t) extends {}", struct_name.name)?;
+		Extra::write_versioned_type(&mut self.file, &self.options, type_name, version, type_definition)?;
 
 		writeln!(self.file, "\tobject V{} {{", version)?;
+		Extra::write_versioned_type_object_data(&mut self.file, &self.options, version, type_definition)?;
 
 
 		if !self.versions.is_empty() {
 			writeln!(self.file, "\t\tdef fromV{}(prev: V{}): V{} =", prev_ver, prev_ver, version)?;
 			if !explicit_version {
-				if type_definition.fields.is_empty() {
-					writeln!(self.file, "\t\t\tV{}()", version)?;
-				}
-				else {
-					writeln!(self.file, "\t\t\tV{}(", version)?;
-					for (field_name, field) in &type_definition.fields {
-						write!(self.file, "\t\t\t\t")?;
-						write_version_convert(&mut self.file, &self.options.package_mapping, prev_ver, version, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
-						writeln!(self.file, ",")?;
-					}
-					writeln!(self.file, "\t\t\t)")?;
-				}
+				Extra::write_from_prev_version(&mut self.file, &self.options, prev_ver, version, type_definition)?;
 			}
 			else {
 				write!(self.file, "\t\t\t")?;
-				write_qual_name(&mut self.file, &self.options.package_mapping, struct_name)?;
+				write_qual_name(&mut self.file, &self.options.package_mapping, type_name)?;
 				writeln!(self.file, "_Conversions.v{}ToV{}(prev);", prev_ver, version)?;
 			}
 		}
 
 		writeln!(self.file, "\t\tval codec: {}.Codec[V{}] = new {}.Codec[V{}] {{", RUNTIME_PACKAGE, version, RUNTIME_PACKAGE, version)?;
 		writeln!(self.file, "\t\t\toverride def read[R, E](reader: {}.FormatReader[R, E]): zio.ZIO[R, E, V{}] =", RUNTIME_PACKAGE, version)?;
-		if type_definition.fields.is_empty() {
-			writeln!(self.file, "\t\t\tzio.IO.succeed(V{}())", version)?;
-		}
-		else {
-			writeln!(self.file, "\t\t\t\tfor {{")?;
-			for (field_name, field) in &type_definition.fields {
-				write!(self.file, "\t\t\t\t\tfield_{} <- ", field_name)?;
-				write_value_read(&mut self.file, &self.options.package_mapping, version, &field.field_type)?;
-				writeln!(self.file, "")?;
-			}
-			writeln!(self.file, "\t\t\t\t}} yield V{}(", version)?;
-			for (field_name, _) in &type_definition.fields {
-				writeln!(self.file, "\t\t\t\t\tfield_{},", field_name)?;
-			}
-			writeln!(self.file, "\t\t\t\t)")?;
-		}
+		Extra::write_codec_read(&mut self.file, &self.options, version, type_definition)?;
 
 
 		writeln!(self.file, "\t\t\toverride def write[R, E](writer: {}.FormatWriter[R, E], value: V{}): zio.ZIO[R, E, Unit] = ", RUNTIME_PACKAGE, version)?;
-		if type_definition.fields.is_empty() {
-			writeln!(self.file, "\t\t\t\tzio.IO.unit")?;
-		}
-		else {
-			writeln!(self.file, "\t\t\t\tfor {{")?;
-			for (field_name, field) in &type_definition.fields {
-				write!(self.file, "\t\t\t\t\t_ <- ")?;
-				write_value_write(&mut self.file, &self.options.package_mapping, version, &field.field_type, format!("value.{}", field_name))?;
-				writeln!(self.file, "")?;
-			}
-			writeln!(self.file, "\t\t\t\t}} yield ()")?;
-		}
+		Extra::write_codec_write(&mut self.file, &self.options, version, type_definition)?;
 
 		writeln!(self.file, "\t\t}}")?;
 
@@ -377,118 +342,164 @@ impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHa
 		Ok(())
 	}
 	
-	fn end(mut self, _struct_name: &model::QualifiedName) -> Result<(), GeneratorError> {
+	fn end(mut self, _type_name: &model::QualifiedName) -> Result<(), GeneratorError> {
 		writeln!(self.file, "}}")?;
 		Ok(())
 	}
 }
 
-impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandlerState<'model, 'state, ScalaTypeGenerator<'model, Output>, GeneratorError> for ScalaTypeGeneratorState<'model, 'state, Output, ScalaEnumType> {
-
-	fn begin(outer: &'state mut ScalaTypeGenerator<'model, Output>, enum_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
-		let mut file = open_scala_file(outer.options, outer.output, enum_name)?;
-
-
-		write_package(&mut file, &outer.options.package_mapping, &enum_name.package)?;
-		writeln!(file, "sealed abstract class {}", enum_name.name)?;
-		writeln!(file, "object {} {{", enum_name.name)?;
-
-		Ok(ScalaTypeGeneratorState {
-			options: outer.options,
-			file: file,
-			versions: HashSet::new(),
-			_extra: ScalaEnumType {},
-		})
+impl ScalaExtraGeneratorOps for ScalaStructType {
+	fn create_extra() -> Self {
+		ScalaStructType {}
 	}
 
-	fn versioned_type(&mut self, explicit_version: bool, enum_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
-
-		let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, version.clone()) - 1;
-		let prev_ver = prev_ver.magnitude();
-
-		writeln!(self.file, "\tsealed abstract class V{} extends {}", version, enum_name.name)?;
-		writeln!(self.file, "\tobject V{} {{", version)?;
+	fn write_versioned_type<F: Write>(f: &mut F, options: &ScalaOptions, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		writeln!(f, "\tfinal case class V{}(", version)?;
 
 		for (field_name, field) in &type_definition.fields {
-			write!(self.file, "\t\tfinal case class {}({}: ", field_name, field_name)?;
-			write_type(&mut self.file, &self.options.package_mapping, version, &field.field_type)?;
-			writeln!(self.file, ") extends V{}", version)?;
+			write!(f, "\t\t{}: ", field_name)?;
+			write_type(f, &options.package_mapping, version, &field.field_type)?;
+			writeln!(f, ",")?;
 		}
 
+		writeln!(f, "\t) extends {}", type_name.name)?;
 
-		if !self.versions.is_empty() {
-			writeln!(self.file, "\t\tdef fromV{}(prev: V{}): V{} =", prev_ver, prev_ver, version)?;
-			if !explicit_version {
-				if type_definition.fields.is_empty() {
-					writeln!(self.file, "\t\t\tthrow new IllegalArgumentException();")?;
-				}
-				else {
-					writeln!(self.file, "\t\t\tprev match {{")?;
-					for (field_name, field) in &type_definition.fields {
-						write!(self.file, "\t\t\t\tcase prev: V{}.{} => V{}.{}(", prev_ver, field_name, version, field_name)?;
-						write_version_convert(&mut self.file, &self.options.package_mapping, prev_ver, version, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
-						writeln!(self.file, ")")?;
-					}
-					writeln!(self.file, "\t\t\t}}")?;
-				}
-			}
-			else {
-				write!(self.file, "\t\t\t")?;
-				write_qual_name(&mut self.file, &self.options.package_mapping, enum_name)?;
-				writeln!(self.file, "_Conversions.v{}ToV{}(prev);", prev_ver, version)?;
-			}
-		}
-
-
-
-		writeln!(self.file, "\t\tval codec: {}.Codec[V{}] = new {}.Codec[V{}] {{", RUNTIME_PACKAGE, version, RUNTIME_PACKAGE, version)?;
-		writeln!(self.file, "\t\t\toverride def read[R, E](reader: {}.FormatReader[R, E]): zio.ZIO[R, E, V{}] =", RUNTIME_PACKAGE, version)?;
-		writeln!(self.file, "\t\t\t\t{}.StandardCodecs.natCodec.read(reader).flatMap {{", RUNTIME_PACKAGE)?;
-		for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
-			writeln!(self.file, "\t\t\t\t\tcase {}.Util.BigIntValue({}) =>", RUNTIME_PACKAGE, index)?;
-			write!(self.file, "\t\t\t\t\t\t")?;
-			write_value_read(&mut self.file, &self.options.package_mapping, version, &field.field_type)?;
-			write!(self.file, ".map(")?;
-			write_qual_name(&mut self.file, &self.options.package_mapping, enum_name)?;
-			writeln!(self.file, ".V{}.{}.apply)", version, field_name)?;
-		}
-		writeln!(self.file, "\t\t\t\t\tcase _ => zio.IO.die(new java.lang.RuntimeException(\"Invalid tag number.\"))")?;
-		writeln!(self.file, "\t\t\t\t}}")?;
-
-
-		writeln!(self.file, "\t\t\toverride def write[R, E](writer: {}.FormatWriter[R, E], value: V{}): zio.ZIO[R, E, Unit] = ", RUNTIME_PACKAGE, version)?;
-		if type_definition.fields.is_empty() {
-			writeln!(self.file, "\t\t\t\tzio.IO.die(new IllegalArgumentException())")?;
-		}
-		else {
-			writeln!(self.file, "\t\t\t\tvalue match {{")?;
-			for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
-				writeln!(self.file, "\t\t\t\t\tcase value: V{}.{} =>", version, field_name)?;
-				writeln!(self.file, "\t\t\t\t\t\tfor {{")?;
-				writeln!(self.file, "\t\t\t\t\t\t\t_ <- {}.StandardCodecs.natCodec.write(writer, {})", RUNTIME_PACKAGE, index)?;
-				write!(self.file, "\t\t\t\t\t\t\t_ <- ")?;
-				write_value_write(&mut self.file, &self.options.package_mapping, version, &field.field_type, format!("value.{}", field_name))?;
-				writeln!(self.file, "")?;
-				writeln!(self.file, "\t\t\t\t\t\t}} yield ()")?;
-			}
-			writeln!(self.file, "\t\t\t\t}}")?;
-		}
-
-		writeln!(self.file, "\t\t}}")?;
-
-
-		writeln!(self.file, "\t}}")?;
-
-		self.versions.insert(version.clone());
-
-		Ok(())	
+		Ok(())
 	}
 
-	fn end(mut self, _name: &model::QualifiedName) -> Result<(), GeneratorError> {
-		writeln!(self.file, "}}")?;
+	fn write_versioned_type_object_data<F: Write>(_f: &mut F, _options: &ScalaOptions, _version: &BigUint, _type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		Ok(())
+	}
+
+	fn write_from_prev_version<F: Write>(f: &mut F, options: &ScalaOptions, prev_ver: &BigUint, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		if type_definition.fields.is_empty() {
+			writeln!(f, "\t\t\tV{}()", version)?;
+		}
+		else {
+			writeln!(f, "\t\t\tV{}(", version)?;
+			for (field_name, field) in &type_definition.fields {
+				write!(f, "\t\t\t\t")?;
+				write_version_convert(f, &options.package_mapping, prev_ver, version, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
+				writeln!(f, ",")?;
+			}
+			writeln!(f, "\t\t\t)")?;
+		}
+		
+		Ok(())
+	}
+
+	fn write_codec_read<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		if type_definition.fields.is_empty() {
+			writeln!(f, "\t\t\tzio.IO.succeed(V{}())", version)?;
+		}
+		else {
+			writeln!(f, "\t\t\t\tfor {{")?;
+			for (field_name, field) in &type_definition.fields {
+				write!(f, "\t\t\t\t\tfield_{} <- ", field_name)?;
+				write_value_read(f, &options.package_mapping, version, &field.field_type)?;
+				writeln!(f, "")?;
+			}
+			writeln!(f, "\t\t\t\t}} yield V{}(", version)?;
+			for (field_name, _) in &type_definition.fields {
+				writeln!(f, "\t\t\t\t\tfield_{},", field_name)?;
+			}
+			writeln!(f, "\t\t\t\t)")?;
+		}
+
+		Ok(())
+	}
+
+	fn write_codec_write<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		if type_definition.fields.is_empty() {
+			writeln!(f, "\t\t\t\tzio.IO.unit")?;
+		}
+		else {
+			writeln!(f, "\t\t\t\tfor {{")?;
+			for (field_name, field) in &type_definition.fields {
+				write!(f, "\t\t\t\t\t_ <- ")?;
+				write_value_write(f, &options.package_mapping, version, &field.field_type, format!("value.{}", field_name))?;
+				writeln!(f, "")?;
+			}
+			writeln!(f, "\t\t\t\t}} yield ()")?;
+		}
+
 		Ok(())
 	}
 }
+
+impl ScalaExtraGeneratorOps for ScalaEnumType {
+	fn create_extra() -> Self {
+		ScalaEnumType {}
+	}
+
+	fn write_versioned_type<F: Write>(f: &mut F, _options: &ScalaOptions, type_name: &model::QualifiedName, version: &BigUint, _type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		writeln!(f, "\tsealed abstract class V{} extends {}", version, type_name.name)?;
+		Ok(())
+	}
+
+	fn write_versioned_type_object_data<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		for (field_name, field) in &type_definition.fields {
+			write!(f, "\t\tfinal case class {}({}: ", field_name, field_name)?;
+			write_type(f, &options.package_mapping, version, &field.field_type)?;
+			writeln!(f, ") extends V{}", version)?;
+		}
+
+		Ok(())
+	}
+
+	fn write_from_prev_version<F: Write>(f: &mut F, options: &ScalaOptions, prev_ver: &BigUint, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		if type_definition.fields.is_empty() {
+			writeln!(f, "\t\t\tthrow new IllegalArgumentException();")?;
+		}
+		else {
+			writeln!(f, "\t\t\tprev match {{")?;
+			for (field_name, field) in &type_definition.fields {
+				write!(f, "\t\t\t\tcase prev: V{}.{} => V{}.{}(", prev_ver, field_name, version, field_name)?;
+				write_version_convert(f, &options.package_mapping, prev_ver, version, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
+				writeln!(f, ")")?;
+			}
+			writeln!(f, "\t\t\t}}")?;
+		}
+
+		Ok(())
+	}
+
+	fn write_codec_read<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		writeln!(f, "\t\t\t\t{}.StandardCodecs.natCodec.read(reader).flatMap {{", RUNTIME_PACKAGE)?;
+		for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
+			writeln!(f, "\t\t\t\t\tcase {}.Util.BigIntValue({}) =>", RUNTIME_PACKAGE, index)?;
+			write!(f, "\t\t\t\t\t\t")?;
+			write_value_read(f, &options.package_mapping, version, &field.field_type)?;
+			writeln!(f, ".map(V{}.{}.apply)", version, field_name)?;
+		}
+		writeln!(f, "\t\t\t\t\tcase _ => zio.IO.die(new java.lang.RuntimeException(\"Invalid tag number.\"))")?;
+		writeln!(f, "\t\t\t\t}}")?;
+
+		Ok(())
+	}
+
+	fn write_codec_write<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		if type_definition.fields.is_empty() {
+			writeln!(f, "\t\t\t\tzio.IO.die(new IllegalArgumentException())")?;
+		}
+		else {
+			writeln!(f, "\t\t\t\tvalue match {{")?;
+			for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
+				writeln!(f, "\t\t\t\t\tcase value: V{}.{} =>", version, field_name)?;
+				writeln!(f, "\t\t\t\t\t\tfor {{")?;
+				writeln!(f, "\t\t\t\t\t\t\t_ <- {}.StandardCodecs.natCodec.write(writer, {})", RUNTIME_PACKAGE, index)?;
+				write!(f, "\t\t\t\t\t\t\t_ <- ")?;
+				write_value_write(f, &options.package_mapping, version, &field.field_type, format!("value.{}", field_name))?;
+				writeln!(f, "")?;
+				writeln!(f, "\t\t\t\t\t\t}} yield ()")?;
+			}
+			writeln!(f, "\t\t\t\t}}")?;
+		}
+
+		Ok(())
+	}
+}
+
 
 impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandler<'model, 'state, GeneratorError> for ScalaTypeGenerator<'model, Output> {
 	type StructHandlerState = ScalaTypeGeneratorState<'model, 'state, Output, ScalaStructType>;
