@@ -32,7 +32,7 @@ fn check_type(verilization: &Verilization, version: &BigUint, t: &Type) -> Resul
     }
 }
 
-impl <'model, 'state> TypeDefinitionHandlerState<'model, 'state, TypeCheck<'model>, TypeCheckError> for TypeCheck<'model> {
+impl <'model, 'state> TypeDefinitionHandlerState<'model, 'state, TypeCheck<'model>, TypeCheckError> for TypeCheck<'model> where 'model : 'state {
     fn begin(outer: &'state mut TypeCheck<'model>, _type_name: &QualifiedName, _referenced_types: HashSet<&QualifiedName>) -> Result<Self, TypeCheckError> {
         Ok(TypeCheck {
             verilization: outer.verilization,
@@ -54,9 +54,9 @@ impl <'model, 'state> TypeDefinitionHandlerState<'model, 'state, TypeCheck<'mode
 
 }
 
-impl <'model, 'state> TypeDefinitionHandler<'model, 'state, TypeCheckError> for TypeCheck<'model> {
-    type StructHandlerState = TypeCheck<'model>;
-    type EnumHandlerState = TypeCheck<'model>;
+impl <'model> TypeDefinitionHandler<'model, TypeCheckError> for TypeCheck<'model> {
+    type StructHandlerState<'state> where 'model : 'state = TypeCheck<'model>;
+    type EnumHandlerState<'state> where 'model : 'state = TypeCheck<'model>;
 }
 
 

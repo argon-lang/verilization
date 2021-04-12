@@ -19,7 +19,7 @@ pub trait FormatWriter {
     fn write_u16(&mut self, value: u16) -> Result<(), Self::Error>;
     fn write_u32(&mut self, value: u32) -> Result<(), Self::Error>;
     fn write_u64(&mut self, value: u64) -> Result<(), Self::Error>;
-    fn write_bytes(data: &Vec<u8>) -> Result<(), Self::Error>;
+    fn write_bytes(&mut self, data: &[u8]) -> Result<(), Self::Error>;
 }
 
 pub trait VerilizationCodec where Self : Sized {
@@ -125,6 +125,21 @@ impl VerilizationCodec for i64 {
 
     fn write_verilization<W : FormatWriter>(&self, writer: &mut W) -> Result<(), W::Error> {
         writer.write_u64(*self as u64)
+    }
+}
+
+impl VerilizationCodec for String {
+    fn read_verilization<R : FormatReader>(reader: &mut R) -> Result<Self, R::Error> {
+        let len = BigUint::read_verilization(reader)?.to_usize().unwrap();
+        let vec = reader.read_bytes(len)?;
+        let s = String::from_utf8(vec).unwrap();
+
+        Ok(s)
+    }
+
+    fn write_verilization<W : FormatWriter>(&self, writer: &mut W) -> Result<(), W::Error> {
+        BigUint::from(self.len()).write_verilization(writer)?;
+        writer.write_bytes(self.as_bytes())
     }
 }
 

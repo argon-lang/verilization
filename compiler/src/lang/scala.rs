@@ -285,7 +285,7 @@ trait ScalaExtraGeneratorOps {
 	fn write_codec_write<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
 }
 
-impl <'model, 'state, Output: for<'a> OutputHandler<'a>, Extra: ScalaExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, ScalaTypeGenerator<'model, Output>, GeneratorError> for ScalaTypeGeneratorState<'model, 'state, Output, Extra> {
+impl <'model, 'state, Output: for<'a> OutputHandler<'a>, Extra: ScalaExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, ScalaTypeGenerator<'model, Output>, GeneratorError> for ScalaTypeGeneratorState<'model, 'state, Output, Extra> where 'model : 'state {
 	fn begin(outer: &'state mut ScalaTypeGenerator<'model, Output>, type_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
 		let mut file = open_scala_file(outer.options, outer.output, type_name)?;
 
@@ -501,9 +501,9 @@ impl ScalaExtraGeneratorOps for ScalaEnumType {
 }
 
 
-impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandler<'model, 'state, GeneratorError> for ScalaTypeGenerator<'model, Output> {
-	type StructHandlerState = ScalaTypeGeneratorState<'model, 'state, Output, ScalaStructType>;
-	type EnumHandlerState = ScalaTypeGeneratorState<'model, 'state, Output, ScalaEnumType>;
+impl <'model, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandler<'model, GeneratorError> for ScalaTypeGenerator<'model, Output> {
+	type StructHandlerState<'state> where 'model : 'state = ScalaTypeGeneratorState<'model, 'state, Output, ScalaStructType>;
+	type EnumHandlerState<'state> where 'model : 'state = ScalaTypeGeneratorState<'model, 'state, Output, ScalaEnumType>;
 }
 
 

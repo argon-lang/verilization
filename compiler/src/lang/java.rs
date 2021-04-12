@@ -310,7 +310,7 @@ trait JavaExtraGeneratorOps {
 	fn write_codec_write<F: Write>(f: &mut F, options: &JavaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
 }
 
-impl <'model, 'state, Output: for<'a> OutputHandler<'a>, Extra: JavaExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, JavaTypeGenerator<'model, Output>, GeneratorError> for JavaTypeGeneratorState<'model, 'state, Output, Extra> {
+impl <'model, 'state, Output: for<'a> OutputHandler<'a>, Extra: JavaExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, JavaTypeGenerator<'model, Output>, GeneratorError> for JavaTypeGeneratorState<'model, 'state, Output, Extra> where 'model : 'state {
 	fn begin(outer: &'state mut JavaTypeGenerator<'model, Output>, type_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> where 'model : 'state {
 		let mut file = open_java_file(outer.options, outer.output, type_name)?;
 
@@ -575,9 +575,9 @@ impl JavaExtraGeneratorOps for JavaEnumType {
 }
 
 
-impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandler<'model, 'state, GeneratorError> for JavaTypeGenerator<'model, Output> {
-	type StructHandlerState = JavaTypeGeneratorState<'model, 'state, Output, JavaStructType>;
-	type EnumHandlerState = JavaTypeGeneratorState<'model, 'state, Output, JavaEnumType>;
+impl <'model, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandler<'model, GeneratorError> for JavaTypeGenerator<'model, Output> {
+	type StructHandlerState<'state> where 'model : 'state = JavaTypeGeneratorState<'model, 'state, Output, JavaStructType>;
+	type EnumHandlerState<'state> where 'model : 'state = JavaTypeGeneratorState<'model, 'state, Output, JavaEnumType>;
 }
 
 

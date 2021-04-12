@@ -25,7 +25,7 @@ fn open_ts_file<'a, Output: OutputHandler<'a>>(options: &TSOptions, output: &'a 
 	Ok(output.create_file(path)?)
 }
 
-fn write_import_name<F : Write>(f: &mut F, name: &model::QualifiedName) -> Result<(), GeneratorError> {
+pub fn write_import_name<F : Write>(f: &mut F, name: &model::QualifiedName) -> Result<(), GeneratorError> {
 	write!(f, "sym_")?;
 
 	for part in &name.package.package {
@@ -182,7 +182,7 @@ fn write_version_convert<F : Write, E : Into<GeneratorError>>(f: &mut F, prev_ve
 }
 
 
-fn write_codec<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&model::QualifiedName>, t: &model::Type) -> Result<(), GeneratorError> {
+pub fn write_codec<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&model::QualifiedName>, t: &model::Type) -> Result<(), GeneratorError> {
 	match t {
 		model::Type::Nat => write!(f, "StandardCodecs.nat")?,
 		model::Type::Int => write!(f, "StandardCodecs.int")?,
@@ -272,7 +272,7 @@ trait TSExtraGeneratorOps {
 	fn write_codec_write<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
 }
 
-impl <'model, 'state, Output: for<'a> OutputHandler<'a>, Extra: TSExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, TSTypeGenerator<'model, Output>, GeneratorError> for TSTypeGeneratorState<'state, Output, Extra> {
+impl <'model, 'state, Output: for<'a> OutputHandler<'a>, Extra: TSExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, TSTypeGenerator<'model, Output>, GeneratorError> for TSTypeGeneratorState<'state, Output, Extra> where 'model : 'state {
 	
 	fn begin(outer: &'state mut TSTypeGenerator<'model, Output>, type_name: &model::QualifiedName, referenced_types: HashSet<&model::QualifiedName>) -> Result<Self, GeneratorError> {
 		let mut file = open_ts_file(outer.options, outer.output, type_name)?;
@@ -451,9 +451,9 @@ impl TSExtraGeneratorOps for TSEnumType {
 }
 
 
-impl <'model, 'state, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandler<'model, 'state, GeneratorError> for TSTypeGenerator<'model, Output> {
-	type StructHandlerState = TSTypeGeneratorState<'state, Output, TSStructType>;
-	type EnumHandlerState = TSTypeGeneratorState<'state, Output, TSEnumType>;
+impl <'model, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandler<'model, GeneratorError> for TSTypeGenerator<'model, Output> {
+	type StructHandlerState<'state> where 'model : 'state = TSTypeGeneratorState<'state, Output, TSStructType>;
+	type EnumHandlerState<'state> where 'model : 'state = TSTypeGeneratorState<'state, Output, TSEnumType>;
 }
 
 

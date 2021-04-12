@@ -1,3 +1,4 @@
+#![feature(generic_associated_types)]
 pub mod model;
 mod parser;
 pub mod lang;

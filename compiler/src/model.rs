@@ -134,15 +134,15 @@ pub trait ConstantDefinitionHandler<E> {
 	fn constant(&mut self, latest_version: &BigUint, name: &QualifiedName, constant: &Constant, referenced_types: HashSet<&QualifiedName>) -> Result<(), E>;
 }
 
-pub trait TypeDefinitionHandlerState<'model, 'state, Outer, E> : Sized where Outer : TypeDefinitionHandler<'model, 'state, E> {
-	fn begin(outer: &'state mut Outer, type_name: &'model QualifiedName, referenced_types: HashSet<&'model QualifiedName>) -> Result<Self, E> where 'model : 'state;
-	fn versioned_type(&mut self, explicit_version: bool, type_name: &'model QualifiedName, version: &BigUint, type_definition: &'model VersionedTypeDefinition) -> Result<(), E> where 'model : 'state;
-	fn end(self, type_name: &'model QualifiedName) -> Result<(), E> where 'model : 'state;
+pub trait TypeDefinitionHandlerState<'model, 'state, Outer, E> : Sized where Outer : TypeDefinitionHandler<'model, E>, 'model : 'state {
+	fn begin(outer: &'state mut Outer, type_name: &'model QualifiedName, referenced_types: HashSet<&'model QualifiedName>) -> Result<Self, E>;
+	fn versioned_type(&mut self, explicit_version: bool, type_name: &'model QualifiedName, version: &BigUint, type_definition: &'model VersionedTypeDefinition) -> Result<(), E>;
+	fn end(self, type_name: &'model QualifiedName) -> Result<(), E>;
 }
 
-pub trait TypeDefinitionHandler<'model, 'state, E> : Sized {
-	type StructHandlerState : TypeDefinitionHandlerState<'model, 'state, Self, E>;
-	type EnumHandlerState : TypeDefinitionHandlerState<'model, 'state, Self, E>;
+pub trait TypeDefinitionHandler<'model, E> : Sized {
+	type StructHandlerState<'state> : TypeDefinitionHandlerState<'model, 'state, Self, E> where 'model : 'state;
+	type EnumHandlerState<'state> : TypeDefinitionHandlerState<'model, 'state, Self, E> where 'model : 'state;
 }
 
 
@@ -210,14 +210,23 @@ impl Verilization {
 		self.type_definitions.contains_key(name)
 	}
 
+	pub fn type_in_version<'a>(&'a self, name: &QualifiedName, version: &BigUint) -> Option<(&'a TypeDefinition, &'a VersionedTypeDefinition)> {
+		let t = self.type_definitions.get(name)?;
+
+		let versions = match t {
+			TypeDefinition::StructType(struct_def) => &struct_def.versions,
+			TypeDefinition::EnumType(enum_def) => &enum_def.versions,
+		};
+
+		let (_, ver_type) = versions.iter()
+			.filter(|(ver, _)| ver <= &version)
+			.max_by_key(|(ver, _)| ver.clone())?;
+
+		Some((t, ver_type))
+	}
+
 	pub fn has_type_in_version(&self, name: &QualifiedName, version: &BigUint) -> bool {
-		match self.type_definitions.get(name) {
-			Some(TypeDefinition::StructType(struct_def)) =>
-				struct_def.versions.keys().find(|ver| ver <= &version).is_some(),
-			Some(TypeDefinition::EnumType(enum_def)) =>
-				enum_def.versions.keys().find(|ver| ver <= &version).is_some(),
-			None => false,
-		}
+		self.type_in_version(name, version).is_some()
 	}
 
 	/// Merges two serialization formats.
@@ -245,12 +254,12 @@ impl Verilization {
 	}
 
 	// Iterates type definitions using the provided handler.
-	pub fn iter_types<'model, E, Handler : for<'state> TypeDefinitionHandler<'model, 'state, E>>(&'model self, handler: &mut Handler) -> Result<(), E> {
+	pub fn iter_types<'model, E, Handler : TypeDefinitionHandler<'model, E>>(&'model self, handler: &mut Handler) -> Result<(), E> {
 		let latest_version = &self.metadata.latest_version;
 
 		for (name, t) in &self.type_definitions {
 
-			fn handle_type<'model, 'state, E, Handler : TypeDefinitionHandler<'model, 'state, E>, State : TypeDefinitionHandlerState<'model, 'state, Handler, E>>(handler: &'state mut Handler, latest_version: &BigUint, name: &'model QualifiedName, type_versions: &'model HashMap<BigUint, VersionedTypeDefinition>) -> Result<(), E> where 'model : 'state {
+			fn handle_type<'model, 'state, E, Handler : TypeDefinitionHandler<'model, E>, State : TypeDefinitionHandlerState<'model, 'state, Handler, E>>(handler: &'state mut Handler, latest_version: &BigUint, name: &'model QualifiedName, type_versions: &'model HashMap<BigUint, VersionedTypeDefinition>) -> Result<(), E> where 'model : 'state {
 				let referenced_types = find_referenced_types(type_versions);
 				let mut state = State::begin(handler, name, referenced_types)?;
 				
@@ -276,8 +285,8 @@ impl Verilization {
 
 
 			match t {
-				TypeDefinition::StructType(struct_def) => handle_type::<_, _, Handler::StructHandlerState>(handler, latest_version, &name, &struct_def.versions)?,
-				TypeDefinition::EnumType(enum_def) => handle_type::<_, _, Handler::EnumHandlerState>(handler, latest_version, &name, &enum_def.versions)?,
+				TypeDefinition::StructType(struct_def) => handle_type::<_, _, Handler::StructHandlerState<'_>>(handler, latest_version, &name, &struct_def.versions)?,
+				TypeDefinition::EnumType(enum_def) => handle_type::<_, _, Handler::EnumHandlerState<'_>>(handler, latest_version, &name, &enum_def.versions)?,
 			}
 		}
 
