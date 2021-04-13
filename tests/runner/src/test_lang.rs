@@ -36,7 +36,7 @@ impl TestLanguage for lang::typescript::TypeScriptLanguage {
     
     fn test_options() -> Self::Options {
         lang::typescript::TSOptions {
-            output_dir: OsString::from("../tests/typescript/src/gen/"),
+            output_dir: OsString::from("../typescript/src/gen/"),
             package_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( PackageName::from_parts(&["struct", "versions"]), OsString::from("struct/versions") ),
                 ( PackageName::from_parts(&["enum", "versions"]), OsString::from("enum/versions") ),
@@ -47,7 +47,7 @@ impl TestLanguage for lang::typescript::TypeScriptLanguage {
     fn test_command() -> Command {
         let mut cmd = Command::new("npm");
         cmd.arg("test");
-        cmd.current_dir("../tests/typescript");
+        cmd.current_dir("../typescript");
         cmd
     }
 
@@ -77,7 +77,7 @@ impl TestLanguage for lang::java::JavaLanguage {
     
     fn test_options() -> Self::Options {
         lang::java::JavaOptions {
-            output_dir: OsString::from("../tests/java/gen/"),
+            output_dir: OsString::from("../java/gen/"),
             package_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( PackageName::from_parts(&["struct", "versions"]), PackageName::from_parts(&["struct", "versions"]) ),
                 ( PackageName::from_parts(&["enum", "versions"]), PackageName::from_parts(&["enum_", "versions"]) ),
@@ -88,7 +88,7 @@ impl TestLanguage for lang::java::JavaLanguage {
     fn test_command() -> Command {
         let mut cmd = Command::new("sbt");
         cmd.arg("test");
-        cmd.current_dir("../tests/java");
+        cmd.current_dir("../java");
         cmd
     }
 }
@@ -102,7 +102,7 @@ impl TestLanguage for lang::scala::ScalaLanguage {
 
     fn test_options() -> Self::Options {
         lang::scala::ScalaOptions {
-            output_dir: OsString::from("../tests/scala/gen/"),
+            output_dir: OsString::from("../scala/gen/"),
             package_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( PackageName::from_parts(&["struct", "versions"]), PackageName::from_parts(&["struct", "versions"]) ),
                 ( PackageName::from_parts(&["enum", "versions"]), PackageName::from_parts(&["enum_", "versions"]) ),
@@ -113,7 +113,7 @@ impl TestLanguage for lang::scala::ScalaLanguage {
     fn test_command() -> Command {
         let mut cmd = Command::new("sbt");
         cmd.arg("test");
-        cmd.current_dir("../tests/scala");
+        cmd.current_dir("../scala");
         cmd
     }
 }

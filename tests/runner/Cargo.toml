@@ -1,0 +1,16 @@
+[package]
+name = "verilization-test-runner"
+version = "0.1.0"
+authors = ["argon-dev <argon@argon.dev>"]
+edition = "2018"
+
+[dependencies]
+verilization-compiler = { path = "../../compiler" }
+verilization-runtime = { path = "../../runtime/rust" }
+rand = "0.8.3"
+num-bigint = { version = "0.4.0", features = ["rand"] }
+num-traits = "0.2.14"
+random-string = "0.2.0"
+rand_chacha = "0.3.0"
+hex-literal = "0.3.1"
+

@@ -209,7 +209,7 @@ pub struct TSTestGenerator {
 
 impl TestGenerator for TSTestGenerator {
     fn start() -> Result<TSTestGenerator, GeneratorError> {
-        let mut file = File::create("../tests/typescript/src/gen/tests.ts")?;
+        let mut file = File::create("../typescript/src/gen/tests.ts")?;
 
         writeln!(file, "import {{StandardCodecs}} from \"@verilization/runtime\";")?;
         writeln!(file, "import {{check}} from \"../check.js\";")?;

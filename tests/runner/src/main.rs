@@ -25,12 +25,13 @@ const TEST_CASE_FILES: &[&str] = &[
 ];
 
 
-fn run_compiler_for_lang<Lang: TestLanguage>() -> Result<(), GeneratorError> {
+fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), GeneratorError> {
+    println!("Tests for language {}", Lang::name());
     let mut test_gen = Lang::TestGen::start()?;
 
     for file in TEST_CASE_FILES {
         println!("Generating {} sources for test case {}", Lang::name(), file);
-        let input_files = vec!(OsString::from(format!("../tests/verilization/{}.verilization", file)));
+        let input_files = vec!(OsString::from(format!("../verilization/{}.verilization", file)));
         
         let model = verilization_compiler::load_files(input_files)?;
 
@@ -66,22 +67,20 @@ fn run_compiler_for_lang<Lang: TestLanguage>() -> Result<(), GeneratorError> {
     Ok(())
 }
 
+fn run_tests() -> Result<(), GeneratorError> {
+    run_tests_for_lang::<lang::typescript::TypeScriptLanguage>()?;
+    run_tests_for_lang::<lang::java::JavaLanguage>()?;
+    run_tests_for_lang::<lang::scala::ScalaLanguage>()?;
 
-
-
-
-#[test]
-fn run_tests_typescript() -> Result<(), GeneratorError> {
-    run_compiler_for_lang::<lang::typescript::TypeScriptLanguage>()
+    Ok(())
 }
 
-#[test]
-fn run_tests_java() -> Result<(), GeneratorError> {
-    run_compiler_for_lang::<lang::java::JavaLanguage>()
+
+fn main() {
+    match run_tests() {
+        Ok(()) => println!("Tests passed"),
+        Err(err) => println!("Tests failed: {:?}", err),
+    }
 }
 
-#[test]
-fn run_tests_scala() -> Result<(), GeneratorError> {
-    run_compiler_for_lang::<lang::scala::ScalaLanguage>()
-}
 
