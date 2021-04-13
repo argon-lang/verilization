@@ -11,6 +11,12 @@ pub struct PackageName {
 }
 
 impl PackageName {
+	pub fn new() -> PackageName {
+		PackageName {
+			package: Vec::new(),
+		}
+	}
+	
 	pub fn from_str(pkg: &str) -> PackageName {
 		PackageName {
 			package: 

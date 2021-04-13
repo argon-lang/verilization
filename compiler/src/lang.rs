@@ -30,6 +30,16 @@ impl From<PErrorType<&str>> for GeneratorError {
 	}
 }
 
+impl From<nom::Err<PErrorType<&str>>> for GeneratorError {
+	fn from(err: nom::Err<PErrorType<&str>>) -> Self {
+		match err {
+			nom::Err::Incomplete(_) => GeneratorError::from("Parse error"),
+			nom::Err::Error(err) => GeneratorError::from(err),
+			nom::Err::Failure(err) => GeneratorError::from(err),
+		}
+	}
+}
+
 impl From<io::Error> for GeneratorError {
 	fn from(err: io::Error) -> Self {
 		GeneratorError::IOError(err)
@@ -55,9 +65,9 @@ impl From<TypeCheckError> for GeneratorError {
 }
 
 
-pub trait OutputHandler<'a> {
-	type FileHandle : io::Write;
-	fn create_file<P: AsRef<Path>>(&'a mut self, path: P) -> Result<Self::FileHandle, GeneratorError>;
+pub trait OutputHandler {
+	type FileHandle<'state> : io::Write;
+	fn create_file<'state, P: AsRef<Path>>(&'state mut self, path: P) -> Result<Self::FileHandle<'state>, GeneratorError>;
 }
 
 
@@ -69,7 +79,7 @@ pub trait Language {
 	fn add_option(builder: &mut Self::OptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError>;
 	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError>;
 	
-	fn generate<Output : for<'a> OutputHandler<'a>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError>;
+	fn generate<Output: OutputHandler>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError>;
 
 
 	fn write_codec<F: io::Write>(file: &mut F, options: &Self::Options, version: &BigUint, type_name: Option<&model::QualifiedName>, t: &model::Type) -> Result<(), GeneratorError>;

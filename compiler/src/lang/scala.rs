@@ -40,7 +40,7 @@ fn write_qual_name<F : Write>(f: &mut F, package_mapping: &PackageMap, name: &mo
 
 
 
-fn open_scala_file<'a, Output: OutputHandler<'a>>(options: &ScalaOptions, output: &'a mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle, GeneratorError> {
+fn open_scala_file<'state, Output: OutputHandler>(options: &ScalaOptions, output: &'state mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle<'state>, GeneratorError> {
 	let java_pkg = scala_package(&options.package_mapping, &name.package)?;
 	let mut path = PathBuf::from(&options.output_dir);
     for part in &java_pkg.package {
@@ -236,13 +236,13 @@ fn write_value_write<F : Write>(f: &mut F, package_mapping: &PackageMap, version
 
 
 
-struct ScalaConstGenerator<'model, Output> {
-	options: &'model ScalaOptions,
-	output: &'model mut Output,
+struct ScalaConstGenerator<'opt, 'output, Output> {
+	options: &'opt ScalaOptions,
+	output: &'output mut Output,
 }
 
 
-impl <'model, Output: for<'a> OutputHandler<'a>> model::ConstantDefinitionHandler<GeneratorError> for ScalaConstGenerator<'model, Output> {
+impl <'opt, 'output, Output: OutputHandler> model::ConstantDefinitionHandler<GeneratorError> for ScalaConstGenerator<'opt, 'output, Output> {
 	fn constant(&mut self, latest_version: &BigUint, name: &model::QualifiedName, constant: &model::Constant, _referenced_types: HashSet<&model::QualifiedName>) -> Result<(), GeneratorError> {
 		let mut file = open_scala_file(self.options, self.output, name)?;
 
@@ -261,17 +261,17 @@ impl <'model, Output: for<'a> OutputHandler<'a>> model::ConstantDefinitionHandle
 }
 
 
-struct ScalaTypeGenerator<'model, Output> {
-	options: &'model ScalaOptions,
-	output: &'model mut Output,
+struct ScalaTypeGenerator<'opt, 'output, Output> {
+	options: &'opt ScalaOptions,
+	output: &'output mut Output,
 }
 
 struct ScalaStructType {}
 struct ScalaEnumType {}
 
-struct ScalaTypeGeneratorState<'model, 'state, Output: OutputHandler<'state>, Extra> {
-	options: &'model ScalaOptions,
-	file: Output::FileHandle,
+struct ScalaTypeGeneratorState<'opt, 'state, Output: OutputHandler, Extra> {
+	options: &'opt ScalaOptions,
+	file: Output::FileHandle<'state>,
 	versions: HashSet<BigUint>,
 	_extra: Extra,
 }
@@ -285,8 +285,8 @@ trait ScalaExtraGeneratorOps {
 	fn write_codec_write<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
 }
 
-impl <'model, 'state, Output: for<'a> OutputHandler<'a>, Extra: ScalaExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, ScalaTypeGenerator<'model, Output>, GeneratorError> for ScalaTypeGeneratorState<'model, 'state, Output, Extra> where 'model : 'state {
-	fn begin(outer: &'state mut ScalaTypeGenerator<'model, Output>, type_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
+impl <'model, 'opt, 'output, 'state, Output: OutputHandler, Extra: ScalaExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, ScalaTypeGenerator<'opt, 'output, Output>, GeneratorError> for ScalaTypeGeneratorState<'opt, 'state, Output, Extra> where 'model : 'state {
+	fn begin(outer: &'state mut ScalaTypeGenerator<'opt, 'output, Output>, type_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
 		let mut file = open_scala_file(outer.options, outer.output, type_name)?;
 
 
@@ -501,9 +501,9 @@ impl ScalaExtraGeneratorOps for ScalaEnumType {
 }
 
 
-impl <'model, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandler<'model, GeneratorError> for ScalaTypeGenerator<'model, Output> {
-	type StructHandlerState<'state> where 'model : 'state = ScalaTypeGeneratorState<'model, 'state, Output, ScalaStructType>;
-	type EnumHandlerState<'state> where 'model : 'state = ScalaTypeGeneratorState<'model, 'state, Output, ScalaEnumType>;
+impl <'model, 'opt, 'output, Output: OutputHandler> model::TypeDefinitionHandler<'model, GeneratorError> for ScalaTypeGenerator<'opt, 'output, Output> {
+	type StructHandlerState<'state> where 'model : 'state = ScalaTypeGeneratorState<'opt, 'state, Output, ScalaStructType>;
+	type EnumHandlerState<'state> where 'model : 'state = ScalaTypeGeneratorState<'opt, 'state, Output, ScalaEnumType>;
 }
 
 
@@ -552,7 +552,7 @@ impl Language for ScalaLanguage {
 		})
 	}
 
-	fn generate<Output : for<'a> OutputHandler<'a>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
+	fn generate<Output: OutputHandler>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
 		let mut const_gen = ScalaConstGenerator {
 			options: &options,
 			output: output,

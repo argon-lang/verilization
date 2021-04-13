@@ -6,9 +6,9 @@ use crate::lang::{OutputHandler, GeneratorError};
 
 pub struct FileOutputHandler {}
 
-impl <'a> OutputHandler<'a> for FileOutputHandler {
-    type FileHandle = File;
-    fn create_file<P: AsRef<Path>>(&'a mut self, path: P) -> Result<Self::FileHandle, GeneratorError> {
+impl OutputHandler for FileOutputHandler {
+    type FileHandle<'state> = File;
+    fn create_file<'state, P: AsRef<Path>>(&'state mut self, path: P) -> Result<Self::FileHandle<'state>, GeneratorError> {
         if let Some(dir) = path.as_ref().parent() {
             fs::create_dir_all(dir)?;
         }

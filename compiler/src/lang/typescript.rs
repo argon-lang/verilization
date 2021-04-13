@@ -17,7 +17,7 @@ pub struct TSOptions {
 }
 
 
-fn open_ts_file<'a, Output: OutputHandler<'a>>(options: &TSOptions, output: &'a mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle, GeneratorError> {
+fn open_ts_file<'state, Output: OutputHandler>(options: &TSOptions, output: &'state mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle<'state>, GeneratorError> {
 	let pkg_dir = options.package_mapping.get(&name.package).ok_or(format!("Unmapped package: {}", name.package))?;
 	let mut path = PathBuf::from(&options.output_dir);
 	path.push(pkg_dir);
@@ -227,12 +227,12 @@ pub fn write_codec<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&m
 }
 
 
-struct TSConstGenerator<'a, 'b, Output> {
-	options: &'a TSOptions,
-	output: &'b mut Output,
+struct TSConstGenerator<'opt, 'output, Output> {
+	options: &'opt TSOptions,
+	output: &'output mut Output,
 }
 
-impl <'model, 'opt, Output: for<'a> OutputHandler<'a>> model::ConstantDefinitionHandler<GeneratorError> for TSConstGenerator<'opt, 'model, Output> {
+impl <'opt, 'output, Output: OutputHandler> model::ConstantDefinitionHandler<GeneratorError> for TSConstGenerator<'opt, 'output, Output> {
 	fn constant(&mut self, latest_version: &BigUint, name: &model::QualifiedName, constant: &model::Constant, referenced_types: HashSet<&model::QualifiedName>) -> Result<(), GeneratorError> {
 		let mut file = open_ts_file(self.options, self.output, name)?;
 		write_imports(&mut file, self.options, name, referenced_types)?;
@@ -250,16 +250,16 @@ impl <'model, 'opt, Output: for<'a> OutputHandler<'a>> model::ConstantDefinition
 
 
 
-struct TSTypeGenerator<'model, Output> {
-	options: &'model TSOptions,
-	output: &'model mut Output,
+struct TSTypeGenerator<'opt, 'output, Output> {
+	options: &'opt TSOptions,
+	output: &'output mut Output,
 }
 
 struct TSStructType {}
 struct TSEnumType {}
 
-struct TSTypeGeneratorState<'a, Output: OutputHandler<'a>, Extra> {
-	file: Output::FileHandle,
+struct TSTypeGeneratorState<'state, Output: OutputHandler, Extra> {
+	file: Output::FileHandle<'state>,
 	versions: HashSet<BigUint>,
 	_extra: Extra,
 }
@@ -272,9 +272,9 @@ trait TSExtraGeneratorOps {
 	fn write_codec_write<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
 }
 
-impl <'model, 'state, Output: for<'a> OutputHandler<'a>, Extra: TSExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, TSTypeGenerator<'model, Output>, GeneratorError> for TSTypeGeneratorState<'state, Output, Extra> where 'model : 'state {
+impl <'model, 'opt, 'output, 'state, Output: OutputHandler, Extra: TSExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, TSTypeGenerator<'opt, 'output, Output>, GeneratorError> for TSTypeGeneratorState<'state, Output, Extra> where 'model : 'state {
 	
-	fn begin(outer: &'state mut TSTypeGenerator<'model, Output>, type_name: &model::QualifiedName, referenced_types: HashSet<&model::QualifiedName>) -> Result<Self, GeneratorError> {
+	fn begin(outer: &'state mut TSTypeGenerator<'opt, 'output, Output>, type_name: &model::QualifiedName, referenced_types: HashSet<&model::QualifiedName>) -> Result<Self, GeneratorError> {
 		let mut file = open_ts_file(outer.options, outer.output, type_name)?;
 		writeln!(file, "import {{Codec, FormatWriter, FormatReader, StandardCodecs}} from \"@verilization/runtime\";")?;
 		write_imports(&mut file, outer.options, type_name, referenced_types)?;
@@ -451,7 +451,7 @@ impl TSExtraGeneratorOps for TSEnumType {
 }
 
 
-impl <'model, Output: for<'a> OutputHandler<'a>> model::TypeDefinitionHandler<'model, GeneratorError> for TSTypeGenerator<'model, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler> model::TypeDefinitionHandler<'model, GeneratorError> for TSTypeGenerator<'opt, 'output, Output> {
 	type StructHandlerState<'state> where 'model : 'state = TSTypeGeneratorState<'state, Output, TSStructType>;
 	type EnumHandlerState<'state> where 'model : 'state = TSTypeGeneratorState<'state, Output, TSEnumType>;
 }
@@ -500,7 +500,7 @@ impl Language for TypeScriptLanguage {
 		})
 	}
 
-	fn generate<Output: for<'a> OutputHandler<'a>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
+	fn generate<Output: OutputHandler>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
 		let mut const_gen = TSConstGenerator {
 			options: &options,
 			output: output,
