@@ -10,8 +10,6 @@
   "scripts": {
     "build": "tsc --project tsconfig.json"
   },
-  "author": "",
-  "license": "ISC",
   "devDependencies": {
     "typescript": "^4.2.3"
   }

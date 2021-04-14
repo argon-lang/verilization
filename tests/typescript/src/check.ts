@@ -22,7 +22,7 @@ function equalObj(a: SimpleValue, b: SimpleValue): boolean {
         }
 
         for(const key in a) {
-            if(!Object.prototype.hasOwnProperty(key)) continue;
+            if(!Object.prototype.hasOwnProperty.call(a, key)) continue;
             const a1 = a[key];
             const b1 = b[key];
 
@@ -36,7 +36,7 @@ function equalObj(a: SimpleValue, b: SimpleValue): boolean {
         }
 
         for(const key in b) {
-            if(!Object.prototype.hasOwnProperty(key)) continue;
+            if(!Object.prototype.hasOwnProperty.call(b, key)) continue;
             if(!(key in a)) {
                 return false;
             }

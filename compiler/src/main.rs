@@ -65,7 +65,7 @@ fn parse_args<Args>(mut args: Args) -> Result<(), GeneratorError> where Args : I
 			"version" | "--version" | "-v" => return command_version(),
 			"help" | "--help" | "-h" => return command_help(),
 			"generate" => {
-				let lang = args.next().ok_or("Language not specified: {}")?;
+				let lang = args.next().ok_or("Language not specified")?;
 				
 				return match lang.to_str().unwrap() {
 					"typescript" => parse_generate_command::<_, lang::typescript::TypeScriptLanguage>(args),

@@ -1,11 +1,11 @@
-use std::ffi::OsString;
 use crate::lang::GeneratorError;
 use crate::model;
-use crate::parser;
 use crate::type_check::type_check_verilization;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn load_files(files: Vec<OsString>) -> Result<model::Verilization, GeneratorError> {
+pub fn load_files(files: Vec<std::ffi::OsString>) -> Result<model::Verilization, GeneratorError> {
+	use crate::parser;
+	
 	let models = files
 		.into_iter()
 		.map(|file| {
