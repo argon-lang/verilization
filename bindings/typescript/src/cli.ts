@@ -105,4 +105,9 @@ async function parse_args(args: Iterator<string>): Promise<void> {
     throw new Error("No command specified");
 }
 
-parse_args(process.argv.slice(2)[Symbol.iterator]());
+try {
+    await parse_args(process.argv.slice(2)[Symbol.iterator]());
+}
+catch(e) {
+    process.exitCode = 1;
+}

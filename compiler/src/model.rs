@@ -3,6 +3,7 @@ use num_traits::One;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::iter::FromIterator;
+use std::cmp::{Ord, Ordering, PartialEq, PartialOrd};
 
 /// A dot-separated package.
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -49,6 +50,33 @@ impl fmt::Display for PackageName {
 	}
 }
 
+impl Ord for PackageName {
+	fn cmp(&self, other: &Self) -> Ordering {
+		let mut i1 = self.package.iter();
+		let mut i2 = other.package.iter();
+
+		loop {
+			match (i1.next(), i2.next()) {
+				(Some(p1), Some(p2)) => {
+					let ord = p1.cmp(p2);
+					if ord != Ordering::Equal {
+						return ord
+					}
+				},
+				(Some(_), None) => return Ordering::Greater,
+				(None, Some(_)) => return Ordering::Less,
+				(None, None) => return Ordering::Equal,
+			}
+		}
+	}
+}
+
+impl PartialOrd for PackageName {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
 /// A name that exists within a package.
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub struct QualifiedName {
@@ -64,6 +92,23 @@ impl fmt::Display for QualifiedName {
 		else {
 			write!(f, "{}.{}", self.package, self.name)
 		}
+	}
+}
+
+impl Ord for QualifiedName {
+	fn cmp(&self, other: &Self) -> Ordering {
+		let ord = self.package.cmp(&other.package);
+		if ord != Ordering::Equal {
+			return ord
+		}
+
+		self.name.cmp(&other.name)
+	}
+}
+
+impl PartialOrd for QualifiedName {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
 	}
 }
 

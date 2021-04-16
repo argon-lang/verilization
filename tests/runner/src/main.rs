@@ -1,8 +1,6 @@
 #![feature(generic_associated_types)]
 
-mod memory_format;
-mod test_lang;
-mod ts_test_gen;
+use verilization_test_runner::*;
 
 use verilization_compiler::{lang, file_output_handler};
 use lang::GeneratorError;
@@ -19,17 +17,11 @@ use hex_literal::hex;
 const NUM_SAMPLES: i32 = 20;
 
 
-const TEST_CASE_FILES: &[&str] = &[
-    "struct_versions",
-    "enum_versions",
-];
-
-
 fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), GeneratorError> {
     println!("Tests for language {}", Lang::name());
     let mut test_gen = Lang::TestGen::start()?;
 
-    for file in TEST_CASE_FILES {
+    for file in test_cases::TEST_CASE_FILES {
         println!("Generating {} sources for test case {}", Lang::name(), file);
         let input_files = vec!(OsString::from(format!("../verilization/{}.verilization", file)));
         
@@ -50,13 +42,10 @@ fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), GeneratorError> {
 
 
     println!("Executing tests for {}", Lang::name());
-    let output = Lang::test_command().output().map_err(|_| GeneratorError::from("Could not run test command."))?;
-    
-    std::io::stdout().write_all(&output.stdout)?;
-    std::io::stderr().write_all(&output.stderr)?;
+    let output = Lang::test_command().status().map_err(|_| GeneratorError::from("Could not run test command."))?;
 
-    if !output.status.success() {
-        if let Some(code) = output.status.code() {
+    if !output.success() {
+        if let Some(code) = output.code() {
             Err(GeneratorError::from(format!("Command failed with exit code: {}", code)))?
         }
         else {

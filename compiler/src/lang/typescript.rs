@@ -42,6 +42,10 @@ fn write_imports<F : Write>(f: &mut F, options: &TSOptions, name: &model::Qualif
 	let mut current_path = PathBuf::from(&options.output_dir);
 	current_path.push(current_pkg_dir);
 
+
+	let mut referenced_types: Vec<_> = referenced_types.into_iter().collect();
+	referenced_types.sort();
+
 	for t in referenced_types {
 		if name == t {
 			continue;

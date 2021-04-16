@@ -3,7 +3,10 @@ use crate::model;
 use crate::type_check::type_check_verilization;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn load_files(files: Vec<std::ffi::OsString>) -> Result<model::Verilization, GeneratorError> {
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_files<P : AsRef<Path>>(files: Vec<P>) -> Result<model::Verilization, GeneratorError> {
 	use crate::parser;
 	
 	let models = files

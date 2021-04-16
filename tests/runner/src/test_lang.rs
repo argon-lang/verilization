@@ -18,7 +18,10 @@ pub trait TestLanguage: Language {
 
     fn name() -> String;
     fn test_options() -> Self::Options;
+    fn test_options_dir(dir: OsString) -> Self::Options;
+    fn append_options(command: &mut Command, options: &Self::Options);
     fn test_command() -> Command;
+
 }
 
 pub trait TestGenerator : Sized {
@@ -35,12 +38,25 @@ impl TestLanguage for lang::typescript::TypeScriptLanguage {
     }
     
     fn test_options() -> Self::Options {
+        Self::test_options_dir(OsString::from("../typescript/src/gen/"))
+    }
+    
+    fn test_options_dir(dir: OsString) -> Self::Options {
         lang::typescript::TSOptions {
-            output_dir: OsString::from("../typescript/src/gen/"),
+            output_dir: dir,
             package_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( PackageName::from_parts(&["struct", "versions"]), OsString::from("struct/versions") ),
                 ( PackageName::from_parts(&["enum", "versions"]), OsString::from("enum/versions") ),
             ]))
+        }
+    }
+    
+    fn append_options(command: &mut Command, options: &Self::Options) {
+        command.arg("-o:out_dir");
+        command.arg(&options.output_dir);
+        for (pkg, dir) in &options.package_mapping {
+            command.arg(format!("-o:pkg:{}", pkg));
+            command.arg(dir);
         }
     }
     
@@ -76,12 +92,25 @@ impl TestLanguage for lang::java::JavaLanguage {
     }
     
     fn test_options() -> Self::Options {
+        Self::test_options_dir(OsString::from("../java/gen/"))
+    }
+    
+    fn test_options_dir(dir: OsString) -> Self::Options {
         lang::java::JavaOptions {
-            output_dir: OsString::from("../java/gen/"),
+            output_dir: dir,
             package_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( PackageName::from_parts(&["struct", "versions"]), PackageName::from_parts(&["struct", "versions"]) ),
                 ( PackageName::from_parts(&["enum", "versions"]), PackageName::from_parts(&["enum_", "versions"]) ),
             ]))
+        }
+    }
+    
+    fn append_options(command: &mut Command, options: &Self::Options) {
+        command.arg("-o:out_dir");
+        command.arg(&options.output_dir);
+        for (pkg, java_pkg) in &options.package_mapping {
+            command.arg(format!("-o:pkg:{}", pkg));
+            command.arg(format!("{}", java_pkg));
         }
     }
 
@@ -101,12 +130,25 @@ impl TestLanguage for lang::scala::ScalaLanguage {
     }
 
     fn test_options() -> Self::Options {
+        Self::test_options_dir(OsString::from("../scala/gen/"))
+    }
+
+    fn test_options_dir(dir: OsString) -> Self::Options {
         lang::scala::ScalaOptions {
-            output_dir: OsString::from("../scala/gen/"),
+            output_dir: dir,
             package_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( PackageName::from_parts(&["struct", "versions"]), PackageName::from_parts(&["struct", "versions"]) ),
                 ( PackageName::from_parts(&["enum", "versions"]), PackageName::from_parts(&["enum_", "versions"]) ),
             ]))
+        }
+    }
+    
+    fn append_options(command: &mut Command, options: &Self::Options) {
+        command.arg("-o:out_dir");
+        command.arg(&options.output_dir);
+        for (pkg, scala_pkg) in &options.package_mapping {
+            command.arg(format!("-o:pkg:{}", pkg));
+            command.arg(format!("{}", scala_pkg));
         }
     }
     
