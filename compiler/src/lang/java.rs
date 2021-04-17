@@ -419,6 +419,31 @@ impl JavaExtraGeneratorOps for JavaStructType {
 			writeln!(f, " {};", field_name)?;
 		}
 
+		writeln!(f, "\t\t@Override")?;
+		writeln!(f, "\t\tpublic int hashCode() {{")?;
+		write!(f, "\t\t\treturn java.util.Objects.hash(")?;
+		{
+			let mut iter = type_definition.fields.iter();
+			if let Some((field_name, _)) = iter.next() {
+				write!(f, "{}", field_name)?;
+				while let Some((field_name, _)) = iter.next() {
+					write!(f, ", {}", field_name)?;
+				}
+			}
+		}
+		writeln!(f, ");")?;
+		writeln!(f, "\t\t}}")?;
+
+		writeln!(f, "\t\t@Override")?;
+		writeln!(f, "\t\tpublic boolean equals(Object obj) {{")?;
+		writeln!(f, "\t\t\tif(!(obj instanceof V{})) return false;", version)?;
+		writeln!(f, "\t\t\tV{} other = (V{})obj;", version, version)?;
+		for (field_name, _) in &type_definition.fields {
+			writeln!(f, "\t\t\tif(!java.util.Objects.deepEquals(this.{}, other.{})) return false;", field_name, field_name)?;
+		}
+		writeln!(f, "\t\t\treturn true;")?;
+		writeln!(f, "\t\t}}")?;
+
 		Ok(())
 	}
 
@@ -496,7 +521,7 @@ impl JavaExtraGeneratorOps for JavaEnumType {
 	fn write_versioned_type_data<F: Write>(f: &mut F, options: &JavaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		writeln!(f, "\t\tprivate V{}() {{}}", version)?;
 
-		for (field_name, field) in &type_definition.fields {
+		for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
 			writeln!(f, "\t\tpublic static final class {} extends V{} {{", field_name, version)?;
 			write!(f, "\t\t\tpublic {}(", field_name)?;
 			write_type(f, &options.package_mapping, version, &field.field_type, false)?;
@@ -506,6 +531,20 @@ impl JavaExtraGeneratorOps for JavaEnumType {
 			write!(f, "\t\t\tpublic final ")?;
 			write_type(f, &options.package_mapping, version, &field.field_type, false)?;
 			writeln!(f, " {};", field_name)?;
+			
+			writeln!(f, "\t\t\t@Override")?;
+			writeln!(f, "\t\t\tpublic int hashCode() {{")?;
+			writeln!(f, "\t\t\t\treturn java.util.Objects.hash({}, this.{});", index, field_name)?;
+			writeln!(f, "\t\t\t}}")?;
+			
+			writeln!(f, "\t\t\t@Override")?;
+			writeln!(f, "\t\t\tpublic boolean equals(Object obj) {{")?;
+			writeln!(f, "\t\t\t\tif(!(obj instanceof {})) return false;", field_name)?;
+			writeln!(f, "\t\t\t\t{} other = ({})obj;", field_name, field_name)?;
+			writeln!(f, "\t\t\t\treturn java.util.Objects.deepEquals(this.{}, other.{});", field_name, field_name)?;
+			writeln!(f, "\t\t\t}}")?;
+	
+
 			writeln!(f, "\t\t}}")?;
 		}
 
