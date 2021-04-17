@@ -68,20 +68,6 @@ impl TestLanguage for lang::typescript::TypeScriptLanguage {
 
 }
 
-
-impl TestGenerator for () {
-    fn start() -> Result<Self, GeneratorError> {
-        Ok(())
-    }
-    fn generate_tests<R: Rng>(&mut self, model: &Verilization, random: &mut R) -> Result<(), GeneratorError> {
-        Ok(())
-    }
-    fn end(self) -> Result<(), GeneratorError> {
-        Ok(())
-    }
-}
-
-
 impl TestLanguage for lang::java::JavaLanguage {
     type TestGen = crate::java_test_gen::JavaTestGenerator;
 
@@ -121,7 +107,7 @@ impl TestLanguage for lang::java::JavaLanguage {
 }
 
 impl TestLanguage for lang::scala::ScalaLanguage {
-    type TestGen = ();
+    type TestGen = crate::scala_test_gen::ScalaTestGenerator;
 
     fn name() -> String {
         String::from("scala")

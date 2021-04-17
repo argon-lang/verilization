@@ -6,5 +6,6 @@ bin/
 tests/java/gen
 tests/java/gen-test
 tests/scala/gen
+tests/scala/gen-test
 
 

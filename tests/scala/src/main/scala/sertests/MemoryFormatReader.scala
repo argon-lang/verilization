@@ -5,7 +5,7 @@ import dev.argon.verilization.scala_runtime.FormatReader
 import java.io.{IOException, EOFException}
 import java.nio.{BufferUnderflowException, ByteBuffer, ByteOrder}
 
-final class MemoryFormatReader(data: ByteBuffer) extends FormatReader[Any, EOFException] {
+final class MemoryFormatReader private(data: ByteBuffer) extends FormatReader[Any, EOFException] {
 
     private def catchErrors(ex: Throwable): IO[EOFException, Nothing] =
         ex match {
@@ -34,4 +34,11 @@ final class MemoryFormatReader(data: ByteBuffer) extends FormatReader[Any, EOFEx
 
     def isEOF: UIO[Boolean] =
         IO.effectTotal { !data.hasRemaining() }
+}
+
+object MemoryFormatReader {
+    def fromChunk(chunk: Chunk[Byte]): UIO[MemoryFormatReader] =
+        IO.effectTotal {
+            new MemoryFormatReader(ByteBuffer.wrap(chunk.toArray).order(ByteOrder.LITTLE_ENDIAN))
+        }
 }

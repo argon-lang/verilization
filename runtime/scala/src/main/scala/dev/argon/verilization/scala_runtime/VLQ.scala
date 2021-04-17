@@ -17,7 +17,7 @@ object VLQ {
                 writer.writeByte((state.currentByte | 0x80).toByte) *> putBit(b, OutputState(0, 0))
             else
                 IO.succeed(OutputState(
-                    currentByte = (state.currentByte | (1 << state.outBitIndex)).toByte,
+                    currentByte = if(b) (state.currentByte | (1 << state.outBitIndex)).toByte else state.currentByte,
                     outBitIndex = state.outBitIndex + 1,
                 ))
 
@@ -50,20 +50,28 @@ object VLQ {
                 def putZeroes(zeroCount: Int, outputState: OutputState): ZIO[R, E, OutputState] =
                     if(zeroCount > 0) putBit(false, outputState).flatMap { outputState => putZeroes(zeroCount - 1, outputState) }
                     else IO.succeed(outputState)
-
-                putZeroes(
-                    zeroCount = zeroCount,
-                    outputState = outputState,
-                ).flatMap { outputState =>
-                    putBit(true, outputState)
-                }.flatMap { outputState =>
+                    
+                if(bit)
+                    putZeroes(
+                        zeroCount = zeroCount,
+                        outputState = outputState,
+                    ).flatMap { outputState =>
+                        putBit(true, outputState)
+                    }.flatMap { outputState =>
+                        iterBits(
+                            byteIndex = byteIndex2,
+                            bitIndex = bitIndex2,
+                            zeroCount = 0,
+                            outputState = outputState,
+                        )
+                    }
+                else
                     iterBits(
                         byteIndex = byteIndex2,
                         bitIndex = bitIndex2,
-                        zeroCount = if(bit) 0 else zeroCount + 1,
+                        zeroCount = zeroCount + 1,
                         outputState = outputState,
                     )
-                }
             }
 
         iterBits(
@@ -78,7 +86,7 @@ object VLQ {
     private final case class BigIntBuildState(currentByte: Byte, otherBytes: Chunk[Byte], bitIndex: Int) {
 
         def putBit(b: Boolean): BigIntBuildState = {
-            val newByte = (currentByte | (1 << bitIndex)).toByte
+            val newByte = if(b) (currentByte | (1 << bitIndex)).toByte else currentByte
 
             if(bitIndex + 1 > 7)
                 BigIntBuildState(
@@ -108,10 +116,10 @@ object VLQ {
         def readBytes(state: BigIntBuildState): ZIO[R, E, BigInt] =
             reader.readByte().flatMap { b =>
                 if((b & 0x80) != 0)
-                    readBytes(processBits(state, b, 0, 8))
+                    readBytes(processBits(state, b, 0, 7))
                 else {
-                    val sign = if((b & 0x40) != 0) -1 else 1
-                    val bigInteger = new BigInteger(sign, processBits(state, b, 0, 6).toByteArray)
+                    val sign = if(isSigned && (b & 0x40) != 0) -1 else 1
+                    val bigInteger = new BigInteger(sign, processBits(state, b, 0, if(isSigned) 6 else 7).toByteArray)
                     IO.succeed(BigInt(bigInteger))
                 }
             }
