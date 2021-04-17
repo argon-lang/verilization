@@ -17,6 +17,31 @@ Other less high-level goals.
  * Support bigint types
  * Embedable in other languages without using native binaries
 
+## Types
+
+The following built-in types are supported.
+
+|Type|Encoding|
+|---|---|
+| `{i,u}{8,16,32,64}` | Fixed-width sequence of bytes in little endian order |
+| `int` | A variable-length format |
+| `nat` | Similar format to `int`, but without the sign bit |
+| `string` | A length `nat` followed by a sequence of UTF-8 bytes with the specified length |
+| `list T` | A length `nat` followed by a sequence of `T` |
+| `option T` | A byte `b`. If `b` is non-zero, then it is followed by a `T` |
+
+The encodings for `int` and `nat` define a sequence of bits in little-endian order.
+The highest bit in each byte is set if there are more bytes in the number.
+
+This encoding is a sequence of bytes [B<sub>0</sub>, ..., B<sub>n</sub>] where B<sub>i,7</sub> = 1 when i < n and B<sub>n,7</sub> = 0.
+This sequence of bytes is equivalent to a sequence of bits [B<sub>0,0</sub>, ... B<sub>0,6</sub>, ..., B<sub>n-1,0</sub>, ..., B<sub>n-1,6</sub>] = [b<sub>0</sub>, ..., b<sub>m-1</sub>] where m = 6n.
+Essentially, the sequence of bits removes the flag bits that are used to determine when the sequence has reached the end and orders the remaining bits in each byte from least to most significant.
+The sequence of bits is mapped as follows:
+
+ * For the `int` type, if b<sub>m-1</sub> = 0, then k = b<sub>0</sub> * 2<sup>0</sup> + ... + b<sub>m - 2</sub> * 2<sup>m-2</sup>
+ * For the `int` type, if b<sub>m-1</sub> = 1, then k = -(b<sub>0</sub> * 2<sup>0</sup> + ... + b<sub>m - 2</sub> * 2<sup>m-2</sup>) - 1
+ * For the `nat` type, k = b<sub>0</sub> * 2<sup>0</sup> + ... + b<sub>m - 1</sub> * 2<sup>m-1</sup>
+
 ## Versioning
 
 In the following example, a user has a username and birth date.
