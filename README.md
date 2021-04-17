@@ -19,7 +19,7 @@ Other less high-level goals.
 
 ## Types
 
-The following built-in types are supported.
+The following types are supported.
 
 |Type|Encoding|
 |---|---|
@@ -29,6 +29,8 @@ The following built-in types are supported.
 | `string` | A length `nat` followed by a sequence of UTF-8 bytes with the specified length |
 | `list T` | A length `nat` followed by a sequence of `T` |
 | `option T` | A byte `b`. If `b` is non-zero, then it is followed by a `T` |
+| `struct` types | The concatenation of its fields |
+| `enum` types | A tag `nat` followed by the field represented by the tag |
 
 The encodings for `int` and `nat` define a sequence of bits in little-endian order.
 The highest bit in each byte is set if there are more bytes in the number.
