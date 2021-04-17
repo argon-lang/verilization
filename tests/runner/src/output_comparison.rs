@@ -1,12 +1,11 @@
 use std::collections::HashMap;
-use std::io;
 use std::io::Read;
 use std::fs;
 use std::fs::File;
 use std::path::Path;
 use std::ffi::OsString;
 use lang::GeneratorError;
-use verilization_compiler::{lang, file_output_handler};
+use verilization_compiler::lang;
 use sha2::Digest;
 use std::convert::TryInto;
 

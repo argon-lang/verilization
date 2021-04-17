@@ -26,7 +26,7 @@ fn java_package<'a>(package_mapping: &'a PackageMap, package: &model::PackageNam
 }
 
 
-fn write_qual_name<F : Write>(f: &mut F, package_mapping: &PackageMap, name: &model::QualifiedName) -> Result<(), GeneratorError> {
+pub fn write_qual_name<F : Write>(f: &mut F, package_mapping: &PackageMap, name: &model::QualifiedName) -> Result<(), GeneratorError> {
 	let pkg = java_package(&package_mapping, &name.package)?;
 	for part in &pkg.package {
 		write!(f, "{}.", part)?;
@@ -193,7 +193,7 @@ fn write_version_convert<'a, F : Write>(f: &mut F, package_mapping: &PackageMap,
 }
 
 
-fn write_codec<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
+pub fn write_codec<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
 	match t {
 		model::Type::Nat => write!(f, "{}.StandardCodecs.natCodec", RUNTIME_PACKAGE)?,
 		model::Type::Int => write!(f, "{}.StandardCodecs.intCodec", RUNTIME_PACKAGE)?,

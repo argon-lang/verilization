@@ -3,8 +3,6 @@ use lang::{Language, GeneratorError};
 use model::PackageName;
 use model::Verilization;
 
-use crate::ts_test_gen::TSTestGenerator;
-
 use std::collections::HashMap;
 use core::array::IntoIter;
 use std::ffi::OsString;
@@ -31,7 +29,7 @@ pub trait TestGenerator : Sized {
 }
 
 impl TestLanguage for lang::typescript::TypeScriptLanguage {
-    type TestGen = TSTestGenerator;
+    type TestGen = crate::ts_test_gen::TSTestGenerator;
 
     fn name() -> String {
         String::from("typescript")
@@ -85,7 +83,7 @@ impl TestGenerator for () {
 
 
 impl TestLanguage for lang::java::JavaLanguage {
-    type TestGen = ();
+    type TestGen = crate::java_test_gen::JavaTestGenerator;
 
     fn name() -> String {
         String::from("java")

@@ -9,7 +9,6 @@ use test_lang::{TestLanguage, TestGenerator};
 
 
 use std::ffi::OsString;
-use std::io::Write;
 use rand::SeedableRng;
 use hex_literal::hex;
 

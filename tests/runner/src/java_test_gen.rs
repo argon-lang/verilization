@@ -7,6 +7,7 @@ use crate::test_lang::{TestLanguage, TestGenerator};
 
 use std::collections::HashSet;
 use num_bigint::{ BigUint, BigInt };
+use std::fs;
 use std::fs::File;
 use std::io::Write;
 use rand::Rng;
@@ -14,9 +15,8 @@ use verilization_runtime::VerilizationCodec;
 use num_traits::{Zero, One};
 use num_bigint::RandBigInt;
 
-struct TSTestGenState<'model, F, R> {
+struct JavaTestGenState<'model, F, R> {
     file: &'model mut F,
-    imported_types: &'model mut HashSet<model::QualifiedName>,
     random: &'model mut R,
     model: &'model Verilization,
 }
@@ -25,52 +25,32 @@ fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = Ge
     match t {
         model::Type::Nat => {
             let n: BigUint = random.gen_biguint(256);
-            write!(f, "{}n", n)?;
+            write!(f, "new java.lang.BigInteger(\"{}\")", n)?;
             n.write_verilization(writer)
         },
         model::Type::Int => {
             let n: BigInt = random.gen_bigint(256);
-            write!(f, "{}n", n)?;
+            write!(f, "new java.lang.BigInteger(\"{}\")", n)?;
             n.write_verilization(writer)
         },
-        model::Type::U8 => {
-            let n: u8 = random.gen();
-            write!(f, "{}", n)?;
-            n.write_verilization(writer)
-        },
-        model::Type::I8 => {
+        model::Type::U8 | model::Type::I8 => {
             let n: i8 = random.gen();
             write!(f, "{}", n)?;
             n.write_verilization(writer)
         },
-        model::Type::U16 => {
-            let n: u16 = random.gen();
-            write!(f, "{}", n)?;
-            n.write_verilization(writer)
-        },
-        model::Type::I16 => {
+        model::Type::U16 | model::Type::I16 => {
             let n: i16 = random.gen();
             write!(f, "{}", n)?;
             n.write_verilization(writer)
         },
-        model::Type::U32 => {
-            let n: u32 = random.gen();
-            write!(f, "{}", n)?;
-            n.write_verilization(writer)
-        },
-        model::Type::I32 => {
+        model::Type::U32 | model::Type::I32 => {
             let n: i32 = random.gen();
             write!(f, "{}", n)?;
             n.write_verilization(writer)
         },
-        model::Type::U64 => {
-            let n: u64 = random.gen();
-            write!(f, "{}n", n)?;
-            n.write_verilization(writer)
-        },
-        model::Type::I64 => {
+        model::Type::U64 | model::Type::I64 => {
             let n: i64 = random.gen();
-            write!(f, "{}n", n)?;
+            write!(f, "{}L", n)?;
             n.write_verilization(writer)
         },
         model::Type::String => {
@@ -83,7 +63,7 @@ fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = Ge
             Ok(())
         },
         model::Type::List(inner) => {
-            write!(f, "[ ")?;
+            write!(f, "java.util.List.of(")?;
 
             let len: u32 = random.gen_range(0..200);
             BigUint::from(len).write_verilization(writer)?;
@@ -92,7 +72,7 @@ fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = Ge
                 write!(f, ", ")?;
             }
 
-            write!(f, "]")?;
+            write!(f, ")")?;
 
             Ok(())
         },
@@ -100,31 +80,38 @@ fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = Ge
             let b: bool = random.gen();
             if b {
                 BigUint::one().write_verilization(writer)?;
-                write!(f, "{{ value: ")?;
+                write!(f, "java.util.Optional.of(")?;
                 write_random_value(f, writer, random, model, version, &*inner)?;
-                write!(f, "}}")?;
+                write!(f, ")")?;
             }
             else {
                 BigUint::zero().write_verilization(writer)?;
-                write!(f, "null")?;
+                write!(f, "java.util.Optional.empty()")?;
             }
 
             Ok(())
         },
         model::Type::Defined(name) => {
             let (t, ver_type) = model.type_in_version(name, version).ok_or("Could not find type in version.")?;
+            let options = lang::java::JavaLanguage::test_options();
 
             match t {
                 model::TypeDefinition::StructType(_) => {
-                    write!(f, "{{ ")?;
+                    write!(f, "new ")?;
+                    lang::java::write_qual_name(f, &options.package_mapping, name)?;
+                    write!(f, ".V{}(", version)?;
 
-                    for (field_name, field) in &ver_type.fields {
-                        write!(f, "{}: ", field_name)?;
-                        write_random_value(f, writer, random, model, version, &field.field_type)?;
-                        write!(f, ", ")?;
+                    {
+                        let mut iter = ver_type.fields.iter();
+                        if let Some((_, field)) = iter.next() {
+                            write_random_value(f, writer, random, model, version, &field.field_type)?;
+                            while let Some((_, field)) = iter.next() {
+                                write!(f, ", ")?;
+                                write_random_value(f, writer, random, model, version, &field.field_type)?;
+                            }
+                        }
                     }
-
-                    write!(f, "}}")?;
+                    write!(f, ")")?;
 
                     Ok(())
                 },
@@ -134,9 +121,11 @@ fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = Ge
                     let (field_name, field) = &ver_type.fields[index];
 
                     BigUint::from(index).write_verilization(writer)?;
-                    write!(f, "{{ tag: \"{}\", {}: ", field_name, field_name)?;
+                    write!(f, "new ")?;
+                    lang::java::write_qual_name(f, &options.package_mapping, name)?;
+                    write!(f, ".V{}.{}(", version, field_name)?;
                     write_random_value(f, writer, random, model, version, &field.field_type)?;
-                    write!(f, "}}")?;
+                    write!(f, ")")?;
 
                     Ok(())
                 },
@@ -145,53 +134,34 @@ fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = Ge
     }
 }
 
-impl <'model, F: Write, R: Rng> model::TypeDefinitionHandler<'model, GeneratorError> for TSTestGenState<'model, F, R> {
-    type StructHandlerState<'state> where 'model : 'state = &'state mut TSTestGenState<'model, F, R>;
-    type EnumHandlerState<'state> where 'model : 'state = &'state mut TSTestGenState<'model, F, R>;
+impl <'model, F: Write, R: Rng> model::TypeDefinitionHandler<'model, GeneratorError> for JavaTestGenState<'model, F, R> {
+    type StructHandlerState<'state> where 'model : 'state = &'state mut JavaTestGenState<'model, F, R>;
+    type EnumHandlerState<'state> where 'model : 'state = &'state mut JavaTestGenState<'model, F, R>;
 }
 
-impl <'model, 'state, F: Write, R: Rng> model::TypeDefinitionHandlerState<'model, 'state, TSTestGenState<'model, F, R>, GeneratorError> for &'state mut TSTestGenState<'model, F, R> where 'model : 'state {
-    fn begin(outer: &'state mut TSTestGenState<'model, F, R>, type_name: &'model model::QualifiedName, referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
-        let options = lang::typescript::TypeScriptLanguage::test_options();
-
-        let mut add_type = |t: &model::QualifiedName| -> Result<(), GeneratorError> {
-            if !outer.imported_types.contains(&t) {
-                let pkg_dir = options.package_mapping.get(&t.package).ok_or(format!("Unmapped package: {}", t.package))?;
-
-                write!(outer.file, "import * as ")?;
-                lang::typescript::write_import_name(outer.file, t)?;
-                writeln!(outer.file, " from \"./{}/{}.js\";", pkg_dir.to_str().unwrap(), t.name)?;
-                outer.imported_types.insert(t.clone());
-            }
-
-            Ok(())
-        };
-
-        add_type(type_name)?;
-
-        for t in referenced_types {
-            add_type(&t)?;
-        }
-
+impl <'model, 'state, F: Write, R: Rng> model::TypeDefinitionHandlerState<'model, 'state, JavaTestGenState<'model, F, R>, GeneratorError> for &'state mut JavaTestGenState<'model, F, R> where 'model : 'state {
+    fn begin(outer: &'state mut JavaTestGenState<'model, F, R>, _type_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
         Ok(outer)
     }
 
     fn versioned_type(&mut self, _explicit_version: bool, type_name: &'model model::QualifiedName, version: &BigUint, _type_definition: &'model model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
-        write!(self.file, "await check(")?;
+        write!(self.file, "\t\tcheck(")?;
+
+        let options = lang::java::JavaLanguage::test_options();
 
         let current_type = model::Type::Defined(type_name.clone());
 
-        lang::typescript::write_codec(self.file, version, None, &current_type)?;
+        lang::java::write_codec(self.file, &options.package_mapping, version, &current_type)?;
         write!(self.file, ", ")?;
         
         let mut writer = MemoryFormatWriter::new();
         write_random_value(self.file, &mut writer, self.random, self.model, version, &current_type)?;
         
-        write!(self.file, ", Uint8Array.of(")?;
+        write!(self.file, ", new byte[] {{")?;
         for b in writer.data() {
-            write!(self.file, "{},", b)?;
+            write!(self.file, "{},", b as i8)?;
         }
-        writeln!(self.file, "));")?;
+        writeln!(self.file, "}});")?;
 
 
         Ok(())
@@ -202,29 +172,28 @@ impl <'model, 'state, F: Write, R: Rng> model::TypeDefinitionHandlerState<'model
     }
 }
 
-pub struct TSTestGenerator {
+pub struct JavaTestGenerator {
     file: File,
-    imported_types: HashSet<model::QualifiedName>,
 }
 
-impl TestGenerator for TSTestGenerator {
-    fn start() -> Result<TSTestGenerator, GeneratorError> {
-        let mut file = File::create("../typescript/src/gen/tests.ts")?;
+impl TestGenerator for JavaTestGenerator {
+    fn start() -> Result<JavaTestGenerator, GeneratorError> {
+        fs::create_dir_all("../java/gen-test/")?;
+        let mut file = File::create("../java/gen-test/Tests.java")?;
 
-        writeln!(file, "import {{StandardCodecs}} from \"@verilization/runtime\";")?;
-        writeln!(file, "import {{check}} from \"../check.js\";")?;
+        writeln!(file, "class Tests extends sertests.TestsBase {{")?;
+        writeln!(file, "\t@org.junit.jupiter.api.Test")?;
+        writeln!(file, "\tvoid test() throws java.io.IOException {{")?;
         
 
-        Ok(TSTestGenerator {
+        Ok(JavaTestGenerator {
             file: file,
-            imported_types: HashSet::new(),
         })
     }
 
     fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), GeneratorError> {
-        let mut state = crate::ts_test_gen::TSTestGenState {
+        let mut state = JavaTestGenState {
             file: &mut self.file,
-            imported_types: &mut self.imported_types,
             random: random,
             model: model,
         };
@@ -232,7 +201,9 @@ impl TestGenerator for TSTestGenerator {
         model.iter_types(&mut state)
     }
     
-    fn end(self) -> Result<(), GeneratorError> {
+    fn end(mut self) -> Result<(), GeneratorError> {
+        writeln!(self.file, "\t}}")?;
+        writeln!(self.file, "}}")?;
         Ok(())
     }
 }
