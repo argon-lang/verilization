@@ -40,7 +40,7 @@ public abstract class VLQ {
 	}
 
 	public static void encodeVLQ(FormatWriter writer, boolean isSigned, BigInteger n) throws IOException {
-		var nBytes = n.abs().toByteArray();
+		var nBytes = ((isSigned && n.signum() < 0) ? n.add(BigInteger.ONE) : n).abs().toByteArray();
 
 		var encoder = new Encoder(writer);
 		int byteIndex = nBytes.length - 1;
@@ -100,7 +100,13 @@ public abstract class VLQ {
 		}
 
 		public BigInteger bigInteger(boolean sign) {
-			return new BigInteger(sign ? -1 : 1, data);
+			var result = new BigInteger(sign ? -1 : 1, data);
+			if(sign) {
+				return result.subtract(BigInteger.ONE);
+			}
+			else {
+				return result;
+			}
 		}
 	}
 

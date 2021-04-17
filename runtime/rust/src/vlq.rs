@@ -1,8 +1,17 @@
 use crate::{FormatReader, FormatWriter};
 use num_bigint::{ BigUint, BigInt, Sign };
-use num_traits::identities::Zero;
+use num_traits::identities::{Zero, One};
 
 pub fn encode_vlq<W : FormatWriter>(writer: &mut W, sign: Option<Sign>, n: &BigUint) -> Result<(), W::Error> {
+
+    let mut n = n.clone();
+    match sign {
+        Some(Sign::Minus) => {
+            n -= BigUint::one();
+        },
+        _ => (),
+    }
+
 
     struct EncodeState {
         out_bit_index: u32,
@@ -69,7 +78,12 @@ pub fn decoede_vlq_signed<R : FormatReader>(reader: &mut R) -> Result<BigInt, R:
         i += 1;
     }
 
-    let sign = if (b & 0x40) != 0 { Sign::Minus } else { Sign::Plus };
+    let signbit = (b & 0x40) != 0;
+    let sign = if signbit { Sign::Minus } else { Sign::Plus };
+
+    if signbit {
+        n -= BigUint::one();
+    }
 
     Ok(BigInt::from_biguint(sign, n))
 }

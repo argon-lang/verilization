@@ -5,7 +5,7 @@ export async function encodeVLQ(encoder: FormatWriter, isSigned: boolean, value:
 
 	const isNeg = value < 0n;
 	if(isNeg) {
-		value = -value;
+		value = -value - 1n;
 	}
 
 	while(value > 0) {
@@ -42,7 +42,7 @@ export async function decodeVLQ(decoder: FormatReader, isSigned: boolean): Promi
 			if(isLast && isSigned) {
 				result |= BigInt(b & 0x3F) << shift;
 				if((b & 0x40) !== 0) {
-					result = -result;
+					result = -result - 1n;
 				}
 				return result;
 			}

@@ -10,7 +10,7 @@ object VLQ {
     private final case class OutputState(currentByte: Byte, outBitIndex: Int)
 
     def encodeVLQ[R, E](writer: FormatWriter[R, E], isSigned: Boolean, n: BigInt): ZIO[R, E, Unit] = {
-        val nBytes = n.abs.toByteArray
+        val nBytes = (if(isSigned && n < 0) n + 1 else n).abs.toByteArray
 
         def putBit(b: Boolean, state: OutputState): ZIO[R, E, OutputState] =
             if(state.outBitIndex > 6) // Only use 7 bits, 8th bit is for tag to indicate more data
@@ -118,9 +118,10 @@ object VLQ {
                 if((b & 0x80) != 0)
                     readBytes(processBits(state, b, 0, 7))
                 else {
-                    val sign = if(isSigned && (b & 0x40) != 0) -1 else 1
+                    val signbit = isSigned && (b & 0x40) != 0
+                    val sign = if(signbit) -1 else 1
                     val bigInteger = new BigInteger(sign, processBits(state, b, 0, if(isSigned) 6 else 7).toByteArray)
-                    IO.succeed(BigInt(bigInteger))
+                    IO.succeed(BigInt(bigInteger) - (if(signbit) 1 else 0))
                 }
             }
 
