@@ -90,6 +90,12 @@ fn sym_dot(input: &str) -> PResult<&str, ()> {
 	Ok((input, ()))
 }
 
+fn sym_comma(input: &str) -> PResult<&str, ()> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = char(',')(input)?;
+	Ok((input, ()))
+}
+
 fn sym_eq(input: &str) -> PResult<&str, ()> {
 	let (input, _) = multispace0(input)?;
 	let (input, _) = char('=')(input)?;
@@ -105,6 +111,18 @@ fn sym_open_curly(input: &str) -> PResult<&str, ()> {
 fn sym_close_curly(input: &str) -> PResult<&str, ()> {
 	let (input, _) = multispace0(input)?;
 	let (input, _) = char('}')(input)?;
+	Ok((input, ()))
+}
+
+fn sym_open_paren(input: &str) -> PResult<&str, ()> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = char('(')(input)?;
+	Ok((input, ()))
+}
+
+fn sym_close_paren(input: &str) -> PResult<&str, ()> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = char(')')(input)?;
 	Ok((input, ()))
 }
 
@@ -174,51 +192,61 @@ fn package_directive(input: &str) -> PResult<&str, model::PackageName> {
 	Ok((input, model::PackageName { package: pkg }))
 }
 
+fn type_expr_args(input: &str) -> PResult<&str, Vec<model::Type>> {
+	let (input, _) = sym_open_paren(input)?;
+	let (input, args) = separated_list1(sym_comma, type_expr)(input)?;
+	let (input, _) = sym_close_paren(input)?;
+	Ok((input, args))
+}
 
 fn type_expr(input: &str) -> PResult<&str, model::Type> {
-	let (input, name) = identifier(input)?;
+	let (input, qual_name, args) = {
+		let (input, mut name) = identifier(input)?;
+		let (input, parts) = many0(preceded(sym_dot, identifier))(input)?;
 
-	Ok(match name.as_str() {
-		"nat" => (input, model::Type::Nat),
-		"int" => (input, model::Type::Int),
-		"u8" => (input, model::Type::U8),
-		"i8" => (input, model::Type::I8),
-		"u16" => (input, model::Type::U16),
-		"i16" => (input, model::Type::I16),
-		"u32" => (input, model::Type::U32),
-		"i32" => (input, model::Type::I32),
-		"u64" => (input, model::Type::U64),
-		"i64" => (input, model::Type::I64),
-		"string" => (input, model::Type::String),
-		"list" => {
-			let (input, elem_type) = type_expr(input)?;
-			(input, model::Type::List(Box::new(elem_type)))
-		},
-		"option" => {
-			let (input, elem_type) = type_expr(input)?;
-			(input, model::Type::Option(Box::new(elem_type)))
-		},
-		_ => {
-			let (input, parts) = many0(preceded(sym_dot, identifier))(input)?;
+		let mut package: Vec<String> = Vec::new();
+		for part in parts.into_iter() {
+			package.push(name);
+			name = part;
+		}
 
-			let mut name = name;
-			let mut package: Vec<String> = Vec::new();
+		let qual_name = model::QualifiedName {
+			package: model::PackageName {
+				package: package,
+			},
+			name: name,
+		};
 
-			for part in parts.into_iter() {
-				package.push(name);
-				name = part;
-			}
+		let (input, args) = opt(type_expr_args)(input)?;
 
-			let qual_name = model::QualifiedName {
-				package: model::PackageName {
-					package: package,
-				},
-				name: name,
-			};
-
-			(input, model::Type::Defined(qual_name))
-		},
-	})
+		(input, qual_name, args.unwrap_or(Vec::new()))
+	};
+	
+	if qual_name.package.package.is_empty() {
+		Ok((input, match (qual_name.name.as_str(), &args[..]) {
+			("nat", []) => model::Type::Nat,
+			("int", []) => model::Type::Int,
+			("u8", []) => model::Type::U8,
+			("i8", []) => model::Type::I8,
+			("u16", []) => model::Type::U16,
+			("i16", []) => model::Type::I16,
+			("u32", []) => model::Type::U32,
+			("i32", []) => model::Type::I32,
+			("u64", []) => model::Type::U64,
+			("i64", []) => model::Type::I64,
+			("string", []) => model::Type::String,
+			("list", [elem_type]) => {
+				model::Type::List(Box::new(elem_type.clone()))
+			},
+			("option", [elem_type]) => {
+				model::Type::Option(Box::new(elem_type.clone()))
+			},
+			(_, _) => model::Type::Defined(qual_name, args),
+		}))
+	}
+	else {
+		Ok((input, model::Type::Defined(qual_name, args)))
+	}
 }
 
 fn constant_value(input: &str) -> PResult<&str, model::ConstantValue> {
@@ -243,6 +271,7 @@ fn constant_defn(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 	let (input, _) = sym_semicolon(input)?;
 
 	Ok((input, (name, TopLevelDefinition::Constant(model::Constant {
+		imports: HashMap::new(),
 		value_type: t,
 		value: value,
 	}))))
@@ -286,6 +315,14 @@ fn versioned_type(input: &str) -> PResult<&str, (BigUint, model::VersionedTypeDe
 	})))
 }
 
+fn type_param_list(input: &str) -> PResult<&str, Vec<String>> {
+	let (input, _) = sym_open_paren(input)?;
+	let (input, result) = separated_list1(sym_comma, identifier)(input)?;
+	let (input, _) = sym_close_paren(input)?;
+
+	Ok((input, result))
+}
+
 // Ex:
 // struct Name {
 //   version 5 {...}
@@ -302,6 +339,9 @@ fn type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 	))(input)?;
 
 	let (input, name) = identifier(input)?;
+	let (input, type_params) = opt(type_param_list)(input)?;
+	let type_params = type_params.unwrap_or(Vec::new());
+	
 	let (input, _) = sym_open_curly(input)?;
 	let (input, versions) = many0(versioned_type)(input)?;
 	let (input, _) = sym_close_curly(input)?;
@@ -318,12 +358,16 @@ fn type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 	
 	Ok((input, (name, TopLevelDefinition::Type(
 		if is_enum {
-			model::TypeDefinition::EnumType(model::EnumDefinition {
+			model::TypeDefinition::EnumType(model::TypeDefinitionData {
+				imports: HashMap::new(),
+				type_params: type_params,
 				versions: version_map,
 			})
 		}
 		else {
-			model::TypeDefinition::StructType(model::StructDefinition {
+			model::TypeDefinition::StructType(model::TypeDefinitionData {
+				imports: HashMap::new(),
+				type_params: type_params,
 				versions: version_map,
 			})
 		}

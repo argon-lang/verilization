@@ -67,7 +67,35 @@ fn write_imports<F : Write>(f: &mut F, options: &TSOptions, name: &model::Qualif
 	Ok(())
 }
 
-fn write_type<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&model::QualifiedName>, t: &model::Type) -> Result<(), GeneratorError> {
+fn write_type_params<F : Write>(f: &mut F, params: &Vec<String>) -> Result<(), GeneratorError> {
+	let mut iter = params.iter();
+	if let Some(param) = iter.next() {
+		write!(f, "<{}", param)?;
+		while let Some(param) = iter.next() {
+			write!(f, ", {}", param)?;
+		}
+		write!(f, ">")?;
+	}
+
+	Ok(())
+}
+
+fn write_type_args<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&model::QualifiedName>, scope: &model::Scope, args: &Vec<model::Type>) -> Result<(), GeneratorError> {
+	let mut iter = args.iter();
+	if let Some(arg) = iter.next() {
+		write!(f, "<")?;
+		write_type(f, version, type_name, scope, arg)?;
+		while let Some(arg) = iter.next() {
+			write!(f, ", ")?;
+			write_type(f, version, type_name, scope, arg)?;
+		}
+		write!(f, ">")?;
+	}
+
+	Ok(())
+}
+
+fn write_type<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&model::QualifiedName>, scope: &model::Scope, t: &model::Type) -> Result<(), GeneratorError> {
 	Ok(match t {
 		// Map built-in types to the equivalent JS type.
 		model::Type::Nat |
@@ -98,7 +126,7 @@ fn write_type<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&model:
 				model::Type::I64 => write!(f, "BigInt64Array")?,
 				_ => {
 					write!(f, "ReadOnlyArray<")?;
-					write_type(f, version, type_name, inner)?;
+					write_type(f, version, type_name, scope, inner)?;
 					write!(f, ">")?;
 				}
 			}
@@ -107,16 +135,27 @@ fn write_type<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&model:
 		// Options map to { value: T } | null because option option T is distinct from option T
 		model::Type::Option(inner) => {
 			write!(f, "{{ readonly value: ")?;
-			write_type(f, version, type_name, inner)?;
+			write_type(f, version, type_name, scope, inner)?;
 			write!(f, "}} | null")?;
 		},
 
-		// This is a value of the current type, so we don't need a qualifier.
-		model::Type::Defined(t) if type_name.filter(|t2| t == *t2).is_some() => write!(f, "V{}", version)?,
-
-		model::Type::Defined(t) => {
-			write_import_name(f, t)?;
-			write!(f, ".V{}", version)?;
+		model::Type::Defined(t, args) => {
+			match scope.lookup(t.clone()) {
+				model::ScopeLookup::NamedType(t) => {
+					// Only use a qualifier if not a value of the current type.
+					if type_name.filter(|t2| t == **t2).is_none() {
+						write_import_name(f, &t)?;
+						write!(f, ".")?;
+					}
+		
+					write!(f, "V{}", version)?;
+				},
+				model::ScopeLookup::TypeParameter(name) => {
+					write!(f, "{}", name)?;
+				},
+			}
+			
+			write_type_args(f, version, type_name, scope, args)?;
 		},
 	})
 }
@@ -132,61 +171,60 @@ fn requires_conversion(field_type: &model::Type) -> bool {
 	match field_type {
 		model::Type::List(inner) => requires_conversion(inner),
 		model::Type::Option(inner) => requires_conversion(inner),
-		model::Type::Defined(_) => true,
+		model::Type::Defined(_, _) => true,
 		_ => false,
 	}
 }
 
 
-fn write_version_convert_list_inner<F : Write>(f: &mut F) -> Result<(), GeneratorError> {
-	write!(f, "value")?;
-	Ok(())
-}
-
-fn write_version_convert_option_inner<F : Write>(f: &mut F) -> Result<(), GeneratorError> {
-	write!(f, "value.value")?;
-	Ok(())
-}
-
-fn write_version_convert<F : Write, E : Into<GeneratorError>>(f: &mut F, prev_ver: &BigUint, version: &BigUint, type_name: &model::QualifiedName, field_type: &model::Type, value_writer: impl FnOnce(&mut F) -> Result<(), E>) -> Result<(), GeneratorError> {
+fn write_version_convert<F : Write>(f: &mut F, prev_ver: &BigUint, version: &BigUint, type_name: &model::QualifiedName, scope: &model::Scope, field_type: &model::Type, value_name: &str) -> Result<(), GeneratorError> {
 	match field_type {
-		model::Type::Defined(name) => {
-			if name != type_name {
-				write_import_name(f, name)?;
-				write!(f, ".")?;
-			}
+		model::Type::Defined(name, args) => match scope.lookup(name.clone()) {
+			model::ScopeLookup::NamedType(name) => {
+				if name != *type_name {
+					write_import_name(f, &name)?;
+					write!(f, ".")?;
+				}
+	
+				write!(f, "V{}.from_v{}", version, prev_ver)?;
+				write_type_args(f, version, Some(type_name), scope, args)?;
+				write!(f, "(")?;
+				for arg in args {
+					write!(f, "value => ")?;
+					write_version_convert(f, prev_ver, version, type_name, scope, arg, "value")?;
+					write!(f, ", ")?;
+				}
+				write!(f, "{})", value_name)?;		
+			},
 
-			write!(f, "V{}.from_v{}(", version, prev_ver)?;
-			value_writer(f).map_err(E::into)?;
-			write!(f, ")")?;
+			model::ScopeLookup::TypeParameter(name) => {
+				write!(f, "{}_conv({})", name, value_name)?;
+			},
 		},
 
 		model::Type::List(inner) if requires_conversion(inner) => {
-			value_writer(f).map_err(E::into)?;
-			write!(f, ".map(value => ")?;
-			write_version_convert(f, prev_ver, version, type_name, inner, write_version_convert_list_inner)?;
+			write!(f, "{}.map(value => ", value_name)?;
+			write_version_convert(f, prev_ver, version, type_name, scope, inner, "value")?;
 			write!(f, ")")?;
 		},
 
 		model::Type::Option(inner) if requires_conversion(inner) => {
 			write!(f, "(function(value: ")?;
-			write_type(f, prev_ver, Some(type_name), field_type)?;
+			write_type(f, prev_ver, Some(type_name), scope, field_type)?;
 			write!(f, ") {{ if(value !== null) return ")?;
-			write_version_convert(f, prev_ver, version, type_name, inner, write_version_convert_option_inner)?;
-			write!(f, "; else return null; }})(")?;
-			value_writer(f).map_err(E::into)?;
-			write!(f, ")")?;
+			write_version_convert(f, prev_ver, version, type_name, scope, inner, "value.value")?;
+			write!(f, "; else return null; }})({})", value_name)?;
 		},
 
 
-		_ => value_writer(f).map_err(E::into)?,
+		_ => write!(f, "{}", value_name)?,
 	};
 
 	Ok(())
 }
 
 
-pub fn write_codec<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&model::QualifiedName>, t: &model::Type) -> Result<(), GeneratorError> {
+pub fn write_codec<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&model::QualifiedName>, scope: &model::Scope, t: &model::Type) -> Result<(), GeneratorError> {
 	match t {
 		model::Type::Nat => write!(f, "StandardCodecs.nat")?,
 		model::Type::Int => write!(f, "StandardCodecs.int")?,
@@ -211,19 +249,32 @@ pub fn write_codec<F : Write>(f: &mut F, version: &BigUint, type_name: Option<&m
 				model::Type::I64 => write!(f, "StandardCodecs.i64list")?,
 				_ => {
 					write!(f, "StandardCodecs.list(")?;
-					write_codec(f, version, type_name, inner)?;
-					write!(f, ")")?
+					write_codec(f, version, type_name, scope, inner)?;
+					write!(f, ")")?;
 				},
 			}
 		},
 		model::Type::Option(inner) => {
 			write!(f, "StandardCodecs.option(")?;
-			write_codec(f, version, type_name, inner)?;
-			write!(f, ")")?
+			write_codec(f, version, type_name, scope, inner)?;
+			write!(f, ")")?;
 		},
-		model::Type::Defined(_) => {
-			write_type(f, version, type_name, t)?;
-			write!(f, ".codec")?;
+		model::Type::Defined(name, args) => match scope.lookup(name.clone()) {
+			model::ScopeLookup::NamedType(name) => {
+				write_import_name(f, &name)?;
+				write!(f, ".V{}.codec", version)?;
+				write_type_args(f, version, type_name, scope, args)?;
+				if !args.is_empty() {
+					write!(f, "(")?;
+					for arg in args {
+						write_codec(f, version, type_name, scope, arg)?;
+					}
+					write!(f, ")")?;
+				}
+			},
+			model::ScopeLookup::TypeParameter(name) => {
+				write!(f, "{}_codec", name)?;
+			}
 		},
 	}
 
@@ -237,12 +288,12 @@ struct TSConstGenerator<'opt, 'output, Output> {
 }
 
 impl <'opt, 'output, Output: OutputHandler> model::ConstantDefinitionHandler<GeneratorError> for TSConstGenerator<'opt, 'output, Output> {
-	fn constant(&mut self, latest_version: &BigUint, name: &model::QualifiedName, constant: &model::Constant, referenced_types: HashSet<&model::QualifiedName>) -> Result<(), GeneratorError> {
+	fn constant(&mut self, latest_version: &BigUint, name: &model::QualifiedName, scope: &model::Scope, constant: &model::Constant, referenced_types: HashSet<&model::QualifiedName>) -> Result<(), GeneratorError> {
 		let mut file = open_ts_file(self.options, self.output, name)?;
 		write_imports(&mut file, self.options, name, referenced_types)?;
 
 		write!(file, "const {}: ", name.name)?;
-		write_type(&mut file, latest_version, None, &constant.value_type)?;
+		write_type(&mut file, latest_version, None, scope, &constant.value_type)?;
 		write!(file, " = ")?;
 		write_constant_value(&mut file, &constant.value)?;
 		writeln!(file, ";")?;
@@ -262,77 +313,136 @@ struct TSTypeGenerator<'opt, 'output, Output> {
 struct TSStructType {}
 struct TSEnumType {}
 
-struct TSTypeGeneratorState<'state, Output: OutputHandler, Extra> {
+struct TSTypeGeneratorState<'model, 'state, 'scope, Output: OutputHandler, Extra> {
 	file: Output::FileHandle<'state>,
+	type_name: &'model model::QualifiedName,
+	type_params: &'model Vec<String>,
+	scope: &'scope model::Scope<'model>,
 	versions: HashSet<BigUint>,
 	_extra: Extra,
 }
 
 trait TSExtraGeneratorOps {
 	fn create_extra() -> Self;
-	fn write_versioned_type<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
-	fn write_from_prev_version<F: Write>(f: &mut F, prev_ver: &BigUint, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
-	fn write_codec_read<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
-	fn write_codec_write<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_versioned_type<F: Write>(f: &mut F, type_name: &model::QualifiedName, type_params: &Vec<String>, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_from_prev_version<F: Write>(f: &mut F, prev_ver: &BigUint, type_name: &model::QualifiedName, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_codec_read<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_codec_write<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
 }
 
-impl <'model, 'opt, 'output, 'state, Output: OutputHandler, Extra: TSExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, TSTypeGenerator<'opt, 'output, Output>, GeneratorError> for TSTypeGeneratorState<'state, Output, Extra> where 'model : 'state {
+impl <'model, 'opt, 'output, 'state, 'scope, Output: OutputHandler, Extra: TSExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, 'scope, TSTypeGenerator<'opt, 'output, Output>, GeneratorError> for TSTypeGeneratorState<'model, 'state, 'scope, Output, Extra> where 'model : 'state {
 	
-	fn begin(outer: &'state mut TSTypeGenerator<'opt, 'output, Output>, type_name: &model::QualifiedName, referenced_types: HashSet<&model::QualifiedName>) -> Result<Self, GeneratorError> {
+	fn begin(outer: &'state mut TSTypeGenerator<'opt, 'output, Output>, type_name: &'model model::QualifiedName, type_params: &'model Vec<String>, scope: &'scope model::Scope<'model>, referenced_types: HashSet<&model::QualifiedName>) -> Result<Self, GeneratorError> {
 		let mut file = open_ts_file(outer.options, outer.output, type_name)?;
 		writeln!(file, "import {{Codec, FormatWriter, FormatReader, StandardCodecs}} from \"@verilization/runtime\";")?;
 		write_imports(&mut file, outer.options, type_name, referenced_types)?;
 
 		Ok(TSTypeGeneratorState {
 			file: file,
+			type_name: type_name,
+			type_params: type_params,
+			scope: scope,
 			versions: HashSet::new(),
 			_extra: Extra::create_extra(),
 		})
 	}
 
-	fn versioned_type(&mut self, explicit_version: bool, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn versioned_type(&mut self, explicit_version: bool, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 
-		Extra::write_versioned_type(&mut self.file, type_name, version, type_definition)?;
+		Extra::write_versioned_type(&mut self.file, self.type_name, self.type_params, version, self.scope, type_definition)?;
 
 		let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, version.clone()) - 1;
 		let prev_ver = prev_ver.magnitude();
 
 		if explicit_version && !self.versions.is_empty() {
-			writeln!(self.file, "import {{v{}_to_v{}}} from \"./{}.conv.js\";", prev_ver, version, type_name.name)?;
+			writeln!(self.file, "import {{v{}_to_v{}}} from \"./{}.conv.js\";", prev_ver, version, self.type_name.name)?;
 		}
 		writeln!(self.file, "export namespace V{} {{", version)?;
 
-		if !explicit_version {
-			writeln!(self.file, "\texport function from_v{}(prev: V{}): V{} {{", prev_ver, prev_ver, version)?;
-			Extra::write_from_prev_version(&mut self.file, prev_ver, type_name, version, type_definition)?;
+
+		// Skip conversion function for first version.
+		if !self.versions.is_empty() {
+			write!(self.file, "\texport function from_v{}", prev_ver)?;
+
+
+			let mut iter = self.type_params.iter();
+			if let Some(param) = iter.next() {
+				write!(self.file, "<{}_1, {}_2", param, param)?;
+				while let Some(param) = iter.next() {
+					write!(self.file, ", {}_1, {}_2", param, param)?;
+				}
+				write!(self.file, ">")?;
+			}
+
+
+			write!(self.file, "(")?;
+			for param in self.type_params {
+				write!(self.file, "{}_conv: (prev: {}_1) => {}_2, ", param, param, param)?;
+			}
+			writeln!(self.file, "prev: V{}): V{} {{", prev_ver, version)?;
+			if explicit_version {
+				write!(self.file, "\t\treturn v{}_to_v{}(", prev_ver, version)?;
+				
+				for param in self.type_params {
+					write!(self.file, "{}_conv, ", param)?;
+				}				
+
+				writeln!(self.file, "prev);")?;
+			}
+			else {
+				Extra::write_from_prev_version(&mut self.file, prev_ver, self.type_name, version, self.scope, type_definition)?;
+			}
 			writeln!(self.file, "\t}}")?;
 		}
-		else if !self.versions.is_empty() {
-			writeln!(self.file, "\texport const from_v{}: (prev: V{}) => V{} = v{}_to_v{};", prev_ver, prev_ver, version, prev_ver, version)?;
+
+		if self.type_params.is_empty() {
+			writeln!(self.file, "\texport const codec: Codec<V{}> = {{", version)?;
+		}
+		else {
+			write!(self.file, "\texport function codec")?;
+			write_type_params(&mut self.file, self.type_params)?;
+			write!(self.file, "(")?;
+			{
+				let mut iter = self.type_params.iter();
+				if let Some(param) = iter.next() {
+					write!(self.file, "{}_codec: Codec<{}>", param, param)?;
+					while let Some(param) = iter.next() {
+						write!(self.file, ", {}_codec: Codec<{}>", param, param)?;
+					}
+				}
+			}
+			write!(self.file, "): Codec<V{}", version)?;
+			write_type_params(&mut self.file, self.type_params)?;
+			writeln!(self.file, "> {{ return {{")?;
 		}
 
-		writeln!(self.file, "\texport const codec: Codec<V{}> = {{", version)?;
-
-		writeln!(self.file, "\t\tasync read(reader: FormatReader): Promise<V{}> {{", version)?;
-		Extra::write_codec_read(&mut self.file, type_name, version, type_definition)?;
+		writeln!(self.file, "\t\tasync read(reader: FormatReader): Promise<V{}", version)?;
+		write_type_params(&mut self.file, self.type_params)?;
+		writeln!(self.file, "> {{")?;
+		Extra::write_codec_read(&mut self.file, self.type_name, version, self.scope, type_definition)?;
 		writeln!(self.file, "\t\t}},")?;
 
-		writeln!(self.file, "\t\tasync write(writer: FormatWriter, value: V{}): Promise<void> {{", version)?;
-		Extra::write_codec_write(&mut self.file, type_name, version, type_definition)?;
+		writeln!(self.file, "\t\tasync write(writer: FormatWriter, value: V{}", version)?;
+		write_type_params(&mut self.file, self.type_params)?;
+		writeln!(self.file, "): Promise<void> {{")?;
+		Extra::write_codec_write(&mut self.file, self.type_name, version, self.scope, type_definition)?;
 		writeln!(self.file, "\t\t}},")?;
 		writeln!(self.file, "\t}};")?;
 
 		
-
-
-		writeln!(self.file, "}}")?;
+		if self.type_params.is_empty() {
+			writeln!(self.file, "}}")?;
+		}
+		else {
+			writeln!(self.file, "}}; }}")?;
+		}
 
 		self.versions.insert(version.clone());
 
 		Ok(())
 	}
 	
-	fn end(self, _type_name: &model::QualifiedName) -> Result<(), GeneratorError> {
+	fn end(self) -> Result<(), GeneratorError> {
 		Ok(())
 	}
 
@@ -343,43 +453,45 @@ impl TSExtraGeneratorOps for TSStructType {
 		TSStructType {}
 	}
 
-	fn write_versioned_type<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
-		writeln!(f, "export interface V{} {{", version)?;
+	fn write_versioned_type<F: Write>(f: &mut F, type_name: &model::QualifiedName, type_params: &Vec<String>, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		writeln!(f, "export interface V{}", version)?;
+		write_type_params(f, type_params)?;
+		writeln!(f, " {{")?;
 		for (field_name, field) in &type_definition.fields {
 			write!(f, "\treadonly {}: ", field_name)?;
-			write_type(f, version, Some(type_name), &field.field_type)?;
+			write_type(f, version, Some(type_name), scope, &field.field_type)?;
 			writeln!(f, ";")?;
 		}
 		writeln!(f, "}}")?;
 		Ok(())
 	}
 
-	fn write_from_prev_version<F: Write>(f: &mut F, prev_ver: &BigUint, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_from_prev_version<F: Write>(f: &mut F, prev_ver: &BigUint, type_name: &model::QualifiedName, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		writeln!(f, "\t\treturn {{")?;
 		for (field_name, field) in &type_definition.fields {
 			write!(f, "\t\t\t{}: ", field_name)?;
-			write_version_convert(f, prev_ver, version, type_name, &field.field_type, |f| write!(f, "prev.{}", field_name))?;
+			write_version_convert(f, prev_ver, version, type_name, scope, &field.field_type, &format!("prev.{}", field_name))?;
 			writeln!(f, ",")?;
 		}
 		writeln!(f, "\t\t}};")?;
 		Ok(())
 	}
 
-	fn write_codec_read<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_codec_read<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		writeln!(f, "\t\t\treturn {{")?;
 		for (field_name, field) in &type_definition.fields {
 			write!(f, "\t\t\t\t{}: await ", field_name)?;
-			write_codec(f, version, Some(type_name), &field.field_type)?;
+			write_codec(f, version, Some(type_name), scope, &field.field_type)?;
 			writeln!(f, ".read(reader),")?;
 		}
 		writeln!(f, "\t\t\t}};")?;
 		Ok(())
 	}
 
-	fn write_codec_write<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_codec_write<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		for (field_name, field) in &type_definition.fields {
 			write!(f, "\t\t\tawait ")?;
-			write_codec(f, version, Some(type_name), &field.field_type)?;
+			write_codec(f, version, Some(type_name), scope, &field.field_type)?;
 			writeln!(f, ".write(writer, value.{});", field_name)?;
 		}
 		Ok(())
@@ -391,8 +503,10 @@ impl TSExtraGeneratorOps for TSEnumType {
 		TSEnumType {}
 	}
 
-	fn write_versioned_type<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
-		write!(f, "export type V{} = ", version)?;
+	fn write_versioned_type<F: Write>(f: &mut F, type_name: &model::QualifiedName, type_params: &Vec<String>, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		write!(f, "export type V{}", version)?;
+		write_type_params(f, type_params)?;
+		write!(f, " = ")?;
 		let mut is_first = true;
 		for (field_name, field) in &type_definition.fields {
 			if !is_first {
@@ -403,7 +517,7 @@ impl TSExtraGeneratorOps for TSEnumType {
 				is_first = false;
 			}
 			write!(f, "{{ readonly tag: \"{}\", readonly {}: ", field_name, field_name)?;
-			write_type(f, version, Some(type_name), &field.field_type)?;
+			write_type(f, version, Some(type_name), scope, &field.field_type)?;
 			write!(f, ", }}")?;
 		}
 
@@ -413,11 +527,11 @@ impl TSExtraGeneratorOps for TSEnumType {
 		Ok(())
 	}
 
-	fn write_from_prev_version<F: Write>(f: &mut F, prev_ver: &BigUint, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_from_prev_version<F: Write>(f: &mut F, prev_ver: &BigUint, type_name: &model::QualifiedName, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		writeln!(f, "\t\tswitch(prev.tag) {{")?;
 		for (field_name, field) in &type_definition.fields {
 			write!(f, "\t\t\tcase \"{}\": return {{ tag: \"{}\", \"{}\": ", field_name, field_name, field_name)?;
-			write_version_convert(f, prev_ver, version, type_name, &field.field_type, |f| write!(f, "prev.{}", field_name))?;
+			write_version_convert(f, prev_ver, version, type_name, scope, &field.field_type, &format!("prev.{}", field_name))?;
 			writeln!(f, "}};")?;
 		}
 		writeln!(f, "\t\t\tdefault: return prev;")?;
@@ -425,12 +539,12 @@ impl TSExtraGeneratorOps for TSEnumType {
 		Ok(())
 	}
 
-	fn write_codec_read<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_codec_read<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		writeln!(f, "\t\t\tconst tag = await StandardCodecs.nat.read(reader);")?;
 		writeln!(f, "\t\t\tswitch(tag) {{")?;
 		for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
 			write!(f, "\t\t\t\tcase {}n: return {{ tag: \"{}\", \"{}\": await ", index, field_name, field_name)?;
-			write_codec(f, version, Some(type_name), &field.field_type)?;
+			write_codec(f, version, Some(type_name), scope, &field.field_type)?;
 			writeln!(f, ".read(reader) }};")?;
 		}
 		writeln!(f, "\t\t\t\tdefault: throw new Error(\"Unknown tag\");")?;
@@ -438,13 +552,13 @@ impl TSExtraGeneratorOps for TSEnumType {
 		Ok(())
 	}
 
-	fn write_codec_write<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_codec_write<F: Write>(f: &mut F, type_name: &model::QualifiedName, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		writeln!(f, "\t\t\tswitch(value.tag) {{")?;
 		for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
 			writeln!(f, "\t\t\t\tcase \"{}\":", field_name)?;
 			writeln!(f, "\t\t\t\t\tawait StandardCodecs.nat.write(writer, {}n);", index)?;
 			write!(f, "\t\t\t\t\tawait ")?;
-			write_codec(f, version, Some(type_name), &field.field_type)?;
+			write_codec(f, version, Some(type_name), scope, &field.field_type)?;
 			writeln!(f, ".write(writer, value.{});", field_name)?;
 			writeln!(f, "\t\t\t\t\tbreak;")?;
 		}
@@ -456,8 +570,8 @@ impl TSExtraGeneratorOps for TSEnumType {
 
 
 impl <'model, 'opt, 'output, Output: OutputHandler> model::TypeDefinitionHandler<'model, GeneratorError> for TSTypeGenerator<'opt, 'output, Output> {
-	type StructHandlerState<'state> where 'model : 'state = TSTypeGeneratorState<'state, Output, TSStructType>;
-	type EnumHandlerState<'state> where 'model : 'state = TSTypeGeneratorState<'state, Output, TSEnumType>;
+	type StructHandlerState<'state, 'scope> where 'model : 'scope, 'scope : 'state = TSTypeGeneratorState<'model, 'state, 'scope, Output, TSStructType>;
+	type EnumHandlerState<'state, 'scope> where 'model : 'scope, 'scope : 'state = TSTypeGeneratorState<'model, 'state, 'scope, Output, TSEnumType>;
 }
 
 
@@ -522,8 +636,4 @@ impl Language for TypeScriptLanguage {
 		Ok(())
 	}
 
-
-	fn write_codec<F: Write>(file: &mut F, _options: &Self::Options, version: &BigUint, type_name: Option<&model::QualifiedName>, t: &model::Type) -> Result<(), GeneratorError> {
-		write_codec(file, version, type_name, t)
-	}
 }

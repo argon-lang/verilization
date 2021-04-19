@@ -8,7 +8,6 @@ use crate::type_check::TypeCheckError;
 use std::ffi::OsString;
 use std::io;
 use std::path::Path;
-use num_bigint::BigUint;
 
 #[derive(Debug)]
 pub enum GeneratorError {
@@ -80,9 +79,6 @@ pub trait Language {
 	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError>;
 	
 	fn generate<Output: OutputHandler>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError>;
-
-
-	fn write_codec<F: io::Write>(file: &mut F, options: &Self::Options, version: &BigUint, type_name: Option<&model::QualifiedName>, t: &model::Type) -> Result<(), GeneratorError>;
 
 }
 

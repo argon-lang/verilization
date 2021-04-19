@@ -15,13 +15,20 @@ use verilization_runtime::VerilizationCodec;
 use num_traits::{Zero, One};
 use num_bigint::RandBigInt;
 
-struct JavaTestGenState<'model, F, R> {
+struct ScalaTestGenInfo<'model, F, R> {
     file: &'model mut F,
     random: &'model mut R,
     model: &'model Verilization,
 }
 
-fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = GeneratorError>, R: Rng>(f: &mut F, writer: &mut W, random: &mut R, model: &Verilization, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
+struct ScalaTestGenState<'model, 'state, 'scope, F, R> {
+    info: &'state mut ScalaTestGenInfo<'model, F, R>,
+    type_name: &'model model::QualifiedName,
+    type_params: &'model Vec<String>,
+    scope: &'scope model::Scope<'model>,
+}
+
+fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = GeneratorError>, R: Rng>(f: &mut F, writer: &mut W, random: &mut R, model: &Verilization, version: &BigUint, scope: &model::Scope, t: &model::Type) -> Result<(), GeneratorError> {
     match t {
         model::Type::Nat => {
             let n: BigUint = random.gen_biguint(256);
@@ -68,7 +75,7 @@ fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = Ge
             let len: u32 = random.gen_range(0..200);
             BigUint::from(len).write_verilization(writer)?;
             for _ in 0..len {
-                write_random_value(f, writer, random, model, version, &*inner)?;
+                write_random_value(f, writer, random, model, version, scope, &*inner)?;
                 write!(f, ", ")?;
             }
 
@@ -81,7 +88,7 @@ fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = Ge
             if b {
                 BigUint::one().write_verilization(writer)?;
                 write!(f, "java.util.Optional.of(")?;
-                write_random_value(f, writer, random, model, version, &*inner)?;
+                write_random_value(f, writer, random, model, version, scope, &*inner)?;
                 write!(f, ")")?;
             }
             else {
@@ -91,90 +98,103 @@ fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = Ge
 
             Ok(())
         },
-        model::Type::Defined(name) => {
-            let (t, ver_type) = model.type_in_version(name, version).ok_or("Could not find type in version.")?;
-            let options = lang::scala::ScalaLanguage::test_options();
-
-            match t {
-                model::TypeDefinition::StructType(_) => {
-                    write!(f, "new ")?;
-                    lang::java::write_qual_name(f, &options.package_mapping, name)?;
-                    write!(f, ".V{}(", version)?;
-
-                    {
-                        let mut iter = ver_type.fields.iter();
-                        if let Some((_, field)) = iter.next() {
-                            write_random_value(f, writer, random, model, version, &field.field_type)?;
-                            while let Some((_, field)) = iter.next() {
-                                write!(f, ", ")?;
-                                write_random_value(f, writer, random, model, version, &field.field_type)?;
+        model::Type::Defined(name, _) => match scope.lookup(name.clone()) {
+            model::ScopeLookup::NamedType(name) => {
+                let t = model.get_type(&name).ok_or("Could not find type")?;
+                let options = lang::scala::ScalaLanguage::test_options();
+    
+                match t {
+                    model::TypeDefinition::StructType(t) => {
+                        let ver_type = t.versioned(version).ok_or("Could not find version of type")?;
+                        write!(f, "new ")?;
+                        lang::java::write_qual_name(f, &options.package_mapping, &name)?;
+                        write!(f, ".V{}(", version)?;
+    
+                        {
+                            let mut iter = ver_type.fields.iter();
+                            if let Some((_, field)) = iter.next() {
+                                write_random_value(f, writer, random, model, version, scope, &field.field_type)?;
+                                while let Some((_, field)) = iter.next() {
+                                    write!(f, ", ")?;
+                                    write_random_value(f, writer, random, model, version, scope, &field.field_type)?;
+                                }
                             }
                         }
-                    }
-                    write!(f, ")")?;
+                        write!(f, ")")?;
+    
+                        Ok(())
+                    },
+    
+                    model::TypeDefinition::EnumType(t) => {
+                        let ver_type = t.versioned(version).ok_or("Could not find version of type")?;
+                        let index = random.gen_range(0..ver_type.fields.len());
+                        let (field_name, field) = &ver_type.fields[index];
+    
+                        BigUint::from(index).write_verilization(writer)?;
+                        write!(f, "new ")?;
+                        lang::java::write_qual_name(f, &options.package_mapping, &name)?;
+                        write!(f, ".V{}.{}(", version, field_name)?;
+                        write_random_value(f, writer, random, model, version, scope, &field.field_type)?;
+                        write!(f, ")")?;
+    
+                        Ok(())
+                    },
+                }
+            },
 
-                    Ok(())
-                },
-
-                model::TypeDefinition::EnumType(_) => {
-                    let index = random.gen_range(0..ver_type.fields.len());
-                    let (field_name, field) = &ver_type.fields[index];
-
-                    BigUint::from(index).write_verilization(writer)?;
-                    write!(f, "new ")?;
-                    lang::java::write_qual_name(f, &options.package_mapping, name)?;
-                    write!(f, ".V{}.{}(", version, field_name)?;
-                    write_random_value(f, writer, random, model, version, &field.field_type)?;
-                    write!(f, ")")?;
-
-                    Ok(())
-                },
-            }
+            // Hardcode type parameters as u32
+            model::ScopeLookup::TypeParameter(_) => write_random_value(f, writer, random, model, version, scope, &model::Type::U32),
         },
     }
 }
 
-impl <'model, F: Write, R: Rng> model::TypeDefinitionHandler<'model, GeneratorError> for JavaTestGenState<'model, F, R> {
-    type StructHandlerState<'state> where 'model : 'state = &'state mut JavaTestGenState<'model, F, R>;
-    type EnumHandlerState<'state> where 'model : 'state = &'state mut JavaTestGenState<'model, F, R>;
+impl <'model, F: Write, R: Rng> model::TypeDefinitionHandler<'model, GeneratorError> for ScalaTestGenInfo<'model, F, R> {
+    type StructHandlerState<'state, 'scope> where 'model : 'scope, 'scope : 'state = ScalaTestGenState<'model, 'state, 'scope, F, R>;
+    type EnumHandlerState<'state, 'scope> where 'model : 'scope, 'scope : 'state = ScalaTestGenState<'model, 'state, 'scope, F, R>;
 }
 
-impl <'model, 'state, F: Write, R: Rng> model::TypeDefinitionHandlerState<'model, 'state, JavaTestGenState<'model, F, R>, GeneratorError> for &'state mut JavaTestGenState<'model, F, R> where 'model : 'state {
-    fn begin(outer: &'state mut JavaTestGenState<'model, F, R>, _type_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
-        Ok(outer)
+impl <'model, 'state, 'scope, F: Write, R: Rng> model::TypeDefinitionHandlerState<'model, 'state, 'scope, ScalaTestGenInfo<'model, F, R>, GeneratorError> for ScalaTestGenState<'model, 'state, 'scope, F, R> where 'model : 'scope, 'scope : 'state {
+    fn begin(outer: &'state mut ScalaTestGenInfo<'model, F, R>, type_name: &'model model::QualifiedName, type_params: &'model Vec<String>, scope: &'scope model::Scope<'model>, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
+        Ok(ScalaTestGenState {
+            info: outer,
+            type_name: type_name,
+            type_params: type_params,
+            scope: scope,
+        })
     }
 
-    fn versioned_type(&mut self, _explicit_version: bool, type_name: &'model model::QualifiedName, version: &BigUint, _type_definition: &'model model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
-        write!(self.file, "\t\tsertests.TestCase(")?;
+    fn versioned_type(&mut self, _explicit_version: bool, version: &BigUint, _type_definition: &'model model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+        write!(self.info.file, "\t\tsertests.TestCase(")?;
 
         let options = lang::scala::ScalaLanguage::test_options();
 
-        let current_type = model::Type::Defined(type_name.clone());
+        let type_args: Vec<_> = std::iter::repeat(model::Type::U32).take(self.type_params.len()).collect();
+        let current_type = model::Type::Defined(self.type_name.clone(), type_args);
 
-        lang::java::write_codec(self.file, &options.package_mapping, version, &current_type)?;
-        write!(self.file, ", ")?;
+        lang::scala::write_codec(self.info.file, &options.package_mapping, version, self.scope, &current_type)?;
+        write!(self.info.file, ", ")?;
         
         let mut writer = MemoryFormatWriter::new();
-        write_random_value(self.file, &mut writer, self.random, self.model, version, &current_type)?;
+        write_random_value(self.info.file, &mut writer, self.info.random, self.info.model, version, self.scope, &current_type)?;
         
-        write!(self.file, ", zio.Chunk[Byte](")?;
+        write!(self.info.file, ", zio.Chunk[Byte](")?;
         {
             let data = writer.data();
             let mut iter = data.iter();
             if let Some(b) = iter.next() {
-                write!(self.file, "{}", *b as i8)?;
+                write!(self.info.file, "{}", *b as i8)?;
                 while let Some(b) = iter.next() {
-                    write!(self.file, ", {}", *b as i8)?;
+                    write!(self.info.file, ", {}", *b as i8)?;
                 }
             }
         }
-        writeln!(self.file, ")),")?;
+        writeln!(self.info.file, ")),")?;
 
 
         Ok(())
     }
 
-    fn end(self, _type_name: &'model model::QualifiedName) -> Result<(), GeneratorError> {
+    fn end(self) -> Result<(), GeneratorError> {
         Ok(())
     }
 }
@@ -198,7 +218,7 @@ impl TestGenerator for ScalaTestGenerator {
     }
 
     fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), GeneratorError> {
-        let mut state = JavaTestGenState {
+        let mut state = ScalaTestGenInfo {
             file: &mut self.file,
             random: random,
             model: model,

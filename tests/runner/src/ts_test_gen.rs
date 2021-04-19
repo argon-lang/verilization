@@ -14,14 +14,21 @@ use verilization_runtime::VerilizationCodec;
 use num_traits::{Zero, One};
 use num_bigint::RandBigInt;
 
-struct TSTestGenState<'model, F, R> {
+struct TSTestGenInfo<'model, F, R> {
     file: &'model mut F,
     imported_types: &'model mut HashSet<model::QualifiedName>,
     random: &'model mut R,
     model: &'model Verilization,
 }
 
-fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = GeneratorError>, R: Rng>(f: &mut F, writer: &mut W, random: &mut R, model: &Verilization, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
+struct TSTestGenState<'model, 'state, 'scope, F, R> {
+    outer: &'state mut TSTestGenInfo<'model, F, R>,
+    type_name: &'model model::QualifiedName,
+    type_params: &'model Vec<String>,
+    scope: &'scope model::Scope<'model>,
+}
+
+fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = GeneratorError>, R: Rng>(f: &mut F, writer: &mut W, random: &mut R, model: &Verilization, version: &BigUint, scope: &model::Scope, t: &model::Type) -> Result<(), GeneratorError> {
     match t {
         model::Type::Nat => {
             let n: BigUint = random.gen_biguint(256);
@@ -88,7 +95,7 @@ fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = Ge
             let len: u32 = random.gen_range(0..200);
             BigUint::from(len).write_verilization(writer)?;
             for _ in 0..len {
-                write_random_value(f, writer, random, model, version, &*inner)?;
+                write_random_value(f, writer, random, model, version, scope, &*inner)?;
                 write!(f, ", ")?;
             }
 
@@ -101,7 +108,7 @@ fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = Ge
             if b {
                 BigUint::one().write_verilization(writer)?;
                 write!(f, "{{ value: ")?;
-                write_random_value(f, writer, random, model, version, &*inner)?;
+                write_random_value(f, writer, random, model, version, scope, &*inner)?;
                 write!(f, "}}")?;
             }
             else {
@@ -111,47 +118,55 @@ fn write_random_value<F: Write, W: verilization_runtime::FormatWriter<Error = Ge
 
             Ok(())
         },
-        model::Type::Defined(name) => {
-            let (t, ver_type) = model.type_in_version(name, version).ok_or("Could not find type in version.")?;
+        model::Type::Defined(name, _) => match scope.lookup(name.clone()) {
+            model::ScopeLookup::NamedType(name) => {
+                let t = model.get_type(&name).ok_or("Could not find type")?;
+                
+    
+                match t {
+                    model::TypeDefinition::StructType(t) => {
+                        let ver_type = t.versioned(version).ok_or("Could not find version of type")?;
+                        write!(f, "{{ ")?;
+    
+                        for (field_name, field) in &ver_type.fields {
+                            write!(f, "{}: ", field_name)?;
+                            write_random_value(f, writer, random, model, version, scope, &field.field_type)?;
+                            write!(f, ", ")?;
+                        }
+    
+                        write!(f, "}}")?;
+    
+                        Ok(())
+                    },
+    
+                    model::TypeDefinition::EnumType(t) => {
+                        let ver_type = t.versioned(version).ok_or("Could not find version of type")?;
+                        let index = random.gen_range(0..ver_type.fields.len());
+                        let (field_name, field) = &ver_type.fields[index];
+    
+                        BigUint::from(index).write_verilization(writer)?;
+                        write!(f, "{{ tag: \"{}\", {}: ", field_name, field_name)?;
+                        write_random_value(f, writer, random, model, version, scope, &field.field_type)?;
+                        write!(f, "}}")?;
+    
+                        Ok(())
+                    },
+                }
+            },
 
-            match t {
-                model::TypeDefinition::StructType(_) => {
-                    write!(f, "{{ ")?;
-
-                    for (field_name, field) in &ver_type.fields {
-                        write!(f, "{}: ", field_name)?;
-                        write_random_value(f, writer, random, model, version, &field.field_type)?;
-                        write!(f, ", ")?;
-                    }
-
-                    write!(f, "}}")?;
-
-                    Ok(())
-                },
-
-                model::TypeDefinition::EnumType(_) => {
-                    let index = random.gen_range(0..ver_type.fields.len());
-                    let (field_name, field) = &ver_type.fields[index];
-
-                    BigUint::from(index).write_verilization(writer)?;
-                    write!(f, "{{ tag: \"{}\", {}: ", field_name, field_name)?;
-                    write_random_value(f, writer, random, model, version, &field.field_type)?;
-                    write!(f, "}}")?;
-
-                    Ok(())
-                },
-            }
+            // Hardcode type parameters as u32
+            model::ScopeLookup::TypeParameter(_) => write_random_value(f, writer, random, model, version, scope, &model::Type::U32),
         },
     }
 }
 
-impl <'model, F: Write, R: Rng> model::TypeDefinitionHandler<'model, GeneratorError> for TSTestGenState<'model, F, R> {
-    type StructHandlerState<'state> where 'model : 'state = &'state mut TSTestGenState<'model, F, R>;
-    type EnumHandlerState<'state> where 'model : 'state = &'state mut TSTestGenState<'model, F, R>;
+impl <'model, F: Write, R: Rng> model::TypeDefinitionHandler<'model, GeneratorError> for TSTestGenInfo<'model, F, R> {
+    type StructHandlerState<'state, 'scope> where 'model : 'scope, 'scope : 'state = TSTestGenState<'model, 'state, 'scope, F, R>;
+    type EnumHandlerState<'state, 'scope> where 'model : 'scope, 'scope : 'state = TSTestGenState<'model, 'state, 'scope, F, R>;
 }
 
-impl <'model, 'state, F: Write, R: Rng> model::TypeDefinitionHandlerState<'model, 'state, TSTestGenState<'model, F, R>, GeneratorError> for &'state mut TSTestGenState<'model, F, R> where 'model : 'state {
-    fn begin(outer: &'state mut TSTestGenState<'model, F, R>, type_name: &'model model::QualifiedName, referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
+impl <'model, 'state, 'scope, F: Write, R: Rng> model::TypeDefinitionHandlerState<'model, 'state, 'scope, TSTestGenInfo<'model, F, R>, GeneratorError> for TSTestGenState<'model, 'state, 'scope, F, R> where 'model : 'scope, 'scope : 'state {
+    fn begin(outer: &'state mut TSTestGenInfo<'model, F, R>, type_name: &'model model::QualifiedName, type_params: &'model Vec<String>, scope: &'scope model::Scope<'model>, referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
         let options = lang::typescript::TypeScriptLanguage::test_options();
 
         let mut add_type = |t: &model::QualifiedName| -> Result<(), GeneratorError> {
@@ -173,31 +188,37 @@ impl <'model, 'state, F: Write, R: Rng> model::TypeDefinitionHandlerState<'model
             add_type(&t)?;
         }
 
-        Ok(outer)
+        Ok(TSTestGenState {
+            outer: outer,
+            type_name: type_name,
+            type_params: type_params,
+            scope: scope,
+        })
     }
 
-    fn versioned_type(&mut self, _explicit_version: bool, type_name: &'model model::QualifiedName, version: &BigUint, _type_definition: &'model model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
-        write!(self.file, "await check(")?;
+    fn versioned_type(&mut self, _explicit_version: bool, version: &BigUint, _type_definition: &'model model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+        write!(self.outer.file, "await check(")?;
 
-        let current_type = model::Type::Defined(type_name.clone());
+        let type_args: Vec<_> = std::iter::repeat(model::Type::U32).take(self.type_params.len()).collect();
+        let current_type = model::Type::Defined(self.type_name.clone(), type_args);
 
-        lang::typescript::write_codec(self.file, version, None, &current_type)?;
-        write!(self.file, ", ")?;
+        lang::typescript::write_codec(self.outer.file, version, None, self.scope, &current_type)?;
+        write!(self.outer.file, ", ")?;
         
         let mut writer = MemoryFormatWriter::new();
-        write_random_value(self.file, &mut writer, self.random, self.model, version, &current_type)?;
+        write_random_value(self.outer.file, &mut writer, self.outer.random, self.outer.model, version, self.scope, &current_type)?;
         
-        write!(self.file, ", Uint8Array.of(")?;
+        write!(self.outer.file, ", Uint8Array.of(")?;
         for b in writer.data() {
-            write!(self.file, "{},", b)?;
+            write!(self.outer.file, "{},", b)?;
         }
-        writeln!(self.file, "));")?;
+        writeln!(self.outer.file, "));")?;
 
 
         Ok(())
     }
 
-    fn end(self, _type_name: &'model model::QualifiedName) -> Result<(), GeneratorError> {
+    fn end(self) -> Result<(), GeneratorError> {
         Ok(())
     }
 }
@@ -222,7 +243,7 @@ impl TestGenerator for TSTestGenerator {
     }
 
     fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), GeneratorError> {
-        let mut state = crate::ts_test_gen::TSTestGenState {
+        let mut state = crate::ts_test_gen::TSTestGenInfo {
             file: &mut self.file,
             imported_types: &mut self.imported_types,
             random: random,

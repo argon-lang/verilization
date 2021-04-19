@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use num_bigint::{BigUint, BigInt, Sign};
+use crate::util::for_sep;
 
 type PackageMap = HashMap<model::PackageName, model::PackageName>;
 const RUNTIME_PACKAGE: &str = "dev.argon.verilization.scala_runtime";
@@ -68,12 +69,40 @@ fn write_package<F : Write>(f: &mut F, package_mapping: &PackageMap, package: &m
 	Ok(())
 }
 
-fn write_type<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
+fn write_type_params<F : Write>(f: &mut F, params: &Vec<String>) -> Result<(), GeneratorError> {
+	let mut iter = params.iter();
+	if let Some(param) = iter.next() {
+		write!(f, "[{}", param)?;
+		while let Some(param) = iter.next() {
+			write!(f, ", {}", param)?;
+		}
+		write!(f, "]")?;
+	}
+
+	Ok(())
+}
+
+fn write_type_args<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, scope: &model::Scope, args: &Vec<model::Type>) -> Result<(), GeneratorError> {
+	let mut iter = args.iter();
+	if let Some(arg) = iter.next() {
+		write!(f, "[")?;
+		write_type(f, package_mapping, version, scope, arg)?;
+		while let Some(arg) = iter.next() {
+			write!(f, ", ")?;
+			write_type(f, package_mapping, version, scope, arg)?;
+		}
+		write!(f, "]")?;
+	}
+
+	Ok(())
+}
+
+
+fn write_type<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, scope: &model::Scope, t: &model::Type) -> Result<(), GeneratorError> {
 	Ok(match t {
 		// Map built-in types to the equivalent Java type.
 		model::Type::Nat | model::Type::Int => write!(f, "scala.math.BigInt")?,
 		
-
         model::Type::U8 | model::Type::I8 => write!(f, "scala.Byte")?,
 		
         model::Type::U16 | model::Type::I16 => write!(f, "scala.Short")?,
@@ -87,18 +116,24 @@ fn write_type<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigU
 
 		model::Type::List(inner) => {
 			write!(f, "zio.Chunk[")?;
-			write_type(f, package_mapping, version, inner)?;
+			write_type(f, package_mapping, version, scope, inner)?;
 			write!(f, "]")?;
 		},
 		model::Type::Option(inner) => {
 			write!(f, "scala.Option[")?;
-			write_type(f, package_mapping, version, inner)?;
+			write_type(f, package_mapping, version, scope, inner)?;
 			write!(f, "]")?;
 		},
 
-		model::Type::Defined(t) => {
-			write_qual_name(f, package_mapping, t)?;
-			write!(f, ".V{}", version)?;
+		model::Type::Defined(t, args) => match scope.lookup(t.clone()) {
+			model::ScopeLookup::NamedType(t) => {
+				write_qual_name(f, package_mapping, &t)?;
+				write!(f, ".V{}", version)?;
+				write_type_args(f, package_mapping, version, scope, args)?;
+			},
+			model::ScopeLookup::TypeParameter(name) => {
+				write!(f, "{}", name)?;
+			}
 		},
 	})
 }
@@ -113,7 +148,7 @@ fn requires_conversion(field_type: &model::Type) -> bool {
 	match field_type {
 		model::Type::List(inner) => requires_conversion(inner),
 		model::Type::Option(inner) => requires_conversion(inner),
-		model::Type::Defined(_) => true,
+		model::Type::Defined(_, _) => true,
 		_ => false,
 	}
 }
@@ -123,17 +158,29 @@ enum ConvertParam {
 	Expression(String),
 }
 
-fn write_version_convert<'a, F : Write>(f: &mut F, package_mapping: &PackageMap, prev_ver: &BigUint, version: &BigUint, field_type: &model::Type, param: ConvertParam) -> Result<(), GeneratorError> {
+fn write_version_convert<'a, F : Write>(f: &mut F, package_mapping: &PackageMap, prev_ver: &BigUint, version: &BigUint, scope: &model::Scope, field_type: &model::Type, param: ConvertParam) -> Result<(), GeneratorError> {
 	match field_type {
-		model::Type::Defined(_) => {
-			write_type(f, package_mapping, version, field_type)?;
-			match param {
-				ConvertParam::FunctionObject => write!(f, "::")?,
-				ConvertParam::Expression(_) => write!(f, ".")?,
-			}
-			write!(f, "fromV{}", prev_ver)?;
-			if let ConvertParam::Expression(param_str) = param {
-				write!(f, "({})", param_str)?;
+		model::Type::Defined(name, args) => match scope.lookup(name.clone()) {
+			model::ScopeLookup::NamedType(name) => {
+				write_qual_name(f, package_mapping, &name)?;
+				write!(f, ".V{}", version)?;
+				write!(f, ".fromV{}", prev_ver)?;
+				if !args.is_empty() {
+					write!(f, "(")?;
+					for_sep(f, args, |f| write!(f, ", "),
+						|f, arg| write_version_convert(f, package_mapping, prev_ver, version, scope, arg, ConvertParam::FunctionObject))?;
+					write!(f, ")")?;
+				}
+				match param {
+					ConvertParam::FunctionObject => (),
+					ConvertParam::Expression(param_str) => write!(f, "({})", param_str)?,
+				}
+			},
+			model::ScopeLookup::TypeParameter(name) => {
+				write!(f, "{}_conv", name)?;
+				if let ConvertParam::Expression(param_str) = param {
+					write!(f, "({})", param_str)?;
+				}
 			}
 		},
 
@@ -141,12 +188,12 @@ fn write_version_convert<'a, F : Write>(f: &mut F, package_mapping: &PackageMap,
 			match param {
 				ConvertParam::FunctionObject => {
 					write!(f, "{}.Util.mapChunk(", RUNTIME_PACKAGE)?;
-					write_version_convert(f, package_mapping, prev_ver, version, inner, ConvertParam::FunctionObject)?;
+					write_version_convert(f, package_mapping, prev_ver, version, scope, inner, ConvertParam::FunctionObject)?;
 					write!(f, ")")?;
 				},
 				ConvertParam::Expression(param_str) => {
 					write!(f, "{}.map(", param_str)?;
-					write_version_convert(f, package_mapping, prev_ver, version, inner, ConvertParam::FunctionObject)?;
+					write_version_convert(f, package_mapping, prev_ver, version, scope, inner, ConvertParam::FunctionObject)?;
 					write!(f, ")")?;
 				},
 			},
@@ -155,12 +202,12 @@ fn write_version_convert<'a, F : Write>(f: &mut F, package_mapping: &PackageMap,
 			match param {
 				ConvertParam::FunctionObject => {
 					write!(f, "{}.Util.mapOption(", RUNTIME_PACKAGE)?;
-					write_version_convert(f, package_mapping, prev_ver, version, inner, ConvertParam::FunctionObject)?;
+					write_version_convert(f, package_mapping, prev_ver, version, scope, inner, ConvertParam::FunctionObject)?;
 					write!(f, ")")?;
 				},
 				ConvertParam::Expression(param_str) => {
 					write!(f, "{}.map(", param_str)?;
-					write_version_convert(f, package_mapping, prev_ver, version, inner, ConvertParam::FunctionObject)?;
+					write_version_convert(f, package_mapping, prev_ver, version, scope, inner, ConvertParam::FunctionObject)?;
 					write!(f, ")")?;
 				},
 			},
@@ -176,7 +223,7 @@ fn write_version_convert<'a, F : Write>(f: &mut F, package_mapping: &PackageMap,
 }
 
 
-fn write_codec<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
+pub fn write_codec<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, scope: &model::Scope, t: &model::Type) -> Result<(), GeneratorError> {
 	match t {
 		model::Type::Nat => write!(f, "{}.StandardCodecs.natCodec", RUNTIME_PACKAGE)?,
 		model::Type::Int => write!(f, "{}.StandardCodecs.intCodec", RUNTIME_PACKAGE)?,
@@ -193,40 +240,53 @@ fn write_codec<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &Big
 				model::Type::U64 | model::Type::I64 => write!(f, "{}.StandardCodecs.i64ListCodec", RUNTIME_PACKAGE)?,
 				_ => {
 					write!(f, "{}.StandardCodecs.listCodec(", RUNTIME_PACKAGE)?;
-					write_codec(f, package_mapping, version, inner)?;
+					write_codec(f, package_mapping, version, scope, inner)?;
 					write!(f, ")")?
 				},
 			}
 		},
 		model::Type::Option(inner) => {
 			write!(f, "{}.StandardCodecs.option(", RUNTIME_PACKAGE)?;
-			write_codec(f, package_mapping, version, inner)?;
+			write_codec(f, package_mapping, version, scope, inner)?;
 			write!(f, ")")?
 		},
-		model::Type::Defined(_) => {
-			write_type(f, package_mapping, version, t)?;
-			write!(f, ".codec")?;
+		model::Type::Defined(name, args) => match scope.lookup(name.clone()) {
+			model::ScopeLookup::NamedType(name) => {
+				write_qual_name(f, package_mapping, &name)?;
+				write!(f, ".V{}", version)?;
+				write!(f, ".codec")?;
+				if !args.is_empty() {
+					write!(f, "(")?;
+					for_sep(f, args, |f| write!(f, ", "),
+						|f, arg| write_codec(f, package_mapping, version, scope, arg)
+					)?;
+					write!(f, ")")?;
+				}
+			},
+			model::ScopeLookup::TypeParameter(name) => {
+				write!(f, "{}_codec", name)?
+			},
 		},
 	}
 
 	Ok(())
 }
 
-fn write_value_read<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
-	write_codec(f, package_mapping, version, t)?;
+fn write_value_read<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, scope: &model::Scope, t: &model::Type) -> Result<(), GeneratorError> {
+	write_codec(f, package_mapping, version, scope, t)?;
 	write!(f, ".read(reader)")?;
 
 	Ok(())
 }
 
-fn write_value_write<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, t: &model::Type, value: String) -> Result<(), GeneratorError> {
+fn write_value_write<F : Write>(f: &mut F, package_mapping: &PackageMap, version: &BigUint, scope: &model::Scope, t: &model::Type, value: String) -> Result<(), GeneratorError> {
 	match t {
 		model::Type::U8 | model::Type::I8 => write!(f, "writer.writeByte({})", value)?,
 		model::Type::U16 | model::Type::I16 => write!(f, "writer.writeShort({})", value)?,
 		model::Type::U32 | model::Type::I32 => write!(f, "writer.writeInt({})", value)?,
 		model::Type::U64 | model::Type::I64 => write!(f, "writer.writeLong({})", value)?,
 		_ => {
-			write_codec(f, package_mapping, version, t)?;
+			write_codec(f, package_mapping, version, scope, t)?;
 			write!(f, ".write(writer, {})", value)?;
 		},
 	}
@@ -243,14 +303,14 @@ struct ScalaConstGenerator<'opt, 'output, Output> {
 
 
 impl <'opt, 'output, Output: OutputHandler> model::ConstantDefinitionHandler<GeneratorError> for ScalaConstGenerator<'opt, 'output, Output> {
-	fn constant(&mut self, latest_version: &BigUint, name: &model::QualifiedName, constant: &model::Constant, _referenced_types: HashSet<&model::QualifiedName>) -> Result<(), GeneratorError> {
+	fn constant(&mut self, latest_version: &BigUint, name: &model::QualifiedName, scope: &model::Scope, constant: &model::Constant, _referenced_types: HashSet<&model::QualifiedName>) -> Result<(), GeneratorError> {
 		let mut file = open_scala_file(self.options, self.output, name)?;
 
         write_package(&mut file, &self.options.package_mapping, &name.package)?;
 
         writeln!(file, "object {} {{", name.name)?;
         write!(file, "\tval value: ")?;
-        write_type(&mut file, &self.options.package_mapping, latest_version, &constant.value_type)?;
+        write_type(&mut file, &self.options.package_mapping, latest_version, scope, &constant.value_type)?;
         write!(file, " = ")?;
 		write_constant_value(&mut file, &constant.value)?;
 		writeln!(file, ";")?;
@@ -269,24 +329,27 @@ struct ScalaTypeGenerator<'opt, 'output, Output> {
 struct ScalaStructType {}
 struct ScalaEnumType {}
 
-struct ScalaTypeGeneratorState<'opt, 'state, Output: OutputHandler, Extra> {
+struct ScalaTypeGeneratorState<'model, 'opt, 'state, 'scope, Output: OutputHandler, Extra> {
 	options: &'opt ScalaOptions,
 	file: Output::FileHandle<'state>,
+	type_name: &'model model::QualifiedName,
+	type_params: &'model Vec<String>,
+	scope: &'scope model::Scope<'model>,
 	versions: HashSet<BigUint>,
 	_extra: Extra,
 }
 
 trait ScalaExtraGeneratorOps {
 	fn create_extra() -> Self;
-	fn write_versioned_type<F: Write>(f: &mut F, options: &ScalaOptions, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
-	fn write_versioned_type_object_data<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
-	fn write_from_prev_version<F: Write>(f: &mut F, options: &ScalaOptions, prev_ver: &BigUint, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
-	fn write_codec_read<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
-	fn write_codec_write<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_versioned_type<F: Write>(f: &mut F, options: &ScalaOptions, type_name: &model::QualifiedName, version: &BigUint, type_params: &Vec<String>, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_versioned_type_object_data<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_from_prev_version<F: Write>(f: &mut F, options: &ScalaOptions, prev_ver: &BigUint, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_codec_read<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
+	fn write_codec_write<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError>;
 }
 
-impl <'model, 'opt, 'output, 'state, Output: OutputHandler, Extra: ScalaExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, ScalaTypeGenerator<'opt, 'output, Output>, GeneratorError> for ScalaTypeGeneratorState<'opt, 'state, Output, Extra> where 'model : 'state {
-	fn begin(outer: &'state mut ScalaTypeGenerator<'opt, 'output, Output>, type_name: &'model model::QualifiedName, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
+impl <'model, 'opt, 'output, 'state, 'scope, Output: OutputHandler, Extra: ScalaExtraGeneratorOps> model::TypeDefinitionHandlerState<'model, 'state, 'scope, ScalaTypeGenerator<'opt, 'output, Output>, GeneratorError> for ScalaTypeGeneratorState<'model, 'opt, 'state, 'scope, Output, Extra> where 'model : 'state {
+	fn begin(outer: &'state mut ScalaTypeGenerator<'opt, 'output, Output>, type_name: &'model model::QualifiedName, type_params: &'model Vec<String>, scope: &'scope model::Scope<'model>, _referenced_types: HashSet<&'model model::QualifiedName>) -> Result<Self, GeneratorError> {
 		let mut file = open_scala_file(outer.options, outer.output, type_name)?;
 
 
@@ -297,41 +360,44 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler, Extra: ScalaExtraGen
 		Ok(ScalaTypeGeneratorState {
 			options: outer.options,
 			file: file,
+			type_name: type_name,
+			type_params: type_params,
+			scope: scope,
 			versions: HashSet::new(),
 			_extra: Extra::create_extra(),
 		})
 	}
 
-	fn versioned_type(&mut self, explicit_version: bool, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn versioned_type(&mut self, explicit_version: bool, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 
 		let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, version.clone()) - 1;
 		let prev_ver = prev_ver.magnitude();
 
-		Extra::write_versioned_type(&mut self.file, &self.options, type_name, version, type_definition)?;
+		Extra::write_versioned_type(&mut self.file, &self.options, self.type_name, version, self.type_params, self.scope, type_definition)?;
 
 		writeln!(self.file, "\tobject V{} {{", version)?;
-		Extra::write_versioned_type_object_data(&mut self.file, &self.options, version, type_definition)?;
+		Extra::write_versioned_type_object_data(&mut self.file, &self.options, version, self.scope, type_definition)?;
 
 
 		if !self.versions.is_empty() {
 			writeln!(self.file, "\t\tdef fromV{}(prev: V{}): V{} =", prev_ver, prev_ver, version)?;
 			if !explicit_version {
-				Extra::write_from_prev_version(&mut self.file, &self.options, prev_ver, version, type_definition)?;
+				Extra::write_from_prev_version(&mut self.file, &self.options, prev_ver, version, self.scope, type_definition)?;
 			}
 			else {
 				write!(self.file, "\t\t\t")?;
-				write_qual_name(&mut self.file, &self.options.package_mapping, type_name)?;
+				write_qual_name(&mut self.file, &self.options.package_mapping, self.type_name)?;
 				writeln!(self.file, "_Conversions.v{}ToV{}(prev);", prev_ver, version)?;
 			}
 		}
 
 		writeln!(self.file, "\t\tval codec: {}.Codec[V{}] = new {}.Codec[V{}] {{", RUNTIME_PACKAGE, version, RUNTIME_PACKAGE, version)?;
 		writeln!(self.file, "\t\t\toverride def read[R, E](reader: {}.FormatReader[R, E]): zio.ZIO[R, E, V{}] =", RUNTIME_PACKAGE, version)?;
-		Extra::write_codec_read(&mut self.file, &self.options, version, type_definition)?;
+		Extra::write_codec_read(&mut self.file, &self.options, version, self.scope, type_definition)?;
 
 
 		writeln!(self.file, "\t\t\toverride def write[R, E](writer: {}.FormatWriter[R, E], value: V{}): zio.ZIO[R, E, Unit] = ", RUNTIME_PACKAGE, version)?;
-		Extra::write_codec_write(&mut self.file, &self.options, version, type_definition)?;
+		Extra::write_codec_write(&mut self.file, &self.options, version, self.scope, type_definition)?;
 
 		writeln!(self.file, "\t\t}}")?;
 
@@ -342,7 +408,7 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler, Extra: ScalaExtraGen
 		Ok(())
 	}
 	
-	fn end(mut self, _type_name: &model::QualifiedName) -> Result<(), GeneratorError> {
+	fn end(mut self) -> Result<(), GeneratorError> {
 		writeln!(self.file, "}}")?;
 		Ok(())
 	}
@@ -353,12 +419,14 @@ impl ScalaExtraGeneratorOps for ScalaStructType {
 		ScalaStructType {}
 	}
 
-	fn write_versioned_type<F: Write>(f: &mut F, options: &ScalaOptions, type_name: &model::QualifiedName, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
-		writeln!(f, "\tfinal case class V{}(", version)?;
+	fn write_versioned_type<F: Write>(f: &mut F, options: &ScalaOptions, type_name: &model::QualifiedName, version: &BigUint, type_params: &Vec<String>, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		write!(f, "\tfinal case class V{}", version)?;
+		write_type_params(f, type_params)?;
+		writeln!(f, "(")?;
 
 		for (field_name, field) in &type_definition.fields {
 			write!(f, "\t\t{}: ", field_name)?;
-			write_type(f, &options.package_mapping, version, &field.field_type)?;
+			write_type(f, &options.package_mapping, version, scope, &field.field_type)?;
 			writeln!(f, ",")?;
 		}
 
@@ -367,11 +435,11 @@ impl ScalaExtraGeneratorOps for ScalaStructType {
 		Ok(())
 	}
 
-	fn write_versioned_type_object_data<F: Write>(_f: &mut F, _options: &ScalaOptions, _version: &BigUint, _type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_versioned_type_object_data<F: Write>(_f: &mut F, _options: &ScalaOptions, _version: &BigUint, _scope: &model::Scope, _type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		Ok(())
 	}
 
-	fn write_from_prev_version<F: Write>(f: &mut F, options: &ScalaOptions, prev_ver: &BigUint, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_from_prev_version<F: Write>(f: &mut F, options: &ScalaOptions, prev_ver: &BigUint, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		if type_definition.fields.is_empty() {
 			writeln!(f, "\t\t\tV{}()", version)?;
 		}
@@ -379,7 +447,7 @@ impl ScalaExtraGeneratorOps for ScalaStructType {
 			writeln!(f, "\t\t\tV{}(", version)?;
 			for (field_name, field) in &type_definition.fields {
 				write!(f, "\t\t\t\t")?;
-				write_version_convert(f, &options.package_mapping, prev_ver, version, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
+				write_version_convert(f, &options.package_mapping, prev_ver, version, scope, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
 				writeln!(f, ",")?;
 			}
 			writeln!(f, "\t\t\t)")?;
@@ -388,7 +456,7 @@ impl ScalaExtraGeneratorOps for ScalaStructType {
 		Ok(())
 	}
 
-	fn write_codec_read<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_codec_read<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		if type_definition.fields.is_empty() {
 			writeln!(f, "\t\t\tzio.IO.succeed(V{}())", version)?;
 		}
@@ -396,7 +464,7 @@ impl ScalaExtraGeneratorOps for ScalaStructType {
 			writeln!(f, "\t\t\t\tfor {{")?;
 			for (field_name, field) in &type_definition.fields {
 				write!(f, "\t\t\t\t\tfield_{} <- ", field_name)?;
-				write_value_read(f, &options.package_mapping, version, &field.field_type)?;
+				write_value_read(f, &options.package_mapping, version, scope, &field.field_type)?;
 				writeln!(f, "")?;
 			}
 			writeln!(f, "\t\t\t\t}} yield V{}(", version)?;
@@ -409,7 +477,7 @@ impl ScalaExtraGeneratorOps for ScalaStructType {
 		Ok(())
 	}
 
-	fn write_codec_write<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_codec_write<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		if type_definition.fields.is_empty() {
 			writeln!(f, "\t\t\t\tzio.IO.unit")?;
 		}
@@ -417,7 +485,7 @@ impl ScalaExtraGeneratorOps for ScalaStructType {
 			writeln!(f, "\t\t\t\tfor {{")?;
 			for (field_name, field) in &type_definition.fields {
 				write!(f, "\t\t\t\t\t_ <- ")?;
-				write_value_write(f, &options.package_mapping, version, &field.field_type, format!("value.{}", field_name))?;
+				write_value_write(f, &options.package_mapping, version, scope, &field.field_type, format!("value.{}", field_name))?;
 				writeln!(f, "")?;
 			}
 			writeln!(f, "\t\t\t\t}} yield ()")?;
@@ -432,22 +500,24 @@ impl ScalaExtraGeneratorOps for ScalaEnumType {
 		ScalaEnumType {}
 	}
 
-	fn write_versioned_type<F: Write>(f: &mut F, _options: &ScalaOptions, type_name: &model::QualifiedName, version: &BigUint, _type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
-		writeln!(f, "\tsealed abstract class V{} extends {}", version, type_name.name)?;
+	fn write_versioned_type<F: Write>(f: &mut F, _options: &ScalaOptions, type_name: &model::QualifiedName, version: &BigUint, type_params: &Vec<String>, _scope: &model::Scope, _type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+		writeln!(f, "\tsealed abstract class V{}", version)?;
+		write_type_params(f, type_params)?;
+		writeln!(f, " extends {}", type_name.name)?;
 		Ok(())
 	}
 
-	fn write_versioned_type_object_data<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_versioned_type_object_data<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		for (field_name, field) in &type_definition.fields {
 			write!(f, "\t\tfinal case class {}({}: ", field_name, field_name)?;
-			write_type(f, &options.package_mapping, version, &field.field_type)?;
+			write_type(f, &options.package_mapping, version, scope, &field.field_type)?;
 			writeln!(f, ") extends V{}", version)?;
 		}
 
 		Ok(())
 	}
 
-	fn write_from_prev_version<F: Write>(f: &mut F, options: &ScalaOptions, prev_ver: &BigUint, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_from_prev_version<F: Write>(f: &mut F, options: &ScalaOptions, prev_ver: &BigUint, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		if type_definition.fields.is_empty() {
 			writeln!(f, "\t\t\tthrow new IllegalArgumentException();")?;
 		}
@@ -455,7 +525,7 @@ impl ScalaExtraGeneratorOps for ScalaEnumType {
 			writeln!(f, "\t\t\tprev match {{")?;
 			for (field_name, field) in &type_definition.fields {
 				write!(f, "\t\t\t\tcase prev: V{}.{} => V{}.{}(", prev_ver, field_name, version, field_name)?;
-				write_version_convert(f, &options.package_mapping, prev_ver, version, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
+				write_version_convert(f, &options.package_mapping, prev_ver, version, scope, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
 				writeln!(f, ")")?;
 			}
 			writeln!(f, "\t\t\t}}")?;
@@ -464,12 +534,12 @@ impl ScalaExtraGeneratorOps for ScalaEnumType {
 		Ok(())
 	}
 
-	fn write_codec_read<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_codec_read<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		writeln!(f, "\t\t\t\t{}.StandardCodecs.natCodec.read(reader).flatMap {{", RUNTIME_PACKAGE)?;
 		for (index, (field_name, field)) in type_definition.fields.iter().enumerate() {
 			writeln!(f, "\t\t\t\t\tcase {}.Util.BigIntValue({}) =>", RUNTIME_PACKAGE, index)?;
 			write!(f, "\t\t\t\t\t\t")?;
-			write_value_read(f, &options.package_mapping, version, &field.field_type)?;
+			write_value_read(f, &options.package_mapping, version, scope, &field.field_type)?;
 			writeln!(f, ".map(V{}.{}.apply)", version, field_name)?;
 		}
 		writeln!(f, "\t\t\t\t\tcase _ => zio.IO.die(new java.lang.RuntimeException(\"Invalid tag number.\"))")?;
@@ -478,7 +548,7 @@ impl ScalaExtraGeneratorOps for ScalaEnumType {
 		Ok(())
 	}
 
-	fn write_codec_write<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
+	fn write_codec_write<F: Write>(f: &mut F, options: &ScalaOptions, version: &BigUint, scope: &model::Scope, type_definition: &model::VersionedTypeDefinition) -> Result<(), GeneratorError> {
 		if type_definition.fields.is_empty() {
 			writeln!(f, "\t\t\t\tzio.IO.die(new IllegalArgumentException())")?;
 		}
@@ -489,7 +559,7 @@ impl ScalaExtraGeneratorOps for ScalaEnumType {
 				writeln!(f, "\t\t\t\t\t\tfor {{")?;
 				writeln!(f, "\t\t\t\t\t\t\t_ <- {}.StandardCodecs.natCodec.write(writer, {})", RUNTIME_PACKAGE, index)?;
 				write!(f, "\t\t\t\t\t\t\t_ <- ")?;
-				write_value_write(f, &options.package_mapping, version, &field.field_type, format!("value.{}", field_name))?;
+				write_value_write(f, &options.package_mapping, version, scope, &field.field_type, format!("value.{}", field_name))?;
 				writeln!(f, "")?;
 				writeln!(f, "\t\t\t\t\t\t}} yield ()")?;
 			}
@@ -502,8 +572,8 @@ impl ScalaExtraGeneratorOps for ScalaEnumType {
 
 
 impl <'model, 'opt, 'output, Output: OutputHandler> model::TypeDefinitionHandler<'model, GeneratorError> for ScalaTypeGenerator<'opt, 'output, Output> {
-	type StructHandlerState<'state> where 'model : 'state = ScalaTypeGeneratorState<'opt, 'state, Output, ScalaStructType>;
-	type EnumHandlerState<'state> where 'model : 'state = ScalaTypeGeneratorState<'opt, 'state, Output, ScalaEnumType>;
+	type StructHandlerState<'state, 'scope> where 'model : 'scope, 'scope : 'state = ScalaTypeGeneratorState<'model, 'opt, 'state, 'scope, Output, ScalaStructType>;
+	type EnumHandlerState<'state, 'scope> where 'model : 'scope, 'scope : 'state = ScalaTypeGeneratorState<'model, 'opt, 'state, 'scope, Output, ScalaEnumType>;
 }
 
 
@@ -568,11 +638,6 @@ impl Language for ScalaLanguage {
 		model.iter_types(&mut type_gen)?;
 
 		Ok(())
-	}
-
-
-	fn write_codec<F: Write>(file: &mut F, options: &Self::Options, version: &BigUint, _type_name: Option<&model::QualifiedName>, t: &model::Type) -> Result<(), GeneratorError> {
-		write_codec(file, &options.package_mapping, version, t)
 	}
 
 }

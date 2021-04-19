@@ -1,0 +1,30 @@
+version 4;
+package enum.versions;
+
+
+enum Either(A, B) {
+    version 1 {
+        left: A;
+        right: B;
+    }
+
+    version 4 {
+        left: A;
+        right: B;
+        other: string;
+    }
+}
+
+struct Pair(A, B) {
+    version 1 {
+        left: A;
+        right: B;
+    }
+
+    version 4 {
+        left: A;
+        right: B;
+        other: string;
+    }
+}
+

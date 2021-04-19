@@ -1,4 +1,4 @@
-use crate::model::{Type, QualifiedName, Verilization, VersionedTypeDefinition, TypeDefinitionHandler, TypeDefinitionHandlerState};
+use crate::model::{Type, QualifiedName, Verilization, VersionedTypeDefinition, TypeDefinitionHandler, TypeDefinitionHandlerState, Scope, ScopeLookup};
 use num_bigint::BigUint;
 use std::collections::HashSet;
 
@@ -6,57 +6,87 @@ use std::collections::HashSet;
 pub enum TypeCheckError {
     TypeNotDefined(QualifiedName),
     TypeAddedInNewerVersion(QualifiedName, BigUint),
+    ArityMismatch(usize, usize),
 }
 
 struct TypeCheck<'a> {
     verilization: &'a Verilization,
 }
 
-
-fn check_type(verilization: &Verilization, version: &BigUint, t: &Type) -> Result<(), TypeCheckError> {
-    match t {
-        Type::Defined(name) => {
-            if !verilization.has_type(name) {
-                Err(TypeCheckError::TypeNotDefined(name.clone()))
-            }
-            else if !verilization.has_type_in_version(name, version) {
-                Err(TypeCheckError::TypeAddedInNewerVersion(name.clone(), version.clone()))
-            }
-            else {
-                Ok(())
-            }
-        },
-        Type::List(inner) => check_type(verilization, version, inner),
-        Type::Option(inner) => check_type(verilization, version, inner),
-        _ => Ok(())
-    }
+struct TypeCheckType<'model, 'scope> {
+    verilization: &'model Verilization,
+    scope: &'scope Scope<'model>,
 }
 
-impl <'model, 'state> TypeDefinitionHandlerState<'model, 'state, TypeCheck<'model>, TypeCheckError> for TypeCheck<'model> where 'model : 'state {
-    fn begin(outer: &'state mut TypeCheck<'model>, _type_name: &QualifiedName, _referenced_types: HashSet<&QualifiedName>) -> Result<Self, TypeCheckError> {
-        Ok(TypeCheck {
+impl <'model, 'scope> TypeCheckType<'model, 'scope> {
+
+    fn check_type(&self, version: &BigUint, t: &Type) -> Result<(), TypeCheckError> {
+        match t {
+            Type::Defined(name, args) => match self.scope.lookup(name.clone()) {
+                ScopeLookup::NamedType(name) => {
+                    let t = match self.verilization.get_type(&name) {
+                        Some(t) => t,
+                        None => return Err(TypeCheckError::TypeNotDefined(name)),
+                    };
+    
+                    if !t.has_version(version) {
+                        return Err(TypeCheckError::TypeAddedInNewerVersion(name, version.clone()));
+                    }
+        
+                    let arity = t.arity();
+                    if arity != args.len() {
+                        return Err(TypeCheckError::ArityMismatch(arity, args.len()));
+                    }
+        
+                    for arg in args {
+                        self.check_type(version, arg)?;
+                    }
+    
+                    Ok(())
+                },
+                ScopeLookup::TypeParameter(_) => {
+                    if args.len() != 0 {
+                        return Err(TypeCheckError::ArityMismatch(0, args.len()));
+                    }
+
+                    Ok(())
+                }
+            },
+            Type::List(inner) => self.check_type(version, inner),
+            Type::Option(inner) => self.check_type(version, inner),
+            _ => Ok(())
+        }
+    }
+    
+}
+
+
+impl <'model, 'state, 'scope> TypeDefinitionHandlerState<'model, 'state, 'scope, TypeCheck<'model>, TypeCheckError> for TypeCheckType<'model, 'scope> where 'model : 'state {
+    fn begin(outer: &'state mut TypeCheck<'model>, _type_name: &QualifiedName, _type_params: &'model Vec<String>, scope: &'scope Scope<'model>,  _referenced_types: HashSet<&QualifiedName>) -> Result<Self, TypeCheckError> {
+        Ok(TypeCheckType {
             verilization: outer.verilization,
+            scope: scope,
         })
     }
 
-	fn versioned_type(&mut self, _explicit_version: bool, _type_name: &QualifiedName, version: &BigUint, type_definition: &VersionedTypeDefinition) -> Result<(), TypeCheckError> {
+	fn versioned_type(&mut self, _explicit_version: bool, version: &BigUint, type_definition: &VersionedTypeDefinition) -> Result<(), TypeCheckError> {
 
         for (_, field) in &type_definition.fields {
-            check_type(self.verilization, version, &field.field_type)?
+            self.check_type(version, &field.field_type)?
         }
 
         Ok(())
     }
 	
-    fn end(self, _struct_name: &QualifiedName) -> Result<(), TypeCheckError> {
+    fn end(self) -> Result<(), TypeCheckError> {
         Ok(())
     }
 
 }
 
 impl <'model> TypeDefinitionHandler<'model, TypeCheckError> for TypeCheck<'model> {
-    type StructHandlerState<'state> where 'model : 'state = TypeCheck<'model>;
-    type EnumHandlerState<'state> where 'model : 'state = TypeCheck<'model>;
+    type StructHandlerState<'state, 'scope> where 'model : 'scope, 'scope : 'state = TypeCheckType<'model, 'scope>;
+    type EnumHandlerState<'state, 'scope> where 'model : 'scope, 'scope : 'state = TypeCheckType<'model, 'scope>;
 }
 
 
