@@ -492,13 +492,13 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> TSTypeGenera
 			writeln!(self.file, "> {{ return {{")?;
 		}
 
-		writeln!(self.file, "\t\tasync read(reader: FormatReader): Promise<V{}", version)?;
+		write!(self.file, "\t\tasync read(reader: FormatReader): Promise<V{}", version)?;
 		self.write_type_params()?;
 		writeln!(self.file, "> {{")?;
 		self.write_codec_read(ver_type)?;
 		writeln!(self.file, "\t\t}},")?;
 
-		writeln!(self.file, "\t\tasync write(writer: FormatWriter, value: V{}", version)?;
+		write!(self.file, "\t\tasync write(writer: FormatWriter, value: V{}", version)?;
 		self.write_type_params()?;
 		writeln!(self.file, "): Promise<void> {{")?;
 		self.write_codec_write(ver_type)?;
