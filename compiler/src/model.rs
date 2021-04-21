@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::iter::FromIterator;
 use std::cmp::{Ord, Ordering, PartialEq, PartialOrd};
+use lazy_static::lazy_static;
+use std::marker::PhantomData;
 
 /// A dot-separated package.
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -39,13 +41,9 @@ impl PackageName {
 
 impl fmt::Display for PackageName {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let mut iter = self.package.iter();
-		if let Some(item) = iter.next() {
+		for_sep!(item, &self.package, { write!(f, ".")?; }, {
 			write!(f, "{}", item)?;
-			while let Some(item) = iter.next() {
-				write!(f, ".{}", item)?
-			}
-		}
+		});
 		Ok(())
 	}
 }
@@ -131,16 +129,85 @@ pub enum Type {
 	Defined(QualifiedName, Vec<Type>),
 }
 
+// Attaches a name to something.
+pub struct Named<'a, A> {
+	model: &'a Verilization,
+	name: &'a QualifiedName,
+	value: &'a A,
+}
+
+impl <'a, A> Clone for Named<'a, A> {
+	fn clone(&self) -> Self {
+		Named {
+			model: self.model,
+			name: self.name,
+			value: self.value,
+		}
+	}
+}
+
+impl <'a, A> Copy for Named<'a, A> {}
+
+impl <'a, A> Named<'a, A> {
+	fn new(model: &'a Verilization, name: &'a QualifiedName, value: &'a A) -> Named<'a, A> {
+		Named {
+			model: model,
+			name: name,
+			value: value,
+		}
+	}
+
+	pub fn name(&self) -> &'a QualifiedName {
+		self.name
+	}
+}
+
 /// The value of a constant.
 pub enum ConstantValue {
 	Integer(BigInt),
+}
+
+pub struct ConstantVersionInfo<'a> {
+	pub version: BigUint,
+	pub value: Option<&'a ConstantValue>,
+
+	dummy: PhantomData<()>,
 }
 
 /// A constant definition.
 pub struct Constant {
 	pub imports: HashMap<String, ScopeLookup>,
 	pub value_type: Type,
-	pub value: ConstantValue,
+	pub versions: HashMap<BigUint, ConstantValue>,
+}
+
+impl <'a> Named<'a, Constant> {
+
+	pub fn value_type(self) -> &'a Type {
+		&self.value.value_type
+	}
+
+	pub fn referenced_types(self) -> ReferencedTypeIterator<'a> {
+		ReferencedTypeIterator::from_type(&self.value.value_type)
+	}
+
+	pub fn versions(self) -> ConstantVersionIterator<'a> {
+		ConstantVersionIterator {
+			constant: self,
+			version: BigUint::one(),
+			has_prev_version: false,
+		}
+	}
+
+	pub fn scope(self) -> Scope<'a> {
+		Scope {
+			model: self.model,
+			current_pkg: Some(&self.name.package),
+			imports: Some(&self.value.imports),
+			type_params: None,
+		}
+	}
+
 }
 
 /// A field of a struct or enum. An enum field represents a single case.
@@ -153,6 +220,14 @@ pub struct VersionedTypeDefinition {
 	pub fields: Vec<(String, FieldInfo)>,
 }
 
+pub struct TypeVersionInfo<'a> {
+	pub version: BigUint,
+	pub explicit_version: bool,
+	pub ver_type: &'a VersionedTypeDefinition,
+
+	dummy: PhantomData<()>,
+}
+
 /// A struct defines a product type. A struct can be defined differently in different format versions.
 pub struct TypeDefinitionData {
 	pub imports: HashMap<String, ScopeLookup>,
@@ -160,15 +235,80 @@ pub struct TypeDefinitionData {
 	pub versions: HashMap<BigUint, VersionedTypeDefinition>,
 }
 
-/// An enum defines a sum type. An enum can be defined differently in different format versions.
-pub struct EnumDefinition {
-	pub versions: HashMap<BigUint, VersionedTypeDefinition>,
+impl <'a> Named<'a, TypeDefinitionData> {
+	pub fn versioned(self, version: &BigUint) -> Option<TypeVersionInfo<'a>> {
+		self.value.versions.iter()
+			.filter(|(ver, _)| ver <= &version)
+			.max_by_key(|(ver, _)| ver.clone())
+			.map(|(actual_ver, ver_type)| {
+				TypeVersionInfo {
+					version: version.clone(),
+					explicit_version: version == actual_ver,
+					ver_type: ver_type,
+					dummy: PhantomData {},
+				}
+			})
+	}
+
+	pub fn referenced_types(self) -> ReferencedTypeIterator<'a> {
+		ReferencedTypeIterator::from_versions(&self.value.versions)
+	}
+
+	pub fn versions(self) -> TypeVersionIterator<'a> {
+		TypeVersionIterator {
+			type_def: self,
+			version: BigUint::one(),
+			last_seen_version: None,
+		}
+	}
+
+	pub fn scope(self) -> Scope<'a> {
+		Scope {
+			model: self.model,
+			current_pkg: Some(&self.name.package),
+			imports: Some(&self.value.imports),
+			type_params: Some(&self.value.type_params),
+		}
+	}
+
+	pub fn type_params(self) -> &'a Vec<String> {
+		&self.value.type_params
+	}
 }
 
 /// A definition of a type. Either a struct or enum.
 pub enum TypeDefinition {
 	StructType(TypeDefinitionData),
 	EnumType(TypeDefinitionData),
+}
+
+#[derive(Copy, Clone)]
+pub enum NamedTypeDefinition<'a> {
+	StructType(Named<'a, TypeDefinitionData>),
+	EnumType(Named<'a, TypeDefinitionData>),
+}
+
+impl <'a> NamedTypeDefinition<'a> {
+	pub fn name(&self) -> &'a QualifiedName {
+		match self {
+			NamedTypeDefinition::StructType(t) => t.name,
+			NamedTypeDefinition::EnumType(t) => t.name,
+		}
+	}
+
+	pub fn arity(self) -> usize {
+		match self {
+			NamedTypeDefinition::StructType(t) => t.value.type_params.len(),
+			NamedTypeDefinition::EnumType(t) => t.value.type_params.len(),
+		}
+	}
+
+	pub fn has_version(self, version: &BigUint) -> bool {
+		match self {
+			NamedTypeDefinition::StructType(t) => t.versioned(version).is_some(),
+			NamedTypeDefinition::EnumType(t) => t.versioned(version).is_some(),
+		}
+	}
 }
 
 /// Metadata about the format.
@@ -191,121 +331,51 @@ pub enum ScopeLookup {
 
 pub struct Scope<'a> {
 	model: &'a Verilization,
-	current_pkg: &'a PackageName,
-	imports: &'a HashMap<String, ScopeLookup>,
-	type_params: &'a Vec<String>,
+	current_pkg: Option<&'a PackageName>,
+	imports: Option<&'a HashMap<String, ScopeLookup>>,
+	type_params: Option<&'a Vec<String>>,
 }
 
 impl <'a> Scope<'a> {
+	pub fn empty(model: &'a Verilization) -> Self {
+		Scope {
+			model: model,
+			current_pkg: None,
+			imports: None,
+			type_params: None,
+		}
+	}
+
 	pub fn lookup(&self, mut name: QualifiedName) -> ScopeLookup {
 		if name.package.package.is_empty() {
-			if self.type_params.contains(&name.name) {
-				return ScopeLookup::TypeParameter(name.name);
+			if let Some(type_params) = self.type_params {
+				if type_params.contains(&name.name) {
+					return ScopeLookup::TypeParameter(name.name);
+				}
 			}
 
-			if let Some(import) = self.imports.get(&name.name) {
+			if let Some(import) = self.imports.and_then(|imports| imports.get(&name.name)) {
 				return import.clone();
 			}
 
-			let current_pkg_name = QualifiedName {
-				package: self.current_pkg.clone(),
-				name: name.name,
-			};
-
-			if self.model.has_type(&current_pkg_name) {
-				return ScopeLookup::NamedType(current_pkg_name);
+			if let Some(current_pkg) = self.current_pkg {
+				let current_pkg_name = QualifiedName {
+					package: current_pkg.clone(),
+					name: name.name,
+				};
+	
+				if self.model.has_type(&current_pkg_name) {
+					return ScopeLookup::NamedType(current_pkg_name);
+				}
+	
+				name.name = current_pkg_name.name; // restore name because current_pkg_name is not a type
 			}
-
-			name.name = current_pkg_name.name; // restore name because current_pkg_name is not a type
 		}
 
 		ScopeLookup::NamedType(name)
 	}
 }
 
-/// Handler for iterating constant definitions.
-pub trait ConstantDefinitionHandler<E> {
-	/// Called for the definition of a constant.
-	fn constant(&mut self, latest_version: &BigUint, name: &QualifiedName, scope: &Scope, constant: &Constant, referenced_types: HashSet<&QualifiedName>) -> Result<(), E>;
-}
-
-pub trait TypeDefinitionHandlerState<'model, 'state, 'scope, Outer, E> : Sized where Outer : TypeDefinitionHandler<'model, E>, 'model : 'state {
-	fn begin(outer: &'state mut Outer, type_name: &'model QualifiedName, type_params: &'model Vec<String>, scope: &'scope Scope<'model>, referenced_types: HashSet<&'model QualifiedName>) -> Result<Self, E>;
-	fn versioned_type(&mut self, explicit_version: bool, version: &BigUint, type_definition: &'model VersionedTypeDefinition) -> Result<(), E>;
-	fn end(self) -> Result<(), E>;
-}
-
-pub trait TypeDefinitionHandler<'model, E> : Sized {
-	type StructHandlerState<'state, 'scope> : TypeDefinitionHandlerState<'model, 'state, 'scope, Self, E> where 'model : 'scope, 'scope : 'state;
-	type EnumHandlerState<'state, 'scope> : TypeDefinitionHandlerState<'model, 'state, 'scope, Self, E> where 'model : 'scope, 'scope : 'state;
-}
-
-trait HandlerStateSelector<'model, E, Outer : TypeDefinitionHandler<'model, E>> {
-	type HandlerState<'state, 'scope> : TypeDefinitionHandlerState<'model, 'state, 'scope, Outer, E> where 'model : 'scope, 'scope : 'state;
-}
-
-struct StructSelector {}
-impl <'model, E, Handler : TypeDefinitionHandler<'model, E>> HandlerStateSelector<'model, E, Handler> for StructSelector {
-	type HandlerState<'state, 'scope> where 'model : 'scope, 'scope : 'state = Handler::StructHandlerState<'state, 'scope>;
-}
-
-struct EnumSelector {}
-impl <'model, E, Handler : TypeDefinitionHandler<'model, E>> HandlerStateSelector<'model, E, Handler> for EnumSelector {
-	type HandlerState<'state, 'scope> where 'model : 'scope, 'scope : 'state = Handler::EnumHandlerState<'state, 'scope>;
-}
-
-fn find_defined_type<'a>(t: &'a Type, types: &mut HashSet<&'a QualifiedName>) {
-	match t {
-		Type::Defined(name, args) => {
-			types.insert(&name);
-			for arg in args {
-				find_defined_type(arg, types);
-			}
-		},
-		Type::List(inner) => find_defined_type(inner, types),
-		Type::Option(inner) => find_defined_type(inner, types),
-		_ => (),
-	}
-}
-
-
-fn find_referenced_types(versions: &HashMap<BigUint, VersionedTypeDefinition>) -> HashSet<&QualifiedName> {
-	let mut names = HashSet::new();
-
-	for ver_type in versions.values() {
-		for (_, field) in &ver_type.fields {
-			find_defined_type(&field.field_type, &mut names)
-		}
-	}
-
-	names
-}
-
-impl TypeDefinition {
-	pub fn arity(&self) -> usize {
-		match self {
-			TypeDefinition::StructType(t) => t.type_params.len(),
-			TypeDefinition::EnumType(t) => t.type_params.len(),
-		}
-	}
-
-	pub fn has_version(&self, version: &BigUint) -> bool {
-		match self {
-			TypeDefinition::StructType(t) => t.versioned(version).is_some(),
-			TypeDefinition::EnumType(t) => t.versioned(version).is_some(),
-		}
-	}
-}
-
-impl TypeDefinitionData {
-	pub fn versioned<'a>(&'a self, version: &BigUint) -> Option<&'a VersionedTypeDefinition> {
-		let (_, ver_type) = self.versions.iter()
-			.filter(|(ver, _)| ver <= &version)
-			.max_by_key(|(ver, _)| ver.clone())?;
-
-		Some(ver_type)
-	}
-}
 
 impl Verilization {
 
@@ -340,8 +410,13 @@ impl Verilization {
 		}
 	}
 
-	pub fn get_type<'a>(&'a self, name: &QualifiedName) -> Option<&'a TypeDefinition> {
-		self.type_definitions.get(name)
+	pub fn get_type<'a>(&'a self, name: &QualifiedName) -> Option<NamedTypeDefinition<'a>> {
+		let (name, t) = self.type_definitions.get_key_value(name)?;
+
+		Some(match t {
+			TypeDefinition::StructType(t) => NamedTypeDefinition::StructType(Named::new(self, name, t)),
+			TypeDefinition::EnumType(t) => NamedTypeDefinition::EnumType(Named::new(self, name, t)),
+		})
 	}
 
 	pub fn has_type<'a>(&'a self, name: &QualifiedName) -> bool {
@@ -361,72 +436,200 @@ impl Verilization {
 	}
 
 
-	// Iterate constants using the provided handler.
-	pub fn iter_constants<E, Handler : ConstantDefinitionHandler<E>>(&self, handler: &mut Handler) -> Result<(), E> {
-		for (name, constant) in &self.constants {
-			let type_params = Vec::new();
-			let scope = Scope {
-				model: self,
-				current_pkg: &name.package,
-				imports: &constant.imports,
-				type_params: &type_params,
-			};
-
-			let mut referenced_types = HashSet::new();
-			find_defined_type(&constant.value_type, &mut referenced_types);
-			handler.constant(&self.metadata.latest_version, &name, &scope, &constant, referenced_types)?
+	// Iterate constants.
+	pub fn constants<'a>(&'a self) -> ConstantIterator<'a> {
+		ConstantIterator {
+			model: self,
+			iter: self.constants.iter(),
 		}
-
-		Ok(())
 	}
 
-	// Iterates type definitions using the provided handler.
-	pub fn iter_types<'model, E, Handler : TypeDefinitionHandler<'model, E>>(&'model self, handler: &mut Handler) -> Result<(), E> {
-		let latest_version = &self.metadata.latest_version;
-
-		for (name, t) in &self.type_definitions {
-
-			fn handle_type<'model, 'state, E, Handler : TypeDefinitionHandler<'model, E>, Selector : HandlerStateSelector<'model, E, Handler>>(handler: &'state mut Handler, model: &'model Verilization, latest_version: &BigUint, name: &'model QualifiedName, type_def: &'model TypeDefinitionData) -> Result<(), E> where 'model : 'state {
-				let scope = Scope {
-					model: model,
-					current_pkg: &name.package,
-					imports: &type_def.imports,
-					type_params: &type_def.type_params,
-				};
-				
-				let referenced_types = find_referenced_types(&type_def.versions);
-				let mut state = Selector::HandlerState::<'_, '_>::begin(handler, name, &type_def.type_params, &scope, referenced_types)?;
-				
-				let mut version = BigUint::one();
-				let mut last_seen_version = None;
-				while version <= *latest_version {
-					
-					if let Some(ver_struct) = type_def.versions.get(&version) {
-						state.versioned_type(true, &version, &ver_struct)?;
-						last_seen_version = Some(ver_struct);
-					}
-					else if let Some(ver_struct) = last_seen_version {
-						state.versioned_type(false, &version, &ver_struct)?;
-					}
-					
-					version = version + BigUint::one();
-				}
-
-				state.end()?;
-
-				Ok(())
-			}
-
-
-			match t {
-				TypeDefinition::StructType(struct_def) => handle_type::<_, _, StructSelector>(handler, self, latest_version, &name, &struct_def)?,
-				TypeDefinition::EnumType(enum_def) => handle_type::<_, _, EnumSelector>(handler, self, latest_version, &name, &enum_def)?,
-			}
+	pub fn types<'a>(&'a self) -> TypeIterator<'a> {
+		TypeIterator {
+			model: self,
+			iter: self.type_definitions.iter(),
 		}
-
-		Ok(())
 	}
 
 }
 
 
+
+// Iterators
+
+pub struct ConstantIterator<'a> {
+	model: &'a Verilization,
+	iter: std::collections::hash_map::Iter<'a, QualifiedName, Constant>,
+}
+
+impl <'a> Iterator for ConstantIterator<'a> {
+	type Item = Named<'a, Constant>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.iter.next().map(|(name, constant)| Named::new(self.model, name, constant))
+	}
+}
+
+pub struct ConstantVersionIterator<'a> {
+	constant: Named<'a, Constant>,
+	version: BigUint,
+	has_prev_version: bool,
+}
+
+impl <'a> Iterator for ConstantVersionIterator<'a> {
+	type Item = ConstantVersionInfo<'a>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let latest_version = &self.constant.model.metadata.latest_version;
+		while self.version <= *latest_version {
+			let version = self.version.clone();
+			self.version += BigUint::one();
+			
+			if let Some(ver_type) = self.constant.value.versions.get(&version) {
+				self.has_prev_version = true;
+				return Some(ConstantVersionInfo {
+					version: version,
+					value: Some(ver_type),
+					dummy: PhantomData {},
+				});
+			}
+			else if self.has_prev_version {
+				return Some(ConstantVersionInfo {
+					version: version,
+					value: None,
+					dummy: PhantomData {},
+				});
+			}
+		}
+
+		None
+	}
+}
+
+pub struct TypeIterator<'a> {
+	model: &'a Verilization,
+	iter: std::collections::hash_map::Iter<'a, QualifiedName, TypeDefinition>,
+}
+
+impl <'a> Iterator for TypeIterator<'a> {
+	type Item = NamedTypeDefinition<'a>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.iter.next().map(|(name, t)| match t {
+			TypeDefinition::StructType(t) => NamedTypeDefinition::StructType(Named::new(self.model, name, t)),
+			TypeDefinition::EnumType(t) => NamedTypeDefinition::EnumType(Named::new(self.model, name, t)),
+		})
+	}
+}
+
+pub struct TypeVersionIterator<'a> {
+	type_def: Named<'a, TypeDefinitionData>,
+	version: BigUint,
+	last_seen_version: Option<&'a VersionedTypeDefinition>,
+}
+
+impl <'a> Iterator for TypeVersionIterator<'a> {
+	type Item = TypeVersionInfo<'a>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let latest_version = &self.type_def.model.metadata.latest_version;
+		while self.version <= *latest_version {
+			let version = self.version.clone();
+			self.version += BigUint::one();
+			
+			if let Some(ver_type) = self.type_def.value.versions.get(&version) {
+				self.last_seen_version = Some(ver_type);
+				return Some(TypeVersionInfo {
+					version: version,
+					explicit_version: true,
+					ver_type: ver_type,
+					dummy: PhantomData {},
+				});
+			}
+			else if let Some(ver_type) = self.last_seen_version {
+				return Some(TypeVersionInfo {
+					version: version,
+					explicit_version: false,
+					ver_type: ver_type,
+					dummy: PhantomData {},
+				});
+			}
+		}
+
+		None
+	}
+}
+
+
+pub struct ReferencedTypeIterator<'a> {
+	seen_types: HashSet<&'a QualifiedName>,
+	ver_iter: std::collections::hash_map::Values<'a, BigUint, VersionedTypeDefinition>,
+	field_iter: std::slice::Iter<'a, (String, FieldInfo)>,
+	arg_iters: Vec<std::slice::Iter<'a, Type>>,
+}
+
+lazy_static! {
+	static ref REF_TYPE_ITER_EMPTY_VER_MAP: HashMap<BigUint, VersionedTypeDefinition> = HashMap::new();
+}
+const REF_TYPE_ITER_EMPTY_FIELD_SLICE: &[(String, FieldInfo)] = &[];
+
+fn find_defined_type_iter<'a>(t: &'a Type) -> Option<(&'a QualifiedName, &'a Vec<Type>)> {
+	match t {
+		Type::Defined(name, args) => Some((name, args)),
+		Type::List(inner) => find_defined_type_iter(inner),
+		Type::Option(inner) => find_defined_type_iter(inner),
+		_ => None,
+	}
+}
+
+impl <'a> Iterator for ReferencedTypeIterator<'a> {
+	type Item = &'a QualifiedName;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		loop {
+			while let Some(arg_iter) = self.arg_iters.last_mut() {
+				if let Some(arg) = arg_iter.next() {
+					if let Some((name, args)) = find_defined_type_iter(arg) {
+						self.arg_iters.push(args.iter());
+						if self.seen_types.insert(name) {
+							return Some(name);
+						}
+					}
+				}
+				else {
+					self.arg_iters.pop();
+				}
+			}
+
+			if let Some((_, field)) = self.field_iter.next() {
+				self.arg_iters.push(std::slice::from_ref(&field.field_type).iter());
+			}
+			else if let Some(ver_type) = self.ver_iter.next() {
+				self.field_iter = ver_type.fields.iter();
+			}
+			else {
+				return None;
+			}
+		}
+	}
+}
+
+impl <'a> ReferencedTypeIterator<'a> {
+	fn from_versions(versions: &'a HashMap<BigUint, VersionedTypeDefinition>) -> ReferencedTypeIterator<'a> {
+		ReferencedTypeIterator {
+			seen_types: HashSet::new(),
+			ver_iter: versions.values(),
+			field_iter: REF_TYPE_ITER_EMPTY_FIELD_SLICE.iter(),
+			arg_iters: Vec::new(),
+		}
+	}
+
+	fn from_type(t: &'a Type) -> ReferencedTypeIterator<'a> {
+		ReferencedTypeIterator {
+			seen_types: HashSet::new(),
+			ver_iter: REF_TYPE_ITER_EMPTY_VER_MAP.values(),
+			field_iter: REF_TYPE_ITER_EMPTY_FIELD_SLICE.iter(),
+			arg_iters: vec!(std::slice::from_ref(t).iter()),
+		}
+	}
+}

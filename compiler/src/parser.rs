@@ -1,6 +1,6 @@
 use crate::model;
 use num_bigint::{ BigUint, BigInt, Sign };
-use num_traits::Zero;
+use num_traits::{Zero, One};
 use std::collections::{HashMap, HashSet};
 
 use nom::{
@@ -270,10 +270,13 @@ fn constant_defn(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 	let (input, value) = constant_value(input)?;
 	let (input, _) = sym_semicolon(input)?;
 
+	let mut ver_map = HashMap::new();
+	ver_map.insert(BigUint::one(), value);
+
 	Ok((input, (name, TopLevelDefinition::Constant(model::Constant {
 		imports: HashMap::new(),
 		value_type: t,
-		value: value,
+		versions: ver_map,
 	}))))
 }
 

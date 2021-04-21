@@ -1,10 +1,10 @@
 #![feature(generic_associated_types)]
 
+mod util;
 pub mod model;
 mod parser;
 pub mod lang;
 mod type_check;
-mod util;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_output_handler;
