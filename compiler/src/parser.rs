@@ -2,6 +2,7 @@ use crate::model;
 use num_bigint::{ BigUint, BigInt, Sign };
 use num_traits::{Zero, One};
 use std::collections::{HashMap, HashSet};
+use std::marker::PhantomData;
 
 use nom::{
 	IResult,
@@ -289,6 +290,7 @@ fn field_definition(input: &str) -> PResult<&str, (String, model::FieldInfo)> {
 
 	Ok((input, (name, model::FieldInfo {
 		field_type: t,
+		dummy: PhantomData {},
 	})))
 }
 
@@ -314,7 +316,8 @@ fn versioned_type(input: &str) -> PResult<&str, (BigUint, model::VersionedTypeDe
 	}
 
 	Ok((input, (ver, model::VersionedTypeDefinition {
-		fields: fields
+		fields: fields,
+		dummy: PhantomData {},
 	})))
 }
 

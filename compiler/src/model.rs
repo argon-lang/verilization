@@ -176,9 +176,9 @@ pub struct ConstantVersionInfo<'a> {
 
 /// A constant definition.
 pub struct Constant {
-	pub imports: HashMap<String, ScopeLookup>,
-	pub value_type: Type,
-	pub versions: HashMap<BigUint, ConstantValue>,
+	pub(crate) imports: HashMap<String, ScopeLookup>,
+	pub(crate) value_type: Type,
+	pub(crate) versions: HashMap<BigUint, ConstantValue>,
 }
 
 impl <'a> Named<'a, Constant> {
@@ -213,11 +213,15 @@ impl <'a> Named<'a, Constant> {
 /// A field of a struct or enum. An enum field represents a single case.
 pub struct FieldInfo {
 	pub field_type: Type,
+
+	pub(crate) dummy: PhantomData<()>,
 }
 
 /// A versioned type defines the contents of a type for a specific format version.
 pub struct VersionedTypeDefinition {
 	pub fields: Vec<(String, FieldInfo)>,
+
+	pub(crate) dummy: PhantomData<()>,
 }
 
 pub struct TypeVersionInfo<'a> {
@@ -230,9 +234,9 @@ pub struct TypeVersionInfo<'a> {
 
 /// A struct defines a product type. A struct can be defined differently in different format versions.
 pub struct TypeDefinitionData {
-	pub imports: HashMap<String, ScopeLookup>,
-	pub type_params: Vec<String>,
-	pub versions: HashMap<BigUint, VersionedTypeDefinition>,
+	pub(crate) imports: HashMap<String, ScopeLookup>,
+	pub(crate) type_params: Vec<String>,
+	pub(crate) versions: HashMap<BigUint, VersionedTypeDefinition>,
 }
 
 impl <'a> Named<'a, TypeDefinitionData> {
