@@ -40,6 +40,7 @@ fn open_ts_file<'output, Output: OutputHandler>(options: &TSOptions, output: &'o
 pub trait TSGenerator<'model> {
 	type GeneratorFile : Write;
 	fn file(&mut self) -> &mut Self::GeneratorFile;
+	fn model(&mut self) -> &'model model::Verilization;
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName>;
 	fn options(&self) -> &TSOptions;
 	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model>;
@@ -151,13 +152,20 @@ pub trait TSGenerator<'model> {
 			model::Type::Defined(t, args) => {
 				match self.scope().lookup(t.clone()) {
 					model::ScopeLookup::NamedType(t) => {
-						// Only use a qualifier if not a value of the current type.
-						if self.generator_element_name() != Some(&t) {
-							self.write_import_name(&t)?;
-							write!(self.file(), ".")?;
+						match self.model().get_type(&t).ok_or("Could not find type")? {
+							model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
+								let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
+
+								// Only use a qualifier if not a value of the current type.
+								if self.generator_element_name() != Some(&t) {
+									self.write_import_name(&t)?;
+									write!(self.file(), ".")?;
+								}
+					
+								write!(self.file(), "V{}", ver_type.version)?;
+
+							},
 						}
-			
-						write!(self.file(), "V{}", version)?;
 					},
 					model::ScopeLookup::TypeParameter(name) => {
 						write!(self.file(), "{}", name)?;
@@ -173,20 +181,32 @@ pub trait TSGenerator<'model> {
 		match t {
 			model::Type::Defined(name, args) => match self.scope().lookup(name.clone()) {
 				model::ScopeLookup::NamedType(name) => {
-					if Some(&name) != self.generator_element_name() {
-						self.write_import_name(&name)?;
-						write!(self.file(), ".")?;
-					}
-		
-					write!(self.file(), "V{}.from_v{}", version, prev_ver)?;
-					self.write_type_args(version, args)?;
-					write!(self.file(), "(")?;
-					for arg in args {
-						write!(self.file(), "value => ")?;
-						self.write_version_convert(prev_ver, version, arg, "value")?;
-						write!(self.file(), ", ")?;
-					}
-					write!(self.file(), "{})", value_name)?;		
+					match self.model().get_type(&name).ok_or("Could not find type")? {
+						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
+							let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
+							
+							if ver_type.version < *version { // Final type with no newer versions, no need to convert
+								write!(self.file(), "{}", value_name)?;
+								return Ok(())
+							}
+
+							if Some(&name) != self.generator_element_name() {
+								self.write_import_name(&name)?;
+								write!(self.file(), ".")?;
+							}
+				
+							write!(self.file(), "V{}.from_v{}", version, prev_ver)?;
+							self.write_type_args(version, args)?;
+							write!(self.file(), "(")?;
+							for arg in args {
+								write!(self.file(), "value => ")?;
+								self.write_version_convert(prev_ver, version, arg, "value")?;
+								write!(self.file(), ", ")?;
+							}
+							write!(self.file(), "{})", value_name)?;
+
+						},
+					}		
 				},
 	
 				model::ScopeLookup::TypeParameter(name) => {
@@ -253,7 +273,15 @@ pub trait TSGenerator<'model> {
 			model::Type::Defined(name, args) => match self.scope().lookup(name.clone()) {
 				model::ScopeLookup::NamedType(name) => {
 					self.write_import_name(&name)?;
-					write!(self.file(), ".V{}.codec", version)?;
+
+					let type_ver = match self.model().get_type(&name).ok_or("Could not find type")? {
+						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
+							let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
+							ver_type.version
+						},
+					};
+
+					write!(self.file(), ".V{}.codec", type_ver)?;
 					self.write_type_args(version, args)?;
 					if !args.is_empty() {
 						write!(self.file(), "(")?;
@@ -284,6 +312,7 @@ fn current_dir_of_name<'model, Gen: TSGenerator<'model>>(gen: &Gen, name: &model
 
 struct TSConstGenerator<'model, 'opt, 'output, Output: OutputHandler> {
 	file: Output::FileHandle<'output>,
+	model: &'model model::Verilization,
 	options: &'opt TSOptions,
 	constant: Named<'model, model::Constant>,
 	scope: model::Scope<'model>,
@@ -293,6 +322,10 @@ impl <'model, 'opt, 'output, Output: OutputHandler> TSGenerator<'model> for TSCo
 	type GeneratorFile = Output::FileHandle<'output>;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
+	}
+
+	fn model(&mut self) -> &'model model::Verilization {
+		self.model
 	}
 
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName> {
@@ -318,10 +351,11 @@ impl <'model, 'opt, 'output, Output: OutputHandler> TSGenerator<'model> for TSCo
 
 impl <'model, 'opt, 'output, Output: OutputHandler> TSConstGenerator<'model, 'opt, 'output, Output> {
 
-	fn open(options: &'opt TSOptions, output: &'output mut Output, constant: Named<'model, model::Constant>) -> Result<Self, GeneratorError> {
+	fn open(model: &'model model::Verilization, options: &'opt TSOptions, output: &'output mut Output, constant: Named<'model, model::Constant>) -> Result<Self, GeneratorError> {
 		let file = open_ts_file(options, output, constant.name())?;
 		Ok(TSConstGenerator {
 			file: file,
+			model: model,
 			options: options,
 			constant: constant,
 			scope: constant.scope(),
@@ -364,6 +398,7 @@ struct TSEnumType {}
 
 struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler, Extra> {
 	file: Output::FileHandle<'output>,
+	model: &'model model::Verilization,
 	options: &'opt TSOptions,
 	type_def: Named<'model, model::TypeDefinitionData>,
 	scope: model::Scope<'model>,
@@ -375,6 +410,10 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra> TSGenerator<'model> f
 	type GeneratorFile = Output::FileHandle<'output>;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
+	}
+
+	fn model(&mut self) -> &'model model::Verilization {
+		self.model
 	}
 
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName> {
@@ -409,10 +448,11 @@ trait TSExtraGeneratorOps {
 
 impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> TSTypeGenerator<'model, 'opt, 'output, Output, Extra> where TSTypeGenerator<'model, 'opt, 'output, Output, Extra> : TSExtraGeneratorOps {
 
-	fn open(options: &'opt TSOptions, output: &'output mut Output, type_def: Named<'model, model::TypeDefinitionData>) -> Result<Self, GeneratorError> {
+	fn open(model: &'model model::Verilization, options: &'opt TSOptions, output: &'output mut Output, type_def: Named<'model, model::TypeDefinitionData>) -> Result<Self, GeneratorError> {
 		let file = open_ts_file(options, output, type_def.name())?;
 		Ok(TSTypeGenerator {
 			file: file,
+			model: model,
 			options: options,
 			type_def: type_def,
 			scope: type_def.scope(),
@@ -715,18 +755,18 @@ impl Language for TypeScriptLanguage {
 
 	fn generate<Output: OutputHandler>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
 		for constant in model.constants() {
-			let mut const_gen = TSConstGenerator::open(&options, output, constant)?;
+			let mut const_gen = TSConstGenerator::open(model, &options, output, constant)?;
 			const_gen.generate()?;
 		}
 
 		for t in model.types() {
 			match t {
 				model::NamedTypeDefinition::StructType(t) => {
-					let mut type_gen: TSTypeGenerator<_, TSStructType> = TSTypeGenerator::open(&options, output, t)?;
+					let mut type_gen: TSTypeGenerator<_, TSStructType> = TSTypeGenerator::open(model, &options, output, t)?;
 					type_gen.generate()?;		
 				},
 				model::NamedTypeDefinition::EnumType(t) => {
-					let mut type_gen: TSTypeGenerator<_, TSEnumType> = TSTypeGenerator::open(&options, output, t)?;
+					let mut type_gen: TSTypeGenerator<_, TSEnumType> = TSTypeGenerator::open(model, &options, output, t)?;
 					type_gen.generate()?;		
 				},
 			}

@@ -46,6 +46,7 @@ impl TestLanguage for lang::typescript::TypeScriptLanguage {
                 ( PackageName::from_parts(&["struct", "versions"]), OsString::from("struct/versions") ),
                 ( PackageName::from_parts(&["enum", "versions"]), OsString::from("enum/versions") ),
                 ( PackageName::from_parts(&["genericsTest"]), OsString::from("genericsTest") ),
+                ( PackageName::from_parts(&["finalTest"]), OsString::from("finalTest") ),
             ]))
         }
     }
@@ -87,6 +88,7 @@ impl TestLanguage for lang::java::JavaLanguage {
                 ( PackageName::from_parts(&["struct", "versions"]), PackageName::from_parts(&["struct", "versions"]) ),
                 ( PackageName::from_parts(&["enum", "versions"]), PackageName::from_parts(&["enum_", "versions"]) ),
                 ( PackageName::from_parts(&["genericsTest"]), PackageName::from_parts(&["genericsTest"]) ),
+                ( PackageName::from_parts(&["finalTest"]), PackageName::from_parts(&["finalTest"]) ),
             ]))
         }
     }
@@ -126,6 +128,7 @@ impl TestLanguage for lang::scala::ScalaLanguage {
                 ( PackageName::from_parts(&["struct", "versions"]), PackageName::from_parts(&["struct", "versions"]) ),
                 ( PackageName::from_parts(&["enum", "versions"]), PackageName::from_parts(&["enum_", "versions"]) ),
                 ( PackageName::from_parts(&["genericsTest"]), PackageName::from_parts(&["genericsTest"]) ),
+                ( PackageName::from_parts(&["finalTest"]), PackageName::from_parts(&["finalTest"]) ),
             ]))
         }
     }

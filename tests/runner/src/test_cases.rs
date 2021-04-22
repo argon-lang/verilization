@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 pub const TEST_CASE_FILES: &[&str] = &[
     "struct_versions",
+    "final",
     "generics",
     "enum_versions",
 ];

@@ -33,6 +33,10 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> TSGenerator<'model> for TSTest
 		&mut self.file
 	}
 
+	fn model(&mut self) -> &'model model::Verilization {
+		self.model
+	}
+
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName> {
 		None
 	}

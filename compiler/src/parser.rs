@@ -72,6 +72,13 @@ fn kw_struct(input: &str) -> PResult<&str, ()> {
 	Ok((input, ()))
 }
 
+fn kw_final(input: &str) -> PResult<&str, ()> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = tag("final")(input)?;
+	let (input, _) = multispace1(input)?;
+	Ok((input, ()))
+}
+
 // Symbols
 fn sym_semicolon(input: &str) -> PResult<&str, ()> {
 	let (input, _) = multispace0(input)?;
@@ -339,6 +346,7 @@ fn type_param_list(input: &str) -> PResult<&str, Vec<String>> {
 //   ...
 // }
 fn type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
+	let (input, is_final) = opt(kw_final)(input)?;
 	let (input, is_enum) = alt((
 		map(kw_enum, |_| true),
 		map(kw_struct, |_| false),
@@ -368,6 +376,7 @@ fn type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 				imports: HashMap::new(),
 				type_params: type_params,
 				versions: version_map,
+				is_final: is_final.is_some(),
 			})
 		}
 		else {
@@ -375,6 +384,7 @@ fn type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 				imports: HashMap::new(),
 				type_params: type_params,
 				versions: version_map,
+				is_final: is_final.is_some(),
 			})
 		}
 	))))

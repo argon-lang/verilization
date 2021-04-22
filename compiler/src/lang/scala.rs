@@ -59,6 +59,7 @@ pub enum ConvertParam {
 pub trait ScalaGenerator<'model, 'opt> {
 	type GeneratorFile : Write;
 	fn file(&mut self) -> &mut Self::GeneratorFile;
+	fn model(&mut self) -> &'model model::Verilization;
 	fn options(&self) -> &'opt ScalaOptions;
 	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model>;
 	fn scope(&self) -> &model::Scope<'model>;
@@ -139,9 +140,17 @@ pub trait ScalaGenerator<'model, 'opt> {
 	
 			model::Type::Defined(t, args) => match self.scope().lookup(t.clone()) {
 				model::ScopeLookup::NamedType(t) => {
-					self.write_qual_name(&t)?;
-					write!(self.file(), ".V{}", version)?;
-					self.write_type_args(version, args)?;
+					match self.model().get_type(&t).ok_or("Could not find type")? {
+						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
+							let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
+
+							self.write_qual_name(&t)?;
+							write!(self.file(), ".V{}", ver_type.version)?;
+							self.write_type_args(version, args)?;
+
+						},
+					}
+
 				},
 				model::ScopeLookup::TypeParameter(name) => {
 					write!(self.file(), "{}", name)?;
@@ -154,19 +163,34 @@ pub trait ScalaGenerator<'model, 'opt> {
 		match field_type {
 			model::Type::Defined(name, args) => match self.scope().lookup(name.clone()) {
 				model::ScopeLookup::NamedType(name) => {
-					self.write_qual_name(&name)?;
-					write!(self.file(), ".V{}", version)?;
-					write!(self.file(), ".fromV{}", prev_ver)?;
-					if !args.is_empty() {
-						write!(self.file(), "(")?;
-						for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
-							self.write_version_convert(prev_ver, version, arg, ConvertParam::FunctionObject)?;
-						});
-						write!(self.file(), ")")?;
-					}
-					match param {
-						ConvertParam::FunctionObject => (),
-						ConvertParam::Expression(param_str) => write!(self.file(), "({})", param_str)?,
+					match self.model().get_type(&name).ok_or("Could not find type")? {
+						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
+							let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
+
+							if ver_type.version < *version { // Final type with no newer versions, no need to convert
+								match param {
+									ConvertParam::FunctionObject => write!(self.file(), "java.util.function.Function::identity")?,
+									ConvertParam::Expression(param_str) => write!(self.file(), "{}", param_str)?,
+								}
+								return Ok(())
+							}
+
+
+							self.write_qual_name(&name)?;
+							write!(self.file(), ".V{}", version)?;
+							write!(self.file(), ".fromV{}", prev_ver)?;
+							if !args.is_empty() {
+								write!(self.file(), "(")?;
+								for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
+									self.write_version_convert(prev_ver, version, arg, ConvertParam::FunctionObject)?;
+								});
+								write!(self.file(), ")")?;
+							}
+							match param {
+								ConvertParam::FunctionObject => (),
+								ConvertParam::Expression(param_str) => write!(self.file(), "({})", param_str)?,
+							}
+						}
 					}
 				},
 				model::ScopeLookup::TypeParameter(name) => {
@@ -245,15 +269,22 @@ pub trait ScalaGenerator<'model, 'opt> {
 			},
 			model::Type::Defined(name, args) => match self.scope().lookup(name.clone()) {
 				model::ScopeLookup::NamedType(name) => {
-					self.write_qual_name(&name)?;
-					write!(self.file(), ".V{}", version)?;
-					write!(self.file(), ".codec")?;
-					if !args.is_empty() {
-						write!(self.file(), "(")?;
-						for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
-							self.write_codec(version, arg)?;
-						});
-						write!(self.file(), ")")?;
+					match self.model().get_type(&name).ok_or("Could not find type")? {
+						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
+							let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
+
+							self.write_qual_name(&name)?;
+							write!(self.file(), ".V{}", ver_type.version)?;
+							write!(self.file(), ".codec")?;
+							if !args.is_empty() {
+								write!(self.file(), "(")?;
+								for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
+									self.write_codec(version, arg)?;
+								});
+								write!(self.file(), ")")?;
+							}
+
+						},
 					}
 				},
 				model::ScopeLookup::TypeParameter(name) => {
@@ -269,6 +300,7 @@ pub trait ScalaGenerator<'model, 'opt> {
 
 struct ScalaConstGenerator<'model, 'opt, 'output, Output: OutputHandler> {
 	file: Output::FileHandle<'output>,
+	model: &'model model::Verilization,
 	options: &'opt ScalaOptions,
 	constant: Named<'model, model::Constant>,
 	scope: model::Scope<'model>,
@@ -278,6 +310,10 @@ impl <'model, 'opt, 'output, Output: OutputHandler> ScalaGenerator<'model, 'opt>
 	type GeneratorFile = Output::FileHandle<'output>;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
+	}
+
+	fn model(&mut self) -> &'model model::Verilization {
+		self.model
 	}
 
 	fn options(&self) -> &'opt ScalaOptions {
@@ -297,10 +333,11 @@ impl <'model, 'opt, 'output, Output: OutputHandler> ScalaGenerator<'model, 'opt>
 
 impl <'model, 'opt, 'output, Output: OutputHandler> ScalaConstGenerator<'model, 'opt, 'output, Output> {
 
-	fn open(options: &'opt ScalaOptions, output: &'output mut Output, constant: Named<'model, model::Constant>) -> Result<Self, GeneratorError> {
+	fn open(model: &'model model::Verilization, options: &'opt ScalaOptions, output: &'output mut Output, constant: Named<'model, model::Constant>) -> Result<Self, GeneratorError> {
 		let file = open_scala_file(options, output, constant.name())?;
 		Ok(ScalaConstGenerator {
 			file: file,
+			model: model,
 			options: options,
 			constant: constant,
 			scope: constant.scope(),
@@ -346,6 +383,7 @@ struct ScalaEnumType {}
 
 struct ScalaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler, Extra> {
 	options: &'opt ScalaOptions,
+	model: &'model model::Verilization,
 	file: Output::FileHandle<'output>,
 	type_def: Named<'model, model::TypeDefinitionData>,
 	scope: model::Scope<'model>,
@@ -367,6 +405,10 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> ScalaGenerat
 		&mut self.file
 	}
 
+	fn model(&mut self) -> &'model model::Verilization {
+		self.model
+	}
+
 	fn options(&self) -> &'opt ScalaOptions {
 		self.options
 	}
@@ -383,10 +425,11 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> ScalaGenerat
 impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> where ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> : ScalaExtraGeneratorOps {
 
 
-	fn open(options: &'opt ScalaOptions, output: &'output mut Output, type_def: Named<'model, model::TypeDefinitionData>) -> Result<Self, GeneratorError> {
+	fn open(model: &'model model::Verilization, options: &'opt ScalaOptions, output: &'output mut Output, type_def: Named<'model, model::TypeDefinitionData>) -> Result<Self, GeneratorError> {
 		let file = open_scala_file(options, output, type_def.name())?;
 		Ok(ScalaTypeGenerator {
 			file: file,
+			model: model,
 			options: options,
 			type_def: type_def,
 			scope: type_def.scope(),
@@ -737,18 +780,18 @@ impl Language for ScalaLanguage {
 
 	fn generate<Output: OutputHandler>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
 		for constant in model.constants() {
-			let mut const_gen = ScalaConstGenerator::open(&options, output, constant)?;
+			let mut const_gen = ScalaConstGenerator::open(model, &options, output, constant)?;
 			const_gen.generate()?;
 		}
 
 		for t in model.types() {
 			match t {
 				model::NamedTypeDefinition::StructType(t) => {
-					let mut type_gen: ScalaTypeGenerator<_, ScalaStructType> = ScalaTypeGenerator::open(&options, output, t)?;
+					let mut type_gen: ScalaTypeGenerator<_, ScalaStructType> = ScalaTypeGenerator::open(model, &options, output, t)?;
 					type_gen.generate()?;		
 				},
 				model::NamedTypeDefinition::EnumType(t) => {
-					let mut type_gen: ScalaTypeGenerator<_, ScalaEnumType> = ScalaTypeGenerator::open(&options, output, t)?;
+					let mut type_gen: ScalaTypeGenerator<_, ScalaEnumType> = ScalaTypeGenerator::open(model, &options, output, t)?;
 					type_gen.generate()?;		
 				},
 			}

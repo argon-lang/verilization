@@ -1,5 +1,5 @@
 use num_bigint::{ BigUint, BigInt };
-use num_traits::One;
+use num_traits::{Zero, One};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::iter::FromIterator;
@@ -111,7 +111,7 @@ impl PartialOrd for QualifiedName {
 }
 
 /// A data type. This can be a built-in or user-defined type.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Type {
 	Nat,
 	Int,
@@ -211,6 +211,7 @@ impl <'a> Named<'a, Constant> {
 }
 
 /// A field of a struct or enum. An enum field represents a single case.
+#[derive(Debug)]
 pub struct FieldInfo {
 	pub field_type: Type,
 
@@ -218,12 +219,14 @@ pub struct FieldInfo {
 }
 
 /// A versioned type defines the contents of a type for a specific format version.
+#[derive(Debug)]
 pub struct VersionedTypeDefinition {
 	pub fields: Vec<(String, FieldInfo)>,
 
 	pub(crate) dummy: PhantomData<()>,
 }
 
+#[derive(Debug)]
 pub struct TypeVersionInfo<'a> {
 	pub version: BigUint,
 	pub explicit_version: bool,
@@ -233,10 +236,12 @@ pub struct TypeVersionInfo<'a> {
 }
 
 /// A struct defines a product type. A struct can be defined differently in different format versions.
+#[derive(Debug)]
 pub struct TypeDefinitionData {
 	pub(crate) imports: HashMap<String, ScopeLookup>,
 	pub(crate) type_params: Vec<String>,
 	pub(crate) versions: HashMap<BigUint, VersionedTypeDefinition>,
+	pub(crate) is_final: bool,
 }
 
 impl <'a> Named<'a, TypeDefinitionData> {
@@ -245,8 +250,17 @@ impl <'a> Named<'a, TypeDefinitionData> {
 			.filter(|(ver, _)| ver <= &version)
 			.max_by_key(|(ver, _)| ver.clone())
 			.map(|(actual_ver, ver_type)| {
+
+				let ver =
+					if self.value.is_final && !self.value.versions.keys().any(|other_ver| other_ver > actual_ver) {
+						actual_ver.clone()
+					}
+					else {
+						version.clone()
+					};
+
 				TypeVersionInfo {
-					version: version.clone(),
+					version: ver,
 					explicit_version: version == actual_ver,
 					ver_type: ver_type,
 					dummy: PhantomData {},
@@ -262,6 +276,18 @@ impl <'a> Named<'a, TypeDefinitionData> {
 		TypeVersionIterator {
 			type_def: self,
 			version: BigUint::one(),
+			max_version:
+				if self.value.is_final {
+					self.value.versions
+						.keys()
+						.max_by_key(|ver| ver.clone())
+						.map(|ver| ver.clone())
+						.unwrap_or(BigUint::zero())
+				}
+				else {
+					self.model.metadata.latest_version.clone()
+				},
+
 			last_seen_version: None,
 		}
 	}
@@ -327,7 +353,7 @@ pub struct Verilization {
 	type_definitions: HashMap<QualifiedName, TypeDefinition>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ScopeLookup {
 	NamedType(QualifiedName),
 	TypeParameter(String),
@@ -529,6 +555,7 @@ impl <'a> Iterator for TypeIterator<'a> {
 pub struct TypeVersionIterator<'a> {
 	type_def: Named<'a, TypeDefinitionData>,
 	version: BigUint,
+	max_version: BigUint,
 	last_seen_version: Option<&'a VersionedTypeDefinition>,
 }
 
@@ -536,8 +563,7 @@ impl <'a> Iterator for TypeVersionIterator<'a> {
 	type Item = TypeVersionInfo<'a>;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		let latest_version = &self.type_def.model.metadata.latest_version;
-		while self.version <= *latest_version {
+		while self.version <= self.max_version {
 			let version = self.version.clone();
 			self.version += BigUint::one();
 			

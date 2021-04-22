@@ -31,6 +31,10 @@ impl <'model, 'opt, 'output, F: Write, R> JavaGenerator<'model, 'opt> for JavaTe
 		&mut self.file
 	}
 
+	fn model(&mut self) -> &'model model::Verilization {
+		self.model
+	}
+
 	fn options(&self) -> &'opt JavaOptions {
 		self.options
 	}
@@ -169,12 +173,12 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> JavaTestCaseGen<'model, 'opt, 'ou
         
                     match t {
                         model::NamedTypeDefinition::StructType(t) => {
-                            let ver_type = t.versioned(version).ok_or("Could not find version of type")?.ver_type;
+                            let ver_type = t.versioned(version).ok_or("Could not find version of type")?;
                             write!(self.file, "new ")?;
                             self.write_qual_name(&name)?;
-                            write!(self.file, ".V{}(", version)?;
+                            write!(self.file, ".V{}(", ver_type.version)?;
         
-                            for_sep!((_, field), &ver_type.fields, { write!(self.file, ", ")?; }, {
+                            for_sep!((_, field), &ver_type.ver_type.fields, { write!(self.file, ", ")?; }, {
                                 self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type)?;
                             });
 
@@ -184,14 +188,14 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> JavaTestCaseGen<'model, 'opt, 'ou
                         },
         
                         model::NamedTypeDefinition::EnumType(t) => {
-                            let ver_type = t.versioned(version).ok_or("Could not find version of type")?.ver_type;
-                            let index = self.random.gen_range(0..ver_type.fields.len());
-                            let (field_name, field) = &ver_type.fields[index];
+                            let ver_type = t.versioned(version).ok_or("Could not find version of type")?;
+                            let index = self.random.gen_range(0..ver_type.ver_type.fields.len());
+                            let (field_name, field) = &ver_type.ver_type.fields[index];
         
                             BigUint::from(index).write_verilization(writer)?;
                             write!(self.file, "new ")?;
                             self.write_qual_name(&name)?;
-                            write!(self.file, ".V{}.{}(", version, field_name)?;
+                            write!(self.file, ".V{}.{}(", ver_type.version, field_name)?;
                             self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type)?;
                             write!(self.file, ")")?;
         

@@ -1,0 +1,15 @@
+version 4;
+package finalTest;
+
+final struct Int32Wrap {
+    version 1 {
+        n: i32;
+    }
+}
+
+struct WrapUser {
+    version 3 {
+        wrap: finalTest.Int32Wrap;
+    }
+}
+
