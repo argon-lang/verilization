@@ -55,10 +55,13 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
     }
 
     fn versioned_type(&mut self, version: &BigUint) -> Result<(), GeneratorError> {
-        write!(self.file, "\t\tsertests.TestCase(")?;
 
         let type_args: Vec<_> = std::iter::repeat(model::Type::U32).take(self.type_def.type_params().len()).collect();
         let current_type = model::Type::Defined(self.type_def.name().clone(), type_args);
+
+        write!(self.file, "\t\tsertests.TestCase[")?;
+        self.write_type(version, &current_type)?;
+        write!(self.file, "](")?;
 
         self.write_codec(version, &current_type)?;
         write!(self.file, ", ")?;

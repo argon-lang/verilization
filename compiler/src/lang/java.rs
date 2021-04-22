@@ -240,7 +240,7 @@ pub trait JavaGenerator<'model, 'opt> {
 			model::Type::U16 | model::Type::I16 => write!(self.file(), "{}.StandardCodecs.i16Codec", RUNTIME_PACKAGE)?,
 			model::Type::U32 | model::Type::I32 => write!(self.file(), "{}.StandardCodecs.i32Codec", RUNTIME_PACKAGE)?,
 			model::Type::U64 | model::Type::I64 => write!(self.file(), "{}.StandardCodecs.i64Codec", RUNTIME_PACKAGE)?,
-			model::Type::String => write!(self.file(), "{}.StandardCodecs.string", RUNTIME_PACKAGE)?,
+			model::Type::String => write!(self.file(), "{}.StandardCodecs.stringCodec", RUNTIME_PACKAGE)?,
 			model::Type::List(inner) => {
 				match **inner {
 					model::Type::U8 | model::Type::I8 => write!(self.file(), "{}.StandardCodecs.i8ListCodec", RUNTIME_PACKAGE)?,
@@ -262,8 +262,9 @@ pub trait JavaGenerator<'model, 'opt> {
 			model::Type::Defined(name, args) => match self.scope().lookup(name.clone()) {
 				model::ScopeLookup::NamedType(name) => {
 					self.write_qual_name(&name)?;
-					write!(self.file(), ".V{}", version)?;
-					write!(self.file(), ".codec")?;
+					write!(self.file(), ".V{}.", version)?;
+					self.write_type_args(version, args)?;
+					write!(self.file(), "codec")?;
 					if !args.is_empty() {
 						write!(self.file(), "(")?;
 						for_sep!(arg, args, { write!(self.file(), ", ")? },
@@ -444,28 +445,12 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> JavaTypeGene
 				write!(self.file, "final ")?;
 			}
 			else {
-				write!(self.file, "<")?;
-				for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-					write!(self.file, "{}_1, {}_2", param, param)?;
-				});
-				write!(self.file, "> ")?;
+				self.write_type_params_with(|param| format!("{}_1, {}_2", param, param))?;
 			}
 			write!(self.file, "java.util.function.Function<V{}", prev_ver)?;
-			if !self.type_def.type_params().is_empty() {
-				write!(self.file, "<")?;
-				for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-					write!(self.file, "{}_1", param)?;
-				});
-				write!(self.file, ">")?;
-			}
+			self.write_type_params_with(|param| format!("{}_1", param))?;
 			write!(self.file, ", V{}", version)?;
-			if !self.type_def.type_params().is_empty() {
-				write!(self.file, "<")?;
-				for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-					write!(self.file, "{}_2", param)?;
-				});
-				write!(self.file, ">")?;
-			}
+			self.write_type_params_with(|param| format!("{}_2", param))?;
 			write!(self.file, "> fromV{}", prev_ver)?;
 			if self.type_def.type_params().is_empty() {
 				writeln!(self.file, " =")?;
@@ -474,7 +459,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> JavaTypeGene
 			else {
 				write!(self.file, "(")?;
 				for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-					write!(self.file, "{}_conv", param)?;
+					write!(self.file, "java.util.function.Function<{}_1, {}_2> {}_conv", param, param, param)?;
 				});
 				writeln!(self.file, ") {{")?;
 				write!(self.file, "\t\t\treturn ")?;
@@ -488,7 +473,11 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> JavaTypeGene
 			else {
 				write!(self.file, "\t\t\t\treturn ")?;
 				self.write_qual_name(self.type_def.name())?;
-				writeln!(self.file, "_Conversions.v{}ToV{}(prev);", prev_ver, version)?;
+				write!(self.file, "_Conversions.v{}ToV{}(", prev_ver, version)?;
+				for param in self.type_def.type_params() {
+					write!(self.file, "{}_conv, ", param)?;
+				}
+				writeln!(self.file, "prev);")?;
 			}
 
 			writeln!(self.file, "\t\t\t}};")?;
@@ -503,6 +492,18 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> JavaTypeGene
 		write!(self.file, " implements {}.Codec<V{}", RUNTIME_PACKAGE, version)?;
 		self.write_type_params()?;
 		writeln!(self.file, "> {{")?;
+		write!(self.file, "\t\t\tpublic CodecImpl(")?;
+		for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
+			write!(self.file, "{}.Codec<{}> {}_codec", RUNTIME_PACKAGE, param, param)?;
+		});
+		writeln!(self.file, ") {{")?;
+		for param in self.type_def.type_params() {
+			writeln!(self.file, "\t\t\t\tthis.{}_codec = {}_codec;", param, param)?;
+		}
+		writeln!(self.file, "\t\t\t}}")?;
+		for param in self.type_def.type_params() {
+			writeln!(self.file, "\t\t\tprivate {}.Codec<{}> {}_codec;", RUNTIME_PACKAGE, param, param)?;
+		}
 		writeln!(self.file, "\t\t\t@Override")?;
 		write!(self.file, "\t\t\tpublic V{}", version)?;
 		self.write_type_params()?;
@@ -523,9 +524,19 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> JavaTypeGene
 		else {
 			write!(self.file, "\t\tpublic static ")?;
 			self.write_type_params()?;
-			write!(self.file, "{}.Codec<V{}", RUNTIME_PACKAGE, version)?;
+			write!(self.file, " {}.Codec<V{}", RUNTIME_PACKAGE, version)?;
 			self.write_type_params()?;
-			writeln!(self.file, "> codec = new CodecImpl();")?;
+			write!(self.file, "> codec(")?;
+			for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
+				write!(self.file, "{}.Codec<{}> {}_codec", RUNTIME_PACKAGE, param, param)?;
+			});
+			writeln!(self.file, ") {{")?;
+			write!(self.file, "\t\t\treturn new CodecImpl<>(")?;
+			for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
+				write!(self.file, "{}_codec", param)?;
+			});
+			writeln!(self.file, ");")?;
+			writeln!(self.file, "\t\t}}")?;
 		}
 
 		writeln!(self.file, "\t}}")?;
@@ -536,10 +547,14 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> JavaTypeGene
 	}
 
 	fn write_type_params(&mut self) -> Result<(), GeneratorError> {
+		self.write_type_params_with(|s| s.to_string())
+	}
+
+	fn write_type_params_with(&mut self, f: impl Fn(&str) -> String) -> Result<(), GeneratorError> {
 		if !self.type_def.type_params().is_empty() {
 			write!(self.file, "<")?;
 			for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-				write!(self.file, "{}", param)?;
+				write!(self.file, "{}", f(param))?;
 			});
 			write!(self.file, ">")?;
 		}
@@ -685,7 +700,11 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> JavaExtraGeneratorOp
 		writeln!(self.file, "\t\tprivate V{}() {{}}", ver_type.version)?;
 
 		for (index, (field_name, field)) in ver_type.ver_type.fields.iter().enumerate() {
-			writeln!(self.file, "\t\tpublic static final class {} extends V{} {{", field_name, ver_type.version)?;
+			write!(self.file, "\t\tpublic static final class {}", field_name)?;
+			self.write_type_params()?;
+			write!(self.file, " extends V{}", ver_type.version)?;
+			self.write_type_params()?;
+			writeln!(self.file, " {{")?;
 			write!(self.file, "\t\t\tpublic {}(", field_name)?;
 			self.write_type(&ver_type.version, &field.field_type, false)?;
 			writeln!(self.file, " {}) {{", field_name)?;
@@ -717,9 +736,16 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> JavaExtraGeneratorOp
 	fn write_from_prev_version(&mut self, ver_type: &model::TypeVersionInfo, prev_ver: &BigUint) -> Result<(), GeneratorError> {
 		write!(self.file, "\t\t\t\t")?;
 		for (field_name, field) in &ver_type.ver_type.fields {
-			writeln!(self.file, "if(prev instanceof V{}.{}) {{", prev_ver, field_name)?;
-			write!(self.file, "\t\t\t\t\treturn new V{}.{}(", ver_type.version, field_name)?;
-			self.write_version_convert(prev_ver, &ver_type.version, &field.field_type, ConvertParam::Expression(format!("((V{}.{})prev).{}", prev_ver, field_name, field_name)))?;
+			write!(self.file, "if(prev instanceof V{}.{}", prev_ver, field_name)?;
+			self.write_type_params_with(|_| "?".to_string())?;
+			writeln!(self.file, ") {{")?;
+			write!(self.file, "\t\t\t\t\tvar prev2 = ((V{}.{}", prev_ver, field_name)?;
+			self.write_type_params_with(|param| format!("{}_1", param))?;
+			writeln!(self.file, ")prev).{};", field_name)?;
+			write!(self.file, "\t\t\t\t\treturn new V{}.{}", ver_type.version, field_name)?;
+			self.write_type_params_with(|param| format!("{}_2", param))?;
+			write!(self.file, "(")?;
+			self.write_version_convert(prev_ver, &ver_type.version, &field.field_type, ConvertParam::Expression("prev2".to_string()))?;
 			writeln!(self.file, ");")?;
 			writeln!(self.file, "\t\t\t\t}}")?;
 			write!(self.file, "\t\t\t\telse ")?;
@@ -756,11 +782,16 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> JavaExtraGeneratorOp
 	fn write_codec_write(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
 		write!(self.file, "\t\t\t\t")?;
 		for (index, (field_name, field)) in ver_type.ver_type.fields.iter().enumerate() {
-			writeln!(self.file, "if(value instanceof V{}.{}) {{", ver_type.version, field_name)?;
+			write!(self.file, "if(value instanceof V{}.{}", ver_type.version, field_name)?;
+			self.write_type_params_with(|_| "?".to_string())?;
+			writeln!(self.file, ") {{")?;
+			write!(self.file, "\t\t\t\t\tvar value2 = ((V{}.{}", ver_type.version, field_name)?;
+			self.write_type_params()?;
+			writeln!(self.file, ")value).{};", field_name)?;
 			write!(self.file, "\t\t\t\t\t{}.StandardCodecs.natCodec.write(writer, java.math.BigInteger.valueOf({}))", RUNTIME_PACKAGE, index)?;
 			writeln!(self.file, ";")?;
 			write!(self.file, "\t\t\t\t\t")?;
-			self.write_value_write(&ver_type.version, &field.field_type, format!("((V{}.{})value).{}", ver_type.version, field_name, field_name))?;
+			self.write_value_write(&ver_type.version, &field.field_type, "value2".to_string())?;
 			writeln!(self.file, ";")?;
 			writeln!(self.file, "\t\t\t\t}}")?;
 			write!(self.file, "\t\t\t\telse ")?;

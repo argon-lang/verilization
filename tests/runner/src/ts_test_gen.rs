@@ -72,6 +72,11 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
 
     fn add_imported_type(&mut self, t: &model::QualifiedName) -> Result<(), GeneratorError> {
         if !self.imported_types.contains(&t) {
+			match self.type_def.scope().lookup(t.clone()) {
+				model::ScopeLookup::TypeParameter(_) => return Ok(()),
+				model::ScopeLookup::NamedType(_) => (),
+			}
+            
             let pkg_dir = self.options.package_mapping.get(&t.package).ok_or(format!("Unmapped package: {}", t.package))?;
 
             write!(self.file, "import * as ")?;

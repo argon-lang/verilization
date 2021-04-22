@@ -1,5 +1,5 @@
 version 4;
-package enum.versions;
+package genericsTest;
 
 
 enum Either(A, B) {

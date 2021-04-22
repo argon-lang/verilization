@@ -123,7 +123,7 @@ pub trait ScalaGenerator<'model, 'opt> {
 	
 			model::Type::U64 | model::Type::I64 => write!(self.file(), "scala.Long")?,
 	
-			model::Type::String => write!(self.file(), "scala.String")?,
+			model::Type::String => write!(self.file(), "scala.Predef.String")?,
 	
 	
 			model::Type::List(inner) => {
@@ -423,23 +423,65 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> ScalaTypeGen
 
 
 		if !self.versions.is_empty() {
-			writeln!(self.file, "\t\tdef fromV{}(prev: V{}): V{} =", prev_ver, prev_ver, version)?;
+			write!(self.file, "\t\tdef fromV{}", prev_ver)?;
+			self.write_type_params_with(|params| format!("{}_1, {}_2", params, params))?;
+			if !self.type_def.type_params().is_empty() {
+				write!(self.file, "(")?;
+				for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
+					write!(self.file, "{}_conv: {}_1 => {}_2", param, param, param)?;
+				});
+				write!(self.file, ")")?;
+			}
+			write!(self.file, "(prev: V{}", prev_ver)?;
+			self.write_type_params_with(|params| format!("{}_1", params))?;
+			write!(self.file, "): V{}", version)?;
+			self.write_type_params_with(|params| format!("{}_2", params))?;
+			writeln!(self.file, " =")?;
 			if !ver_type.explicit_version {
 				self.write_from_prev_version(ver_type, prev_ver)?;
 			}
 			else {
 				write!(self.file, "\t\t\t")?;
 				self.write_qual_name(self.type_def.name())?;
-				writeln!(self.file, "_Conversions.v{}ToV{}(prev);", prev_ver, version)?;
+				write!(self.file, "_Conversions.v{}ToV{}", prev_ver, version)?;
+				if !self.type_def.type_params().is_empty() {
+					write!(self.file, "(")?;
+					for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
+						write!(self.file, "{}_conv", param)?;
+					});
+					write!(self.file, ")")?;
+				}
+				writeln!(self.file, "(prev)")?;
 			}
 		}
 
-		writeln!(self.file, "\t\tval codec: {}.Codec[V{}] = new {}.Codec[V{}] {{", RUNTIME_PACKAGE, version, RUNTIME_PACKAGE, version)?;
-		writeln!(self.file, "\t\t\toverride def read[R, E](reader: {}.FormatReader[R, E]): zio.ZIO[R, E, V{}] =", RUNTIME_PACKAGE, version)?;
+		
+		if self.type_def.type_params().is_empty() {
+			write!(self.file, "\t\tval codec")?;
+		}
+		else {
+			write!(self.file, "\t\tdef codec")?;
+			self.write_type_params()?;
+			write!(self.file, "(")?;
+			for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
+				write!(self.file, "{}_codec: {}.Codec[{}]", param, RUNTIME_PACKAGE, param)?;
+			});
+			write!(self.file, ")")?;
+		}
+		write!(self.file, ": {}.Codec[V{}", RUNTIME_PACKAGE, version)?;
+		self.write_type_params()?;
+		write!(self.file, "] = new {}.Codec[V{}", RUNTIME_PACKAGE, version)?;
+		self.write_type_params()?;
+		writeln!(self.file, "] {{")?;
+		write!(self.file, "\t\t\toverride def read[R, E](reader: {}.FormatReader[R, E]): zio.ZIO[R, E, V{}", RUNTIME_PACKAGE, version)?;
+		self.write_type_params()?;
+		writeln!(self.file, "] =")?;
 		self.write_codec_read(ver_type)?;
 
 
-		writeln!(self.file, "\t\t\toverride def write[R, E](writer: {}.FormatWriter[R, E], value: V{}): zio.ZIO[R, E, Unit] = ", RUNTIME_PACKAGE, version)?;
+		write!(self.file, "\t\t\toverride def write[R, E](writer: {}.FormatWriter[R, E], value: V{}", RUNTIME_PACKAGE, version)?;
+		self.write_type_params()?;
+		writeln!(self.file, "): zio.ZIO[R, E, Unit] = ")?;
 		self.write_codec_write(ver_type)?;
 
 		writeln!(self.file, "\t\t}}")?;
@@ -452,10 +494,14 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> ScalaTypeGen
 	}
 
 	fn write_type_params(&mut self) -> Result<(), GeneratorError> {
+		self.write_type_params_with(|param| param.to_string())
+	}
+
+	fn write_type_params_with(&mut self, f: impl Fn(&str) -> String) -> Result<(), GeneratorError> {
 		if !self.type_def.type_params().is_empty() {
 			write!(self.file, "[")?;
 			for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-				write!(self.file, "{}", param)?;
+				write!(self.file, "{}", f(param))?;
 			});
 			write!(self.file, "]")?;
 		}
@@ -566,7 +612,7 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorO
 
 impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorOps for ScalaTypeGenerator<'model, 'opt, 'state, Output, ScalaEnumType> {
 	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		writeln!(self.file, "\tsealed abstract class V{}", ver_type.version)?;
+		write!(self.file, "\tsealed abstract class V{}", ver_type.version)?;
 		self.write_type_params()?;
 		writeln!(self.file, " extends {}", self.type_def.name().name)?;
 		Ok(())
@@ -574,9 +620,13 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorO
 
 	fn write_versioned_type_object_data(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
 		for (field_name, field) in &ver_type.ver_type.fields {
-			write!(self.file, "\t\tfinal case class {}({}: ", field_name, field_name)?;
+			write!(self.file, "\t\tfinal case class {}", field_name)?;
+			self.write_type_params()?;
+			write!(self.file, "({}: ", field_name)?;
 			self.write_type(&ver_type.version, &field.field_type)?;
-			writeln!(self.file, ") extends V{}", ver_type.version)?;
+			write!(self.file, ") extends V{}", ver_type.version)?;
+			self.write_type_params()?;
+			writeln!(self.file)?;
 		}
 
 		Ok(())
@@ -589,7 +639,9 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorO
 		else {
 			writeln!(self.file, "\t\t\tprev match {{")?;
 			for (field_name, field) in &ver_type.ver_type.fields {
-				write!(self.file, "\t\t\t\tcase prev: V{}.{} => V{}.{}(", prev_ver, field_name, ver_type.version, field_name)?;
+				write!(self.file, "\t\t\t\tcase prev: V{}.{}", prev_ver, field_name)?;
+				self.write_type_params_with(|param| format!("{}_1", param))?;
+				write!(self.file, " => V{}.{}(", ver_type.version, field_name)?;
 				self.write_version_convert(prev_ver, &ver_type.version, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
 				writeln!(self.file, ")")?;
 			}
@@ -620,7 +672,9 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorO
 		else {
 			writeln!(self.file, "\t\t\t\tvalue match {{")?;
 			for (index, (field_name, field)) in ver_type.ver_type.fields.iter().enumerate() {
-				writeln!(self.file, "\t\t\t\t\tcase value: V{}.{} =>", ver_type.version, field_name)?;
+				write!(self.file, "\t\t\t\t\tcase value: V{}.{}", ver_type.version, field_name)?;
+				self.write_type_params()?;
+				writeln!(self.file, " =>")?;
 				writeln!(self.file, "\t\t\t\t\t\tfor {{")?;
 				writeln!(self.file, "\t\t\t\t\t\t\t_ <- {}.StandardCodecs.natCodec.write(writer, {})", RUNTIME_PACKAGE, index)?;
 				write!(self.file, "\t\t\t\t\t\t\t_ <- ")?;

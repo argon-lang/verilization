@@ -70,6 +70,11 @@ pub trait TSGenerator<'model> {
 				continue;
 			}
 
+			match self.scope().lookup(t.clone()) {
+				model::ScopeLookup::TypeParameter(_) => continue,
+				model::ScopeLookup::NamedType(_) => (),
+			}
+
 			let import_pkg_dir = self.options().package_mapping.get(&t.package).ok_or(format!("Unmapped package: {}", t.package))?;
 			let mut abs_import_path = PathBuf::from(&self.options().output_dir);
 			abs_import_path.push(import_pkg_dir);
@@ -252,9 +257,9 @@ pub trait TSGenerator<'model> {
 					self.write_type_args(version, args)?;
 					if !args.is_empty() {
 						write!(self.file(), "(")?;
-						for arg in args {
+						for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
 							self.write_codec(version, arg)?;
-						}
+						});
 						write!(self.file(), ")")?;
 					}
 				},
@@ -461,7 +466,23 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> TSTypeGenera
 			for param in self.type_def.type_params() {
 				write!(self.file, "{}_conv: (prev: {}_1) => {}_2, ", param, param, param)?;
 			}
-			writeln!(self.file, "prev: V{}): V{} {{", prev_ver, version)?;
+			write!(self.file, "prev: V{}", prev_ver)?;
+			if !self.type_def.type_params().is_empty() {
+				write!(self.file, "<")?;
+				for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
+					write!(self.file, "{}_1", param)?;
+				});
+				write!(self.file, ">")?;
+			}
+			write!(self.file, "): V{}", version)?;
+			if !self.type_def.type_params().is_empty() {
+				write!(self.file, "<")?;
+				for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
+					write!(self.file, "{}_2", param)?;
+				});
+				write!(self.file, ">")?;
+			}
+			writeln!(self.file, " {{")?;
 			if ver_type.explicit_version {
 				write!(self.file, "\t\treturn v{}_to_v{}(", prev_ver, version)?;
 				

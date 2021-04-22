@@ -57,9 +57,9 @@ object StandardCodecs {
         override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, String] =
             natCodec.read(reader).flatMap { length =>
                 if(length > Int.MaxValue)
-                    reader.readBytes(length.toInt)
-                else
                     IO.die(new ArithmeticException("Length of string would overflow"))
+                else
+                    reader.readBytes(length.toInt)
             }.map { data => new String(data.toArray, StandardCharsets.UTF_8) }
 
         override def write[R, E](writer: FormatWriter[R, E], value: String): ZIO[R, E, Unit] = {
