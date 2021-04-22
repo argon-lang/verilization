@@ -80,6 +80,16 @@ In the generated code, the user is expected to provide code that can upgrade `Na
 However, there is no need to provide such code for upgrading `Person`.
 `Person` can be upgraded automaticially using the upgrade code for its fields.
 
+## Generics
+
+Generic types allow a type to be parameterized.
+
+    final struct Pair(A, B) {
+        version 1 {
+            left: A;
+            right: B;
+        }
+    }
 
 ## Command Line
 
