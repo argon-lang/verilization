@@ -28,3 +28,16 @@ struct Pair(A, B) {
     }
 }
 
+struct GenericUser1 {
+    version 1 {
+        a: Either(i32, i32);
+        b: Pair(i32, i32);
+    }
+}
+
+enum GenericUser2 {
+    version 1 {
+        a: Either(i32, i32);
+        b: Pair(i32, i32);
+    }
+}

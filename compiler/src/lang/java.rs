@@ -184,15 +184,24 @@ pub trait JavaGenerator<'model, 'opt> {
 
 							if ver_type.version < *version { // Final type with no newer versions, no need to convert
 								match param {
-									ConvertParam::FunctionObject => write!(self.file(), "java.util.function.Function::identity")?,
+									ConvertParam::FunctionObject => write!(self.file(), "java.util.function.Function.identity()")?,
 									ConvertParam::Expression(param_str) => write!(self.file(), "{}", param_str)?,
 								}
 								return Ok(())
 							}
 
 							self.write_qual_name(&name)?;
-							write!(self.file(), ".V{}", version)?;
-							write!(self.file(), ".fromV{}", prev_ver)?;
+							write!(self.file(), ".V{}.", version)?;
+							if !args.is_empty() {
+								write!(self.file(), "<")?;
+								for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
+									self.write_type(prev_ver, arg, true)?;
+									write!(self.file(), ", ")?;
+									self.write_type(version, arg, true)?;
+								});
+								write!(self.file(), ">")?;
+							}
+							write!(self.file(), "fromV{}", prev_ver)?;
 							if !args.is_empty() {
 								write!(self.file(), "(")?;
 								for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
@@ -245,7 +254,7 @@ pub trait JavaGenerator<'model, 'opt> {
 	
 	
 			_ => match param {
-				ConvertParam::FunctionObject => write!(self.file(), "java.util.function.Function::identity")?,
+				ConvertParam::FunctionObject => write!(self.file(), "java.util.function.Function.identity()")?,
 				ConvertParam::Expression(param_str) => write!(self.file(), "{}", param_str)?,
 			},
 		};

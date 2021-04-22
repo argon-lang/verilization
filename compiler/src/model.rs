@@ -326,11 +326,15 @@ impl <'a> NamedTypeDefinition<'a> {
 		}
 	}
 
-	pub fn arity(self) -> usize {
+	pub fn type_params(&self) -> &'a Vec<String> {
 		match self {
-			NamedTypeDefinition::StructType(t) => t.value.type_params.len(),
-			NamedTypeDefinition::EnumType(t) => t.value.type_params.len(),
+			NamedTypeDefinition::StructType(t) => &t.value.type_params,
+			NamedTypeDefinition::EnumType(t) => &t.value.type_params,
 		}
+	}
+
+	pub fn arity(&self) -> usize {
+		self.type_params().len()
 	}
 
 	pub fn has_version(self, version: &BigUint) -> bool {
@@ -403,6 +407,30 @@ impl <'a> Scope<'a> {
 		}
 
 		ScopeLookup::NamedType(name)
+	}
+
+	pub fn resolve(&self, t: Type, type_args: &HashMap<String, Type>) -> Option<Type> {
+		Some(match t {
+			Type::Defined(name, args) => {
+				match self.lookup(name) {
+					ScopeLookup::NamedType(name) => {
+						Type::Defined(name, args.into_iter().map(|arg| self.resolve(arg, type_args)).collect::<Option<Vec<_>>>()?)
+					},
+					ScopeLookup::TypeParameter(name) => {
+						type_args.get(&name)?.clone()
+					},
+				}
+			},
+			Type::Option(inner) => {
+				let res_inner = self.resolve(*inner, type_args)?;
+				Type::Option(Box::new(res_inner))
+			},
+			Type::List(inner) => {
+				let res_inner = self.resolve(*inner, type_args)?;
+				Type::List(Box::new(res_inner))
+			},
+			t => t,
+		})
 	}
 }
 

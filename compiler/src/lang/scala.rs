@@ -180,6 +180,13 @@ pub trait ScalaGenerator<'model, 'opt> {
 							write!(self.file(), ".V{}", version)?;
 							write!(self.file(), ".fromV{}", prev_ver)?;
 							if !args.is_empty() {
+								write!(self.file(), "[")?;
+								for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
+									self.write_type(prev_ver, arg)?;
+									write!(self.file(), ", ")?;
+									self.write_type(version, arg)?;
+								});
+								write!(self.file(), "]")?;
 								write!(self.file(), "(")?;
 								for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
 									self.write_version_convert(prev_ver, version, arg, ConvertParam::FunctionObject)?;

@@ -6,7 +6,7 @@ use model::{Verilization, Named};
 use crate::memory_format::MemoryFormatWriter;
 use crate::test_lang::{TestLanguage, TestGenerator};
 
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use num_bigint::{ BigUint, BigInt };
 use std::fs::File;
 use std::io::Write;
@@ -75,16 +75,17 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
     }
 
     fn add_imported_type(&mut self, t: &model::QualifiedName) -> Result<(), GeneratorError> {
+        let t = match self.type_def.scope().lookup(t.clone()) {
+            model::ScopeLookup::TypeParameter(_) => return Ok(()),
+            model::ScopeLookup::NamedType(t) => t,
+        };
+
         if !self.imported_types.contains(&t) {
-			match self.type_def.scope().lookup(t.clone()) {
-				model::ScopeLookup::TypeParameter(_) => return Ok(()),
-				model::ScopeLookup::NamedType(_) => (),
-			}
-            
+
             let pkg_dir = self.options.package_mapping.get(&t.package).ok_or(format!("Unmapped package: {}", t.package))?;
 
             write!(self.file, "import * as ")?;
-            self.write_import_name(t)?;
+            self.write_import_name(&t)?;
             writeln!(self.file, " from \"./{}/{}.js\";", pkg_dir.to_str().unwrap(), t.name)?;
             self.imported_types.insert(t.clone());
         }
@@ -95,14 +96,15 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
     fn versioned_type(&mut self, version: &BigUint) -> Result<(), GeneratorError> {
         write!(self.file, "await check(")?;
 
-        let type_args: Vec<_> = std::iter::repeat(model::Type::U32).take(self.type_def.type_params().len()).collect();
+        let type_arg_map: HashMap<_, _> = self.type_def.type_params().iter().map(|param| (param.clone(), model::Type::U32)).collect();
+        let type_args: Vec<_> = type_arg_map.values().map(|arg| arg.clone()).collect();
         let current_type = model::Type::Defined(self.type_def.name().clone(), type_args);
 
         self.write_codec(version, &current_type)?;
         write!(self.file, ", ")?;
         
         let mut writer = MemoryFormatWriter::new();
-        self.write_random_value(&mut writer, version, &current_type)?;
+        self.write_random_value(&mut writer, version, &current_type, &type_arg_map)?;
         
         write!(self.file, ", Uint8Array.of(")?;
         for b in writer.data() {
@@ -134,7 +136,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
         }
     }
 
-    fn write_random_value<W: verilization_runtime::FormatWriter<Error = GeneratorError>>(&mut self, writer: &mut W, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
+    fn write_random_value<W: verilization_runtime::FormatWriter<Error = GeneratorError>>(&mut self, writer: &mut W, version: &BigUint, t: &model::Type, type_args: &HashMap<String, model::Type>) -> Result<(), GeneratorError> {
         match t {
             model::Type::Nat => {
                 let n: BigUint = self.random.gen_biguint(256);
@@ -201,7 +203,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
                 let len: u32 = self.random.gen_range(0..200);
                 BigUint::from(len).write_verilization(writer)?;
                 for _ in 0..len {
-                    self.write_random_value(writer, version, &*inner)?;
+                    self.write_random_value(writer, version, &*inner, type_args)?;
                     write!(self.file, ", ")?;
                 }
     
@@ -214,7 +216,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
                 if b {
                     BigUint::one().write_verilization(writer)?;
                     write!(self.file, "{{ value: ")?;
-                    self.write_random_value(writer, version, &*inner)?;
+                    self.write_random_value(writer, version, &*inner, type_args)?;
                     write!(self.file, "}}")?;
                 }
                 else {
@@ -224,10 +226,14 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
     
                 Ok(())
             },
-            model::Type::Defined(name, _) => match self.scope.lookup(name.clone()) {
+            model::Type::Defined(name, args) => match self.scope.lookup(name.clone()) {
                 model::ScopeLookup::NamedType(name) => {
                     let t = self.model.get_type(&name).ok_or("Could not find type")?;
                     
+                    let resolved_args = t.type_params().iter().zip(args.iter())
+                        .map(|(param, arg)| Some((param.clone(), self.scope.resolve(arg.clone(), type_args)?)))
+                        .collect::<Option<HashMap<_, _>>>()
+                        .ok_or("Could not resolve args")?;
         
                     match t {
                         model::NamedTypeDefinition::StructType(t) => {
@@ -236,7 +242,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
         
                             for (field_name, field) in &ver_type.fields {
                                 write!(self.file, "{}: ", field_name)?;
-                                self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type)?;
+                                self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type, &resolved_args)?;
                                 write!(self.file, ", ")?;
                             }
         
@@ -252,7 +258,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
         
                             BigUint::from(index).write_verilization(writer)?;
                             write!(self.file, "{{ tag: \"{}\", {}: ", field_name, field_name)?;
-                            self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type)?;
+                            self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type, &resolved_args)?;
                             write!(self.file, "}}")?;
         
                             Ok(())
@@ -261,7 +267,10 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
                 },
     
                 // Hardcode type parameters as u32
-                model::ScopeLookup::TypeParameter(_) => self.write_random_value(writer, version, &model::Type::U32),
+                model::ScopeLookup::TypeParameter(name) => {
+                    let mut t = type_args.get(&name).ok_or("Unknown type parameter")?;
+                    self.with_scope(model::Scope::empty(self.model)).write_random_value(writer, version, t, &HashMap::new())
+                },
             },
         }
     }

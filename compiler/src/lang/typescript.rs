@@ -71,10 +71,10 @@ pub trait TSGenerator<'model> {
 				continue;
 			}
 
-			match self.scope().lookup(t.clone()) {
+			let t = match self.scope().lookup(t.clone()) {
 				model::ScopeLookup::TypeParameter(_) => continue,
-				model::ScopeLookup::NamedType(_) => (),
-			}
+				model::ScopeLookup::NamedType(t) => t,
+			};
 
 			let import_pkg_dir = self.options().package_mapping.get(&t.package).ok_or(format!("Unmapped package: {}", t.package))?;
 			let mut abs_import_path = PathBuf::from(&self.options().output_dir);
@@ -85,7 +85,7 @@ pub trait TSGenerator<'model> {
 
 
 			write!(self.file(), "import * as ")?;
-			self.write_import_name(t)?;
+			self.write_import_name(&t)?;
 			writeln!(self.file(), " from \"./{}\";", import_path.to_str().unwrap())?;
 		}
 
@@ -196,7 +196,17 @@ pub trait TSGenerator<'model> {
 							}
 				
 							write!(self.file(), "V{}.from_v{}", version, prev_ver)?;
-							self.write_type_args(version, args)?;
+
+							if !args.is_empty() {
+								write!(self.file(), "<")?;
+								for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
+									self.write_type(prev_ver, arg)?;
+									write!(self.file(), ", ")?;
+									self.write_type(version, arg)?;
+								});
+								write!(self.file(), ">")?;
+							}
+
 							write!(self.file(), "(")?;
 							for arg in args {
 								write!(self.file(), "value => ")?;
