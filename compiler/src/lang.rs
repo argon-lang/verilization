@@ -1,3 +1,4 @@
+pub mod generator;
 pub mod typescript;
 pub mod java;
 pub mod scala;
