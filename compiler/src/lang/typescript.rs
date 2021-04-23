@@ -185,9 +185,18 @@ pub trait TSGenerator<'model> {
 						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
 							let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
 							
-							if ver_type.version < *version { // Final type with no newer versions, no need to convert
-								write!(self.file(), "{}", value_name)?;
-								return Ok(())
+
+							let mut conversion_method_name = format!("from_v{}", prev_ver);
+
+							if ver_type.version < *version { // Final type with no newer versions
+								// Conversion only required for type parameters
+								if args.is_empty() {
+									write!(self.file(), "{}", value_name)?;
+									return Ok(())
+								}
+								else {
+									conversion_method_name = "convert".to_string();
+								}
 							}
 
 							if Some(&name) != self.generator_element_name() {
@@ -195,7 +204,7 @@ pub trait TSGenerator<'model> {
 								write!(self.file(), ".")?;
 							}
 				
-							write!(self.file(), "V{}.from_v{}", version, prev_ver)?;
+							write!(self.file(), "V{}.{}", version, conversion_method_name)?;
 
 							if !args.is_empty() {
 								write!(self.file(), "<")?;
@@ -504,34 +513,16 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> TSTypeGenera
 			write!(self.file, "\texport function from_v{}", prev_ver)?;
 
 
-			if !self.type_def.type_params().is_empty() {
-				write!(self.file, "<")?;
-				for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-					write!(self.file, "{}_1, {}_2", param, param)?;
-				});
-				write!(self.file, ">")?;
-			}
+			self.write_type_params_with(|param| format!("{}_1, {}_2", param, param))?;
 
 			write!(self.file, "(")?;
 			for param in self.type_def.type_params() {
 				write!(self.file, "{}_conv: (prev: {}_1) => {}_2, ", param, param, param)?;
 			}
 			write!(self.file, "prev: V{}", prev_ver)?;
-			if !self.type_def.type_params().is_empty() {
-				write!(self.file, "<")?;
-				for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-					write!(self.file, "{}_1", param)?;
-				});
-				write!(self.file, ">")?;
-			}
+			self.write_type_params_with(|param| format!("{}_1", param))?;
 			write!(self.file, "): V{}", version)?;
-			if !self.type_def.type_params().is_empty() {
-				write!(self.file, "<")?;
-				for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-					write!(self.file, "{}_2", param)?;
-				});
-				write!(self.file, ">")?;
-			}
+			self.write_type_params_with(|param| format!("{}_2", param))?;
 			writeln!(self.file, " {{")?;
 			if ver_type.explicit_version {
 				write!(self.file, "\t\treturn v{}_to_v{}(", prev_ver, version)?;
@@ -589,12 +580,15 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> TSTypeGenera
 		Ok(())
 	}
 
-
 	fn write_type_params(&mut self) -> Result<(), GeneratorError> {
+		self.write_type_params_with(|s| s.to_string())
+	}
+
+	fn write_type_params_with(&mut self, f: impl Fn(&str) -> String) -> Result<(), GeneratorError> {
 		if !self.type_def.type_params().is_empty() {
 			write!(self.file, "<")?;
 			for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-				write!(self.file, "{}", param)?;
+				write!(self.file, "{}", f(param))?;
 			});
 			write!(self.file, ">")?;
 		}

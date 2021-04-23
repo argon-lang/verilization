@@ -6,6 +6,7 @@ use model::{Verilization, Named};
 use crate::memory_format::MemoryFormatWriter;
 use crate::test_lang::{TestLanguage, TestGenerator};
 
+use std::collections::HashMap;
 use num_bigint::{ BigUint, BigInt };
 use std::fs;
 use std::fs::File;
@@ -60,7 +61,8 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
 
     fn versioned_type(&mut self, version: &BigUint) -> Result<(), GeneratorError> {
 
-        let type_args: Vec<_> = std::iter::repeat(model::Type::U32).take(self.type_def.type_params().len()).collect();
+        let type_arg_map: HashMap<_, _> = self.type_def.type_params().iter().map(|param| (param.clone(), model::Type::U32)).collect();
+        let type_args: Vec<_> = type_arg_map.values().map(|arg| arg.clone()).collect();
         let current_type = model::Type::Defined(self.type_def.name().clone(), type_args);
 
         write!(self.file, "\t\tsertests.TestCase[")?;
@@ -71,7 +73,7 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
         write!(self.file, ", ")?;
         
         let mut writer = MemoryFormatWriter::new();
-        self.write_random_value(&mut writer, version, &current_type)?;
+        self.write_random_value(&mut writer, version, &current_type, &type_arg_map)?;
         
         write!(self.file, ", zio.Chunk[Byte](")?;
         {
@@ -107,7 +109,7 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
         }
     }
 
-    fn write_random_value<W: verilization_runtime::FormatWriter<Error = GeneratorError>>(&mut self, writer: &mut W, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
+    fn write_random_value<W: verilization_runtime::FormatWriter<Error = GeneratorError>>(&mut self, writer: &mut W, version: &BigUint, t: &model::Type, type_args: &HashMap<String, model::Type>) -> Result<(), GeneratorError> {
         match t {
             model::Type::Nat => {
                 let n: BigUint = self.random.gen_biguint(256);
@@ -154,7 +156,7 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
                 let len: u32 = self.random.gen_range(0..200);
                 BigUint::from(len).write_verilization(writer)?;
                 for _ in 0..len {
-                    self.write_random_value(writer, version, &*inner)?;
+                    self.write_random_value(writer, version, &*inner, type_args)?;
                     write!(self.file, ", ")?;
                 }
     
@@ -167,7 +169,7 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
                 if b {
                     BigUint::one().write_verilization(writer)?;
                     write!(self.file, "java.util.Optional.of(")?;
-                    self.write_random_value(writer, version, &*inner)?;
+                    self.write_random_value(writer, version, &*inner, type_args)?;
                     write!(self.file, ")")?;
                 }
                 else {
@@ -177,19 +179,26 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
     
                 Ok(())
             },
-            model::Type::Defined(name, _) => match self.scope.lookup(name.clone()) {
+            model::Type::Defined(name, args) => match self.scope.lookup(name.clone()) {
                 model::ScopeLookup::NamedType(name) => {
                     let t = self.model.get_type(&name).ok_or("Could not find type")?;
+                    
+                    let resolved_args = t.type_params().iter().zip(args.iter())
+                        .map(|(param, arg)| Some((param.clone(), self.scope.resolve(arg.clone(), type_args)?)))
+                        .collect::<Option<HashMap<_, _>>>()
+                        .ok_or("Could not resolve args")?;
         
                     match t {
                         model::NamedTypeDefinition::StructType(t) => {
                             let ver_type = t.versioned(version).ok_or("Could not find version of type")?;
                             write!(self.file, "new ")?;
                             self.write_qual_name(&name)?;
-                            write!(self.file, ".V{}(", ver_type.version)?;
+                            write!(self.file, ".V{}", ver_type.version)?;
+                            self.write_type_args(&ver_type.version, args)?;
+                            write!(self.file, "(")?;
         
                             for_sep!((_, field), &ver_type.ver_type.fields, { write!(self.file, ", ")?; }, {
-                                self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type)?;
+                                self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type, &resolved_args)?;
                             });
 
                             write!(self.file, ")")?;
@@ -205,8 +214,10 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
                             BigUint::from(index).write_verilization(writer)?;
                             write!(self.file, "new ")?;
                             self.write_qual_name(&name)?;
-                            write!(self.file, ".V{}.{}(", ver_type.version, field_name)?;
-                            self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type)?;
+                            write!(self.file, ".V{}.{}", ver_type.version, field_name)?;
+                            self.write_type_args(&ver_type.version, args)?;
+                            write!(self.file, "(")?;
+                            self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type, &resolved_args)?;
                             write!(self.file, ")")?;
         
                             Ok(())
@@ -214,8 +225,10 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
                     }
                 },
     
-                // Hardcode type parameters as u32
-                model::ScopeLookup::TypeParameter(_) => self.write_random_value(writer, version, &model::Type::U32),
+                model::ScopeLookup::TypeParameter(name) => {
+                    let t = type_args.get(&name).ok_or("Unknown type parameter")?;
+                    self.with_scope(model::Scope::empty(self.model)).write_random_value(writer, version, t, &HashMap::new())
+                },
             },
         }
     }

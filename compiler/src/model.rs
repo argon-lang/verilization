@@ -245,6 +245,10 @@ pub struct TypeDefinitionData {
 }
 
 impl <'a> Named<'a, TypeDefinitionData> {
+	pub fn is_final(&self) -> bool {
+		self.value.is_final
+	}
+
 	pub fn versioned(self, version: &BigUint) -> Option<TypeVersionInfo<'a>> {
 		self.value.versions.iter()
 			.filter(|(ver, _)| ver <= &version)
@@ -266,6 +270,10 @@ impl <'a> Named<'a, TypeDefinitionData> {
 					dummy: PhantomData {},
 				}
 			})
+	}
+
+	pub fn last_explicit_version(self) -> Option<&'a BigUint> {
+		self.value.versions.keys().max()
 	}
 
 	pub fn referenced_types(self) -> ReferencedTypeIterator<'a> {

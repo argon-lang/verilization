@@ -266,9 +266,8 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
                     }
                 },
     
-                // Hardcode type parameters as u32
                 model::ScopeLookup::TypeParameter(name) => {
-                    let mut t = type_args.get(&name).ok_or("Unknown type parameter")?;
+                    let t = type_args.get(&name).ok_or("Unknown type parameter")?;
                     self.with_scope(model::Scope::empty(self.model)).write_random_value(writer, version, t, &HashMap::new())
                 },
             },

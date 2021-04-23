@@ -7,9 +7,25 @@ final struct Int32Wrap {
     }
 }
 
+final struct Box(T) {
+    version 1 {
+        value: T;
+    }
+}
+
+struct Upgrade {
+    version 3 {
+        n: i32;
+    }
+    version 4 {
+        n: i64;
+    }
+}
+
 struct WrapUser {
     version 3 {
         wrap: finalTest.Int32Wrap;
+        box: Box(Upgrade);
     }
 }
 
