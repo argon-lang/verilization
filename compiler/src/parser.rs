@@ -267,24 +267,42 @@ enum TopLevelDefinition {
 	Type(model::TypeDefinition),
 }
 
-// Ex: const name: Type = value;
+fn versioned_constant(input: &str) -> PResult<&str, (BigUint, model::ConstantValue)> {
+	let (input, _) = kw_version(input)?;
+	let (input, ver) = biguint(input)?;
+	let (input, _) = sym_eq(input)?;
+	let (input, value) = constant_value(input)?;
+	let (input, _) = sym_semicolon(input)?;
+	Ok((input, (ver, value)))
+}
+
+// Ex:
+// const name: Type {
+//     version 1 = ...;
+//}
 fn constant_defn(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 	let (input, _) = kw_const(input)?;
 	let (input, name) = identifier(input)?;
 	let (input, _) = sym_colon(input)?;
 	let (input, t) = type_expr(input)?;
 	let (input, _) = multispace0(input)?;
-	let (input, _) = sym_eq(input)?;
-	let (input, value) = constant_value(input)?;
-	let (input, _) = sym_semicolon(input)?;
+	let (input, _) = sym_open_curly(input)?;
+	let (input, versions) = many0(versioned_constant)(input)?;
+	let (input, _) = sym_close_curly(input)?;
 
-	let mut ver_map = HashMap::new();
-	ver_map.insert(BigUint::one(), value);
+	let mut version_map = HashMap::new();
+	for (ver, value) in versions.into_iter() {
+		if version_map.contains_key(&ver) {
+			return Err(nom::Err::Failure(PErrorType::DuplicateVersion(input, name, ver)))
+		}
+
+		version_map.insert(ver, value);
+	}
 
 	Ok((input, (name, TopLevelDefinition::Constant(model::Constant {
 		imports: HashMap::new(),
 		value_type: t,
-		versions: ver_map,
+		versions: version_map,
 	}))))
 }
 

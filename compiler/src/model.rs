@@ -192,10 +192,26 @@ impl <'a> Named<'a, Constant> {
 	}
 
 	pub fn versions(self) -> ConstantVersionIterator<'a> {
+
+		let last_version = match self.scope().lookup(self.name.clone()) {
+			ScopeLookup::NamedType(name) => match self.model.get_type(&name) {
+				Some(NamedTypeDefinition::StructType(ver_type) | NamedTypeDefinition::EnumType(ver_type)) =>
+					if ver_type.is_final() {
+						Some(ver_type.last_explicit_version().map_or_else(|| BigUint::zero(), |ver| ver.clone()))
+					}
+					else {
+						None
+					},
+				None => None,
+			},
+			ScopeLookup::TypeParameter(_) => None,
+		};
+
 		ConstantVersionIterator {
 			constant: self,
 			version: BigUint::one(),
 			has_prev_version: false,
+			max_version: last_version.unwrap_or_else(|| self.model.metadata.latest_version.clone()),
 		}
 	}
 
@@ -233,6 +249,18 @@ pub struct TypeVersionInfo<'a> {
 	pub ver_type: &'a VersionedTypeDefinition,
 
 	dummy: PhantomData<()>,
+}
+
+impl <'a> Clone for TypeVersionInfo<'a> {
+	fn clone(&self) -> Self {
+		TypeVersionInfo {
+			version: self.version.clone(),
+			explicit_version: self.explicit_version,
+			ver_type: self.ver_type,
+
+			dummy: PhantomData {}
+		}
+	}
 }
 
 /// A struct defines a product type. A struct can be defined differently in different format versions.
@@ -286,11 +314,7 @@ impl <'a> Named<'a, TypeDefinitionData> {
 			version: BigUint::one(),
 			max_version:
 				if self.value.is_final {
-					self.value.versions
-						.keys()
-						.max_by_key(|ver| ver.clone())
-						.map(|ver| ver.clone())
-						.unwrap_or(BigUint::zero())
+					self.last_explicit_version().map(|ver| ver.clone()).unwrap_or(BigUint::zero())
 				}
 				else {
 					self.model.metadata.latest_version.clone()
@@ -539,6 +563,7 @@ impl <'a> Iterator for ConstantIterator<'a> {
 pub struct ConstantVersionIterator<'a> {
 	constant: Named<'a, Constant>,
 	version: BigUint,
+	max_version: BigUint,
 	has_prev_version: bool,
 }
 
@@ -546,8 +571,7 @@ impl <'a> Iterator for ConstantVersionIterator<'a> {
 	type Item = ConstantVersionInfo<'a>;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		let latest_version = &self.constant.model.metadata.latest_version;
-		while self.version <= *latest_version {
+		while self.version <= self.max_version {
 			let version = self.version.clone();
 			self.version += BigUint::one();
 			

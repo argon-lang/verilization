@@ -1,6 +1,7 @@
 use verilization_compiler::{lang, model};
 use lang::GeneratorError;
 use lang::typescript::{TSGenerator, TSOptions};
+use lang::generator::*;
 use model::{Verilization, Named};
 
 use crate::memory_format::MemoryFormatWriter;
@@ -26,16 +27,24 @@ struct TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
 	scope: model::Scope<'model>,
 }
 
-
-impl <'model, 'opt, 'state, 'output, F: Write, R> TSGenerator<'model> for TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
+impl <'model, 'opt, 'state, 'output, F: Write, R> GeneratorWithFile for TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
 	type GeneratorFile = F;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
+}
 
-	fn model(&mut self) -> &'model model::Verilization {
+impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model> for TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
+	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
+
+	fn scope(&self) -> &model::Scope<'model> {
+		&self.scope
+	}
+}
+
+impl <'model, 'opt, 'state, 'output, F: Write, R> TSGenerator<'model> for TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
 
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName> {
 		None
@@ -47,10 +56,6 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> TSGenerator<'model> for TSTest
 
 	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model> {
 		self.type_def.referenced_types()
-	}
-
-	fn scope(&self) -> &model::Scope<'model> {
-		&self.scope
 	}
 
 	fn current_dir(&self) -> Result<PathBuf, GeneratorError> {
@@ -100,7 +105,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
         let type_args: Vec<_> = type_arg_map.values().map(|arg| arg.clone()).collect();
         let current_type = model::Type::Defined(self.type_def.name().clone(), type_args);
 
-        self.write_codec(version, &current_type)?;
+        self.write_expr(&self.build_codec(version, &current_type)?)?;
         write!(self.file, ", ")?;
         
         let mut writer = MemoryFormatWriter::new();
