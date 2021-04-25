@@ -1,8 +1,9 @@
 package enum_.versions
 
+import dev.argon.verilization.scala_runtime.Converter
+
 object Referenced_Conversions {
-	def v1ToV2(prev: Referenced.V1): Referenced.V2 =
-		prev match {
-			case Referenced.V1.x(x) => Referenced.V2.x(x)
-		}
+	val v1ToV2: Converter[Referenced.V1, Referenced.V2] = {
+		case Referenced.V1.x(x) => Referenced.V2.x(x)
+	}
 }

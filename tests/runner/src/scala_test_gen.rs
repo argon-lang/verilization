@@ -2,6 +2,7 @@ use verilization_compiler::{lang, model, for_sep};
 use lang::GeneratorError;
 use lang::scala::{ScalaGenerator, ScalaOptions};
 use model::{Verilization, Named};
+use lang::generator::*;
 
 use crate::memory_format::MemoryFormatWriter;
 use crate::test_lang::{TestLanguage, TestGenerator};
@@ -26,26 +27,30 @@ struct ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
 }
 
 
-impl <'model, 'opt, 'output, F: Write, R> ScalaGenerator<'model, 'opt> for ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
+impl <'model, 'opt, 'state, 'output, F: Write, R> GeneratorWithFile for ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
 	type GeneratorFile = F;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
+}
 
-	fn model(&mut self) -> &'model model::Verilization {
+impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model, lang::scala::ScalaLanguage> for ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
+	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
 
+	fn scope(&self) -> &model::Scope<'model> {
+		&self.scope
+	}
+}
+
+impl <'model, 'opt, 'output, F: Write, R> ScalaGenerator<'model, 'opt> for ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
 	fn options(&self) -> &'opt ScalaOptions {
 		self.options
 	}
 
 	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model> {
 		self.type_def.referenced_types()
-	}
-
-	fn scope(&self) -> &model::Scope<'model> {
-		&self.scope
 	}
 }
 
@@ -66,10 +71,10 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
         let current_type = model::Type::Defined(self.type_def.name().clone(), type_args);
 
         write!(self.file, "\t\tsertests.TestCase[")?;
-        self.write_type(version, &current_type)?;
+        self.write_type(&self.build_type(version, &current_type)?)?;
         write!(self.file, "](")?;
 
-        self.write_codec(version, &current_type)?;
+        self.write_expr(&self.build_codec(version, &current_type)?)?;
         write!(self.file, ", ")?;
         
         let mut writer = MemoryFormatWriter::new();
@@ -194,7 +199,7 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
                             write!(self.file, "new ")?;
                             self.write_qual_name(&name)?;
                             write!(self.file, ".V{}", ver_type.version)?;
-                            self.write_type_args(&ver_type.version, args)?;
+                            self.write_type_args(&args.iter().map(|arg| self.build_type(version, arg)).collect::<Result<Vec<_>, _>>()?)?;
                             write!(self.file, "(")?;
         
                             for_sep!((_, field), &ver_type.ver_type.fields, { write!(self.file, ", ")?; }, {
@@ -215,7 +220,7 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
                             write!(self.file, "new ")?;
                             self.write_qual_name(&name)?;
                             write!(self.file, ".V{}.{}", ver_type.version, field_name)?;
-                            self.write_type_args(&ver_type.version, args)?;
+                            self.write_type_args(&args.iter().map(|arg| self.build_type(version, arg)).collect::<Result<Vec<_>, _>>()?)?;
                             write!(self.file, "(")?;
                             self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type, &resolved_args)?;
                             write!(self.file, ")")?;

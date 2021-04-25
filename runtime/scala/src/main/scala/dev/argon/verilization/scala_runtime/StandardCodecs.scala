@@ -1,6 +1,6 @@
 package dev.argon.verilization.scala_runtime
 
-import zio.{IO, ZIO, Chunk}
+import zio.{IO, ZIO, Chunk, ChunkBuilder}
 import java.nio.charset.StandardCharsets
 
 object StandardCodecs {
@@ -66,27 +66,6 @@ object StandardCodecs {
             val data = value.getBytes(StandardCharsets.UTF_8)
             natCodec.write(writer, value.length) *> writer.writeBytes(Chunk.fromArray(data))
         }
-            
-    }
-
-    def listCodec[A](elementCodec: Codec[A]): Codec[Chunk[A]] = new Codec[Chunk[A]] {
-
-        override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, Chunk[A]] =
-            natCodec.read(reader).flatMap { length =>
-                if(length > Int.MaxValue)
-                    IO.succeed(length.toInt)
-                else
-                    IO.die(new ArithmeticException("Length of chunk would overflow"))
-            }.flatMap { length =>
-                def readElements(num: Int, data: Chunk[A]): ZIO[R, E, Chunk[A]] =
-                    if(num > 0) elementCodec.read(reader).flatMap { elem => readElements(num - 1, data :+ elem) }
-                    else IO.succeed(data)
-
-                readElements(length, Chunk.empty)
-            }
-
-        override def write[R, E](writer: FormatWriter[R, E], value: Chunk[A]): ZIO[R, E, Unit] =
-            natCodec.write(writer, value.size) *> ZIO.foreach_(value) { elem => elementCodec.write(writer, elem) }
             
     }
 

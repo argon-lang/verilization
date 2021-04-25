@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use num_bigint::{BigUint, BigInt, Sign};
+use super::generator::*;
 
 type PackageMap = HashMap<model::PackageName, model::PackageName>;
 const RUNTIME_PACKAGE: &str = "dev.argon.verilization.scala_runtime";
@@ -42,28 +43,9 @@ fn open_scala_file<'output, Output: OutputHandler>(options: &ScalaOptions, outpu
 }
 
 
-fn requires_conversion(field_type: &model::Type) -> bool {
-	match field_type {
-		model::Type::List(inner) => requires_conversion(inner),
-		model::Type::Option(inner) => requires_conversion(inner),
-		model::Type::Defined(_, _) => true,
-		_ => false,
-	}
-}
-
-pub enum ConvertParam {
-	FunctionObject,
-	Expression(String),
-}
-
-pub trait ScalaGenerator<'model, 'opt> {
-	type GeneratorFile : Write;
-	fn file(&mut self) -> &mut Self::GeneratorFile;
-	fn model(&mut self) -> &'model model::Verilization;
+pub trait ScalaGenerator<'model, 'opt> : Generator<'model, ScalaLanguage> + GeneratorWithFile {
 	fn options(&self) -> &'opt ScalaOptions;
 	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model>;
-	fn scope(&self) -> &model::Scope<'model>;
-
 
 
 	fn scala_package(&self, package: &model::PackageName) -> Result<&'opt model::PackageName, GeneratorError> {
@@ -98,11 +80,11 @@ pub trait ScalaGenerator<'model, 'opt> {
 		Ok(())
 	}
 
-	fn write_type_args(&mut self, version: &BigUint, args: &Vec<model::Type>) -> Result<(), GeneratorError> {
+	fn write_type_args(&mut self, args: &Vec<LangType<'model>>) -> Result<(), GeneratorError> {
 		if !args.is_empty() {
 			write!(self.file(), "[")?;
 			for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
-				self.write_type(version, arg)?;
+				self.write_type(arg)?;
 			});
 			write!(self.file(), "]")?;
 		}
@@ -111,198 +93,223 @@ pub trait ScalaGenerator<'model, 'opt> {
 	}
 	
 	
-	fn write_type(&mut self, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
+	fn write_type(&mut self, t: &LangType<'model>) -> Result<(), GeneratorError> {
 		Ok(match t {
-			// Map built-in types to the equivalent Java type.
-			model::Type::Nat | model::Type::Int => write!(self.file(), "scala.math.BigInt")?,
+			// Map built-in types to the equivalent Scala type.
+			LangType::Nat | LangType::Int => write!(self.file(), "scala.math.BigInt")?,
 			
-			model::Type::U8 | model::Type::I8 => write!(self.file(), "scala.Byte")?,
+			LangType::U8 | LangType::I8 => write!(self.file(), "scala.Byte")?,
 			
-			model::Type::U16 | model::Type::I16 => write!(self.file(), "scala.Short")?,
+			LangType::U16 | LangType::I16 => write!(self.file(), "scala.Short")?,
 	
-			model::Type::U32 | model::Type::I32 => write!(self.file(), "scala.Int")?,
+			LangType::U32 | LangType::I32 => write!(self.file(), "scala.Int")?,
 	
-			model::Type::U64 | model::Type::I64 => write!(self.file(), "scala.Long")?,
+			LangType::U64 | LangType::I64 => write!(self.file(), "scala.Long")?,
 	
-			model::Type::String => write!(self.file(), "scala.Predef.String")?,
+			LangType::String => write!(self.file(), "scala.Predef.String")?,
 	
 	
-			model::Type::List(inner) => {
+			LangType::List(inner) => {
 				write!(self.file(), "zio.Chunk[")?;
-				self.write_type(version, inner)?;
+				self.write_type(inner)?;
 				write!(self.file(), "]")?;
 			},
-			model::Type::Option(inner) => {
+			LangType::Option(inner) => {
 				write!(self.file(), "scala.Option[")?;
-				self.write_type(version, inner)?;
+				self.write_type(inner)?;
 				write!(self.file(), "]")?;
 			},
 	
-			model::Type::Defined(t, args) => match self.scope().lookup(t.clone()) {
-				model::ScopeLookup::NamedType(t) => {
-					match self.model().get_type(&t).ok_or("Could not find type")? {
-						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
-							let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
+			LangType::Versioned(name, version, args) => {
+				self.write_qual_name(&name)?;
+				write!(self.file(), ".V{}", version)?;
+				self.write_type_args(args)?;
+			},
 
-							self.write_qual_name(&t)?;
-							write!(self.file(), ".V{}", ver_type.version)?;
-							self.write_type_args(version, args)?;
+			LangType::TypeParameter(name) => {
+				write!(self.file(), "{}", name)?;
+			},
 
-						},
-					}
+			LangType::Converter(from, to) => {
+				write!(self.file(), "{}.Converter[", RUNTIME_PACKAGE)?;
+				self.write_type(&*from)?;
+				write!(self.file(), ", ")?;
+				self.write_type(&*to)?;
+				write!(self.file(), "]")?;
+			},
 
-				},
-				model::ScopeLookup::TypeParameter(name) => {
-					write!(self.file(), "{}", name)?;
-				}
+			LangType::Codec(t) => {
+				write!(self.file(), "{}.Codec[", RUNTIME_PACKAGE)?;
+				self.write_type(&*t)?;
+				write!(self.file(), "]")?;
 			},
 		})
 	}
 
-	fn write_version_convert(&mut self, prev_ver: &BigUint, version: &BigUint, field_type: &model::Type, param: ConvertParam) -> Result<(), GeneratorError> {
-		match field_type {
-			model::Type::Defined(name, args) => match self.scope().lookup(name.clone()) {
-				model::ScopeLookup::NamedType(name) => {
-					match self.model().get_type(&name).ok_or("Could not find type")? {
-						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
-							let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
+	fn write_args(&mut self, args: &Vec<LangExpr<'model>>) -> Result<(), GeneratorError> {
+		if !args.is_empty() {
+			write!(self.file(), "(")?;
+			for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
+				self.write_expr(&arg)?;
+			});
+			write!(self.file(), ")")?;
+		}
 
-							if ver_type.version < *version { // Final type with no newer versions, no need to convert
-								match param {
-									ConvertParam::FunctionObject => write!(self.file(), "java.util.function.Function::identity")?,
-									ConvertParam::Expression(param_str) => write!(self.file(), "{}", param_str)?,
-								}
-								return Ok(())
-							}
-
-
-							self.write_qual_name(&name)?;
-							write!(self.file(), ".V{}", version)?;
-							write!(self.file(), ".fromV{}", prev_ver)?;
-							if !args.is_empty() {
-								write!(self.file(), "[")?;
-								for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
-									self.write_type(prev_ver, arg)?;
-									write!(self.file(), ", ")?;
-									self.write_type(version, arg)?;
-								});
-								write!(self.file(), "]")?;
-								write!(self.file(), "(")?;
-								for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
-									self.write_version_convert(prev_ver, version, arg, ConvertParam::FunctionObject)?;
-								});
-								write!(self.file(), ")")?;
-							}
-							match param {
-								ConvertParam::FunctionObject => (),
-								ConvertParam::Expression(param_str) => write!(self.file(), "({})", param_str)?,
-							}
-						}
-					}
-				},
-				model::ScopeLookup::TypeParameter(name) => {
-					write!(self.file(), "{}_conv", name)?;
-					if let ConvertParam::Expression(param_str) = param {
-						write!(self.file(), "({})", param_str)?;
-					}
-				}
-			},
-	
-			model::Type::List(inner) if requires_conversion(inner) =>
-				match param {
-					ConvertParam::FunctionObject => {
-						write!(self.file(), "{}.Util.mapChunk(", RUNTIME_PACKAGE)?;
-						self.write_version_convert(prev_ver, version, inner, ConvertParam::FunctionObject)?;
-						write!(self.file(), ")")?;
-					},
-					ConvertParam::Expression(param_str) => {
-						write!(self.file(), "{}.map(", param_str)?;
-						self.write_version_convert(prev_ver, version, inner, ConvertParam::FunctionObject)?;
-						write!(self.file(), ")")?;
-					},
-				},
-	
-			model::Type::Option(inner) if requires_conversion(inner) => 
-				match param {
-					ConvertParam::FunctionObject => {
-						write!(self.file(), "{}.Util.mapOption(", RUNTIME_PACKAGE)?;
-						self.write_version_convert(prev_ver, version, inner, ConvertParam::FunctionObject)?;
-						write!(self.file(), ")")?;
-					},
-					ConvertParam::Expression(param_str) => {
-						write!(self.file(), "{}.map(", param_str)?;
-						self.write_version_convert(prev_ver, version, inner, ConvertParam::FunctionObject)?;
-						write!(self.file(), ")")?;
-					},
-				},
-	
-	
-			_ => match param {
-				ConvertParam::FunctionObject => write!(self.file(), "scala.Predef.identity")?,
-				ConvertParam::Expression(param_str) => write!(self.file(), "{}", param_str)?,
-			},
-		};
-	
 		Ok(())
 	}
 
+	fn write_operation_name(&mut self, op: &Operation) -> Result<(), GeneratorError> {
+		match op {
+			Operation::FromPreviousVersion(prev_ver) => write!(self.file(), "fromV{}", prev_ver)?,
+			Operation::FinalTypeConverter => write!(self.file(), "converter")?,
+			Operation::VersionedTypeCodec => write!(self.file(), "codec")?,
+		}
 
-	fn write_codec(&mut self, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
-		match t {
-			model::Type::Nat => write!(self.file(), "{}.StandardCodecs.natCodec", RUNTIME_PACKAGE)?,
-			model::Type::Int => write!(self.file(), "{}.StandardCodecs.intCodec", RUNTIME_PACKAGE)?,
-			model::Type::U8 | model::Type::I8 => write!(self.file(), "{}.StandardCodecs.i8Codec", RUNTIME_PACKAGE)?,
-			model::Type::U16 | model::Type::I16 => write!(self.file(), "{}.StandardCodecs.i16Codec", RUNTIME_PACKAGE)?,
-			model::Type::U32 | model::Type::I32 => write!(self.file(), "{}.StandardCodecs.i32Codec", RUNTIME_PACKAGE)?,
-			model::Type::U64 | model::Type::I64 => write!(self.file(), "{}.StandardCodecs.i64Codec", RUNTIME_PACKAGE)?,
-			model::Type::String => write!(self.file(), "{}.StandardCodecs.stringCodec", RUNTIME_PACKAGE)?,
-			model::Type::List(inner) => {
-				match **inner {
-					model::Type::U8 | model::Type::I8 => write!(self.file(), "{}.StandardCodecs.i8ListCodec", RUNTIME_PACKAGE)?,
-					model::Type::U16 | model::Type::I16 => write!(self.file(), "{}.StandardCodecs.i16ListCodec", RUNTIME_PACKAGE)?,
-					model::Type::U32 | model::Type::I32 => write!(self.file(), "{}.StandardCodecs.i32ListCodec", RUNTIME_PACKAGE)?,
-					model::Type::U64 | model::Type::I64 => write!(self.file(), "{}.StandardCodecs.i64ListCodec", RUNTIME_PACKAGE)?,
-					_ => {
-						write!(self.file(), "{}.StandardCodecs.listCodec(", RUNTIME_PACKAGE)?;
-						self.write_codec(version, inner)?;
-						write!(self.file(), ")")?
-					},
-				}
+		Ok(())
+	}
+
+	fn write_expr(&mut self, expr: &LangExpr<'model>) -> Result<(), GeneratorError> {
+		match expr {
+			LangExpr::Identifier(name) => write!(self.file(), "{}", name)?,
+			LangExpr::InvokeConverter { converter, value } => {
+				self.write_expr(&*converter)?;
+				write!(self.file(), ".convert(")?;
+				self.write_expr(&*value)?;
+				write!(self.file(), ")")?;
 			},
-			model::Type::Option(inner) => {
-				write!(self.file(), "{}.StandardCodecs.option(", RUNTIME_PACKAGE)?;
-				self.write_codec(version, inner)?;
+			LangExpr::IdentityConverter(t) => {
+				write!(self.file(), "{}.Converter.identity[", RUNTIME_PACKAGE)?;
+				self.write_type(t)?;
+				write!(self.file(), "]")?;
+			},
+			LangExpr::MapListConverter { from_type, to_type, element_converter } => {
+				write!(self.file(), "{}.List.converter[", RUNTIME_PACKAGE)?;
+				self.write_type(from_type)?;
+				write!(self.file(), ", ")?;
+				self.write_type(to_type)?;
+				write!(self.file(), "](")?;
+				self.write_expr(element_converter)?;
+				write!(self.file(), ")")?;
+				
+			},
+			LangExpr::MapOptionConverter { from_type, to_type, element_converter } => {
+				write!(self.file(), "{}.Option.converter[", RUNTIME_PACKAGE)?;
+				self.write_type(from_type)?;
+				write!(self.file(), ", ")?;
+				self.write_type(to_type)?;
+				write!(self.file(), "](")?;
+				self.write_expr(element_converter)?;
+				write!(self.file(), ")")?;
+			},
+			LangExpr::NatCodec => write!(self.file(), "{}.StandardCodecs.natCodec", RUNTIME_PACKAGE)?,
+			LangExpr::IntCodec => write!(self.file(), "{}.StandardCodecs.intCodec", RUNTIME_PACKAGE)?,
+			LangExpr::U8Codec | LangExpr::I8Codec => write!(self.file(), "{}.StandardCodecs.i8Codec", RUNTIME_PACKAGE)?,
+			LangExpr::U16Codec | LangExpr::I16Codec => write!(self.file(), "{}.StandardCodecs.i16Codec", RUNTIME_PACKAGE)?,
+			LangExpr::U32Codec | LangExpr::I32Codec => write!(self.file(), "{}.StandardCodecs.i32Codec", RUNTIME_PACKAGE)?,
+			LangExpr::U64Codec | LangExpr::I64Codec => write!(self.file(), "{}.StandardCodecs.i64Codec", RUNTIME_PACKAGE)?,
+			LangExpr::StringCodec => write!(self.file(), "{}.StandardCodecs.stringCodec", RUNTIME_PACKAGE)?,
+			LangExpr::ListCodec(inner) => {
+				write!(self.file(), "{}.List.codec(", RUNTIME_PACKAGE)?;
+				self.write_expr(&*inner)?;
 				write!(self.file(), ")")?
 			},
-			model::Type::Defined(name, args) => match self.scope().lookup(name.clone()) {
-				model::ScopeLookup::NamedType(name) => {
-					match self.model().get_type(&name).ok_or("Could not find type")? {
-						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
-							let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
-
-							self.write_qual_name(&name)?;
-							write!(self.file(), ".V{}", ver_type.version)?;
-							write!(self.file(), ".codec")?;
-							if !args.is_empty() {
-								write!(self.file(), "(")?;
-								for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
-									self.write_codec(version, arg)?;
-								});
-								write!(self.file(), ")")?;
-							}
-
-						},
-					}
-				},
-				model::ScopeLookup::TypeParameter(name) => {
-					write!(self.file(), "{}_codec", name)?
-				},
+			LangExpr::OptionCodec(inner) => {
+				write!(self.file(), "{}.Option.codec(", RUNTIME_PACKAGE)?;
+				self.write_expr(&*inner)?;
+				write!(self.file(), ")")?
+			},
+			LangExpr::ReadDiscriminator => write!(self.file(), "{}.StandardCodecs.natCodec.read(reader)", RUNTIME_PACKAGE)?,
+			LangExpr::WriteDiscriminator(value) => write!(self.file(), "{}.StandardCodecs.natCodec.write(writer, {})", RUNTIME_PACKAGE, value)?,
+			LangExpr::CodecRead { codec } => {
+				self.write_expr(&*codec)?;
+				write!(self.file(), ".read(reader)")?;
+			},
+			LangExpr::CodecWrite { codec, value } => {
+				self.write_expr(&*codec)?;
+				write!(self.file(), ".write(writer, ")?;
+				self.write_expr(value)?;
+				write!(self.file(), ")")?;
+			},
+			LangExpr::InvokeOperation(op, name, version, type_args, args) => {
+				self.write_qual_name(name)?;
+				write!(self.file(), ".V{}.", version)?;
+				self.write_operation_name(op)?;
+				self.write_type_args(type_args)?;
+				self.write_args(args)?;
+			},
+			LangExpr::InvokeUserConverter { name, prev_ver, version, type_args, args } => {
+				self.write_qual_name(name)?;
+				write!(self.file(), "_Conversions.v{}ToV{}", prev_ver, version)?;
+				self.write_type_args(type_args)?;
+				self.write_args(args)?;
+			},
+			LangExpr::ConstantValue(name, version) => {
+				self.write_qual_name(name)?;
+				write!(self.file(), ".{}", Self::constant_version_name(version))?;
+			},
+			LangExpr::ConstantValue(name, version) => {
+				self.write_qual_name(name)?;
+				write!(self.file(), ".{}", Self::constant_version_name(version))?;
+			},
+			LangExpr::CreateStruct(name, version, type_args, fields) => {
+				write!(self.file(), "new ")?;
+				self.write_qual_name(name)?;
+				write!(self.file(), ".V{}", version)?;
+				self.write_type_args(type_args)?;
+				write!(self.file(), "(")?;
+				for_sep!((_, value), fields, { write!(self.file(), ", ")?; }, {
+					self.write_expr(value)?;
+				});
+				write!(self.file(), ")")?;
+			},
+			LangExpr::CreateEnum(name, version, type_args, field_name, value) => {
+				write!(self.file(), "new ")?;
+				self.write_qual_name(name)?;
+				write!(self.file(), ".V{}.{}", version, field_name)?;
+				self.write_type_args(type_args)?;
+				write!(self.file(), "(")?;
+				self.write_expr(value)?;
+				write!(self.file(), ")")?;
+			},
+			LangExpr::StructField(_, _, field_name, value) => {
+				self.write_expr(value)?;
+				write!(self.file(), ".{}", field_name)?;
 			},
 		}
-	
+
 		Ok(())
 	}
 	
+}
+
+impl <'model, 'opt, TImpl> GeneratorNameMapping<ScalaLanguage> for TImpl where TImpl : ScalaGenerator<'model, 'opt> {
+	fn convert_prev_type_param(param: &str) -> String {
+		format!("{}_1", param)
+	}
+
+	fn convert_current_type_param(param: &str) -> String {
+		format!("{}_2", param)
+	}
+
+	fn convert_conv_param_name(param: &str) -> String {
+		format!("{}_conv", param)
+	}
+
+	fn convert_prev_param_name() -> &'static str {
+		"prev"
+	}
+
+	fn codec_write_value_name() -> &'static str {
+		"value"
+	}
+
+	fn codec_codec_param_name(param: &str) -> String {
+		format!("{}_codec", param)
+	}
+
+	fn constant_version_name(version: &BigUint) -> String {
+		format!("v{}", version)
+	}
 }
 
 struct ScalaConstGenerator<'model, 'opt, 'output, Output: OutputHandler> {
@@ -313,16 +320,24 @@ struct ScalaConstGenerator<'model, 'opt, 'output, Output: OutputHandler> {
 	scope: model::Scope<'model>,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> ScalaGenerator<'model, 'opt> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler> Generator<'model, ScalaLanguage> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
+	fn model(&self) -> &'model model::Verilization {
+		self.model
+	}
+
+	fn scope(&self) -> &model::Scope<'model> {
+		&self.scope
+	}
+}
+
+impl <'model, 'opt, 'output, Output: OutputHandler> GeneratorWithFile for ScalaConstGenerator<'model, 'opt, 'output, Output> {
 	type GeneratorFile = Output::FileHandle<'output>;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
+}
 
-	fn model(&mut self) -> &'model model::Verilization {
-		self.model
-	}
-
+impl <'model, 'opt, 'output, Output: OutputHandler> ScalaGenerator<'model, 'opt> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
 	fn options(&self) -> &'opt ScalaOptions {
 		self.options
 	}
@@ -330,11 +345,35 @@ impl <'model, 'opt, 'output, Output: OutputHandler> ScalaGenerator<'model, 'opt>
 	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model> {
 		self.constant.referenced_types()
 	}
+}
 
-	fn scope(&self) -> &model::Scope<'model> {
-		&self.scope
+impl <'model, 'opt, 'output, Output: OutputHandler> ConstGenerator<'model, ScalaLanguage> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
+	fn constant(&self) -> Named<'model, model::Constant> {
+		self.constant
 	}
 
+	fn write_header(&mut self) -> Result<(), GeneratorError> {
+        self.write_package(&self.constant.name().package)?;
+
+		writeln!(self.file, "object {} {{", self.constant.name().name)?;
+
+		Ok(())
+	}
+
+	fn write_constant(&mut self, version_name: String, t: LangType<'model>, value: LangExpr<'model>) -> Result<(), GeneratorError> {
+		write!(self.file, "\tval {}: ", version_name)?;
+		self.write_type(&t)?;
+		write!(self.file, " = ")?;
+		self.write_expr(&value)?;
+		writeln!(self.file)?;
+
+		Ok(())
+	}
+
+	fn write_footer(&mut self) -> Result<(), GeneratorError> {
+		writeln!(self.file, "}}")?;
+		Ok(())
+	}
 }
 
 
@@ -351,42 +390,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler> ScalaConstGenerator<'model, 
 		})
 	}
 
-
-	fn generate(&mut self) -> Result<(), GeneratorError> {
-        self.write_package(&self.constant.name().package)?;
-
-		writeln!(self.file, "object {} {{", self.constant.name().name)?;
-		for ver in self.constant.versions() {
-			write!(self.file, "\tval value: ")?;
-			self.write_type(&ver.version, &self.constant.value_type())?;
-			write!(self.file, " = ")?;
-			if let Some(value) = ver.value {
-				self.write_constant_value(&ver.version, value)?;
-			}
-			else {
-				let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, ver.version.clone()) - 1;
-				let prev_ver = prev_ver.to_biguint().unwrap();
-				self.write_version_convert(&prev_ver, &ver.version, self.constant.value_type(), ConvertParam::Expression(format!("v{}", prev_ver)))?;
-			}
-			writeln!(self.file)?;
-		}
-		writeln!(self.file, "}}")?;
-
-		Ok(())
-	}
-
-	fn write_constant_value(&mut self, _version: &BigUint, value: &model::ConstantValue) -> Result<(), GeneratorError> {
-		Ok(match value {
-			model::ConstantValue::Integer(n) => write!(self.file, "{}", n)?,
-		})
-	}
 }
-
-#[derive(Default)]
-struct ScalaStructType {}
-
-#[derive(Default)]
-struct ScalaEnumType {}
 
 struct ScalaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler, Extra> {
 	options: &'opt ScalaOptions,
@@ -394,34 +398,18 @@ struct ScalaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler, Extra> {
 	file: Output::FileHandle<'output>,
 	type_def: Named<'model, model::TypeDefinitionData>,
 	scope: model::Scope<'model>,
-	versions: HashSet<BigUint>,
+	indentation_level: u32,
 	_extra: Extra,
 }
 
 trait ScalaExtraGeneratorOps {
 	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError>;
 	fn write_versioned_type_object_data(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError>;
-	fn write_from_prev_version(&mut self, ver_type: &model::TypeVersionInfo, prev_ver: &BigUint) -> Result<(), GeneratorError>;
-	fn write_codec_read(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError>;
-	fn write_codec_write(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError>;
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> ScalaGenerator<'model, 'opt> for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
-	type GeneratorFile = Output::FileHandle<'output>;
-	fn file(&mut self) -> &mut Self::GeneratorFile {
-		&mut self.file
-	}
-
-	fn model(&mut self) -> &'model model::Verilization {
+impl <'model, 'opt, 'output, Output: OutputHandler, Extra> Generator<'model, ScalaLanguage> for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+	fn model(&self) -> &'model model::Verilization {
 		self.model
-	}
-
-	fn options(&self) -> &'opt ScalaOptions {
-		self.options
-	}
-
-	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model> {
-		self.type_def.referenced_types()
 	}
 
 	fn scope(&self) -> &model::Scope<'model> {
@@ -429,10 +417,110 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> ScalaGenerat
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> where ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> : ScalaExtraGeneratorOps {
+impl <'model, 'opt, 'output, Output: OutputHandler, Extra> GeneratorWithFile for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+	type GeneratorFile = Output::FileHandle<'output>;
+	fn file(&mut self) -> &mut Self::GeneratorFile {
+		&mut self.file
+	}
+}
+
+impl <'model, 'opt, 'output, Output: OutputHandler, Extra> Indentation for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+	fn indentation_size(&mut self) -> &mut u32 {
+		&mut self.indentation_level
+	}
+}
+
+impl <'model, 'opt, 'output, Output: OutputHandler, Extra> ScalaGenerator<'model, 'opt> for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+	fn options(&self) -> &'opt ScalaOptions {
+		self.options
+	}
+
+	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model> {
+		self.type_def.referenced_types()
+	}
+}
+
+impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> VersionedTypeGenerator<'model, ScalaLanguage, GenTypeKind> for ScalaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
+	where ScalaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : ScalaExtraGeneratorOps
+{
+	fn type_def(&self) -> Named<'model, model::TypeDefinitionData> {
+		self.type_def
+	}
+
+	fn write_header(&mut self) -> Result<(), GeneratorError> {
+		self.write_package(&self.type_def.name().package)?;
+		writeln!(self.file, "sealed abstract class {}", self.type_def.name().name)?;
+		writeln!(self.file, "object {} {{", self.type_def.name().name)?;
+		self.indent_increase();
+		
+		Ok(())
+	}
+
+	fn write_version_header(&mut self, ver_type: &model::TypeVersionInfo<'model>) -> Result<(), GeneratorError> {
+
+		let version = &ver_type.version;
+
+		self.write_versioned_type(ver_type)?;
+
+		self.write_indent()?;
+		writeln!(self.file, "object V{} {{", version)?;
+		self.indent_increase();
+		self.write_versioned_type_object_data(ver_type)?;
+
+		Ok(())
+	}
+
+	fn write_operation(&mut self, operation: OperationInfo<'model>) -> Result<(), GeneratorError> {
+		let is_func = !operation.type_params.is_empty() || !operation.params.is_empty();
+
+		self.write_indent()?;
+		if is_func {
+			write!(self.file, "def ")?;
+		}
+		else {
+			write!(self.file, "val ")?;
+		}
+
+		self.write_operation_name(&operation.operation)?;
+		self.write_type_params(&operation.type_params)?;
+		if is_func {
+			write!(self.file, "(")?;
+			for_sep!((param_name, param), operation.params, { write!(self.file, ", ")?; }, {
+				write!(self.file, "{}: ", param_name)?;
+				self.write_type(&param)?;
+			});
+			write!(self.file, ")")?;
+		}
+		write!(self.file, ": ")?;
+		self.write_type(&operation.result)?;
+		write!(self.file, " = ")?;
+
+		self.write_expr_statement(operation.implementation)?;
 
 
-	fn open(model: &'model model::Verilization, options: &'opt ScalaOptions, output: &'output mut Output, type_def: Named<'model, model::TypeDefinitionData>) -> Result<Self, GeneratorError> {
+		Ok(())
+	}
+
+	fn write_version_footer(&mut self, _ver_type: &model::TypeVersionInfo<'model>) -> Result<(), GeneratorError> {
+		self.indent_decrease();
+		writeln!(self.file, "}}")?;
+
+		Ok(())
+	}
+
+	fn write_footer(&mut self) -> Result<(), GeneratorError> {
+		self.indent_decrease();
+		writeln!(self.file, "}}")?;
+		
+		Ok(())
+	}
+
+}
+
+impl <'model, 'opt, 'output, Output: OutputHandler, Extra> ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> where ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> : ScalaExtraGeneratorOps {
+
+
+	fn open(model: &'model model::Verilization, options: &'opt ScalaOptions, output: &'output mut Output, type_def: Named<'model, model::TypeDefinitionData>) -> Result<Self, GeneratorError> where Extra : Default {
 		let file = open_scala_file(options, output, type_def.name())?;
 		Ok(ScalaTypeGenerator {
 			file: file,
@@ -440,162 +528,335 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra: Default> ScalaTypeGen
 			options: options,
 			type_def: type_def,
 			scope: type_def.scope(),
-			versions: HashSet::new(),
+			indentation_level: 0,
 			_extra: Extra::default(),
 		})
 	}
 
-	fn generate(&mut self) -> Result<(), GeneratorError> {
-		self.write_package(&self.type_def.name().package)?;
-		writeln!(self.file, "sealed abstract class {}", self.type_def.name().name)?;
-		writeln!(self.file, "object {} {{", self.type_def.name().name)?;
+	fn write_expr_statement(&mut self, stmt: LangExprStmt<'model>) -> Result<(), GeneratorError> {
+		match stmt {
+			LangExprStmt::Expr(expr) => {
+				self.write_expr(&expr)?;
+				writeln!(self.file, ";")?;
+			},
 
-		for ver in self.type_def.versions() {
-			self.versioned_type(&ver)?;
+			LangExprStmt::CreateCodec { t, read, write } => {
+				write!(self.file, "new {}.Codec[", RUNTIME_PACKAGE)?;
+				self.write_type(&t)?;
+				writeln!(self.file, "] {{")?;
+				self.indent_increase();
+
+
+				self.write_indent()?;
+				write!(self.file, "override def read[R, E](reader: {}.FormatReader[R, E]): zio.ZIO[R, E, ", RUNTIME_PACKAGE)?;
+				self.write_type(&t)?;
+				write!(self.file, "] = ")?;
+				
+				self.write_statement(*read, true)?;
+
+				self.write_indent()?;
+				write!(self.file, "override def write[R, E](writer: {}.FormatWriter[R, E], value: ", RUNTIME_PACKAGE)?;
+				self.write_type(&t)?;
+				write!(self.file, "): zio.ZIO[R, E, Unit] = ")?;
+
+				self.write_statement(*write, true)?;
+
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
+			},
+
+			LangExprStmt::CreateConverter { from_type, to_type, body } => {
+				write!(self.file, "new {}.Converter[", RUNTIME_PACKAGE)?;
+				self.write_type(&from_type)?;
+				write!(self.file, ", ")?;
+				self.write_type(&to_type)?;
+				writeln!(self.file, "] {{")?;
+				self.indent_increase();
+
+
+				self.write_indent()?;
+				write!(self.file, "override def convert({}: ", Self::convert_prev_param_name())?;
+				self.write_type(&from_type)?;
+				write!(self.file, "): ")?;
+				self.write_type(&to_type)?;
+				write!(self.file, " = ")?;
+
+				self.write_statement(*body, false)?;
+
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}};")?;
+			},
 		}
-
-		writeln!(self.file, "}}")?;
 
 		Ok(())
 	}
 
-	fn versioned_type(&mut self, ver_type: &model::TypeVersionInfo<'model>) -> Result<(), GeneratorError> {
+	fn record_io_expr(&self, expr: &mut LangExpr<'model>, ops: &mut Vec<(String, LangExpr<'model>)>) {
+		let name = format!("value{}", ops.len());
+		let old_expr = std::mem::replace(expr, LangExpr::Identifier(name.clone()));
+		ops.push((name, old_expr));
+	}
 
-		let version = &ver_type.version;
+	fn gather_io_exprs(&self, expr: &mut LangExpr<'model>, ops: &mut Vec<(String, LangExpr<'model>)>) {
+		match expr {
+			LangExpr::ReadDiscriminator | LangExpr::WriteDiscriminator(_) => self.record_io_expr(expr, ops),
 
-		let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, version.clone()) - 1;
-		let prev_ver = prev_ver.magnitude();
+			LangExpr::CodecRead { codec } => {
+				self.gather_io_exprs(codec, ops);
+				self.record_io_expr(expr, ops);
+			},
+			LangExpr::CodecWrite { codec, value } => {
+				self.gather_io_exprs(codec, ops);
+				self.gather_io_exprs(value, ops);
+				self.record_io_expr(expr, ops);
+			},
 
-		self.write_versioned_type(ver_type)?;
-
-		writeln!(self.file, "\tobject V{} {{", version)?;
-		self.write_versioned_type_object_data(ver_type)?;
 
 
-		if !self.versions.is_empty() {
-			write!(self.file, "\t\tdef fromV{}", prev_ver)?;
-			self.write_type_params_with(|params| format!("{}_1, {}_2", params, params))?;
-			if !self.type_def.type_params().is_empty() {
-				write!(self.file, "(")?;
-				for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-					write!(self.file, "{}_conv: {}_1 => {}_2", param, param, param)?;
-				});
-				write!(self.file, ")")?;
-			}
-			write!(self.file, "(prev: V{}", prev_ver)?;
-			self.write_type_params_with(|params| format!("{}_1", params))?;
-			write!(self.file, "): V{}", version)?;
-			self.write_type_params_with(|params| format!("{}_2", params))?;
-			writeln!(self.file, " =")?;
-			if !ver_type.explicit_version {
-				self.write_from_prev_version(ver_type, prev_ver)?;
-			}
-			else {
-				write!(self.file, "\t\t\t")?;
-				self.write_qual_name(self.type_def.name())?;
-				write!(self.file, "_Conversions.v{}ToV{}", prev_ver, version)?;
-				if !self.type_def.type_params().is_empty() {
-					write!(self.file, "(")?;
-					for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-						write!(self.file, "{}_conv", param)?;
-					});
-					write!(self.file, ")")?;
+			LangExpr::InvokeConverter { converter, value } => {
+				self.gather_io_exprs(converter, ops);
+				self.gather_io_exprs(value, ops);
+			},
+			LangExpr::MapListConverter { element_converter, .. } => self.gather_io_exprs(element_converter, ops),
+			LangExpr::MapOptionConverter { element_converter, .. } => self.gather_io_exprs(element_converter, ops),
+			LangExpr::ListCodec(inner) => self.gather_io_exprs(inner, ops),
+			LangExpr::OptionCodec(inner) => self.gather_io_exprs(inner, ops),
+
+			LangExpr::InvokeOperation(_, _, _, _, args) => {
+				for arg in args {
+					self.gather_io_exprs(arg, ops);
 				}
-				writeln!(self.file, "(prev)")?;
-			}
+			},
+			LangExpr::InvokeUserConverter { args, .. } => {
+				for arg in args {
+					self.gather_io_exprs(arg, ops);
+				}
+			},
+			LangExpr::CreateStruct(_, _, _, fields) => {
+				for (_, value) in fields {
+					self.gather_io_exprs(value, ops);
+				}
+			},
+			LangExpr::CreateEnum(_, _, _, _, value) => {
+				self.gather_io_exprs(value, ops);
+			},
+			LangExpr::StructField(_, _, _, value) => {
+				self.gather_io_exprs(value, ops);
+			},
+			_ => (),
 		}
+	}
+	
+	fn write_statement(&mut self, stmt: LangStmt<'model>, use_io: bool) -> Result<(), GeneratorError> {
+		match stmt {
+			LangStmt::Expr(mut exprs, mut result_expr) if use_io => {
 
-		
-		if self.type_def.type_params().is_empty() {
-			write!(self.file, "\t\tval codec")?;
+				let mut io_ops = Vec::new();
+				let mut ignored_values = HashSet::new();
+
+				for mut expr in &mut exprs {
+					self.gather_io_exprs(&mut expr, &mut io_ops);
+					match expr {
+						LangExpr::Identifier(name) => { ignored_values.insert(name.clone()); },
+						_ => (),
+					};
+				}
+				
+				if let Some(result_expr) = &mut result_expr {
+					self.gather_io_exprs(result_expr, &mut io_ops);
+				}
+
+				if io_ops.is_empty() {
+					write!(self.file, "zio.IO.succeed(")?;
+					if let Some(result_expr) = result_expr {
+						self.write_expr(&result_expr)?;
+					}
+					else {
+						write!(self.file, "()")?;
+					}
+					writeln!(self.file, ")")?;
+				}
+				else {
+					writeln!(self.file, "for {{")?;
+					self.indent_increase();
+	
+					for (name, expr) in io_ops {
+						self.write_indent()?;
+						if ignored_values.contains(&name) {
+							write!(self.file, "_")?;
+						}
+						else {
+							write!(self.file, "{}", name)?;
+						}
+						write!(self.file, " <- ")?;
+						self.write_expr(&expr)?;
+						writeln!(self.file)?;
+					}
+	
+					self.indent_decrease();
+					self.write_indent()?;
+					write!(self.file, "}} yield ")?;
+	
+					if let Some(result_expr) = result_expr {
+						self.write_expr(&result_expr)?;
+					}
+					else {
+						write!(self.file, "()")?;
+					}
+	
+					writeln!(self.file)?;
+				}
+			},
+
+			LangStmt::Expr(exprs, result_expr) => {
+				writeln!(self.file, "{{")?;
+				self.indent_increase();
+
+				for expr in exprs {
+					self.write_indent()?;
+					self.write_expr(&expr)?;
+					writeln!(self.file)?;
+				}
+
+				if let Some(result_expr) = result_expr {
+					self.write_indent()?;
+					self.write_expr(&result_expr)?;
+					writeln!(self.file)?;
+				}
+
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
+			},
+
+			LangStmt::MatchEnum { mut value, value_type, cases } => {
+				if cases.is_empty() {
+					self.write_expr(&value)?;
+					writeln!(self.file)?;
+					return Ok(())
+				}
+
+				let mut io_ops = Vec::new();
+				if use_io {
+					self.gather_io_exprs(&mut value, &mut io_ops);
+				}
+
+				for (name, op) in &io_ops {
+					self.write_expr(op)?;
+					writeln!(self.file, ".flatMap {{ {} =>", name)?;
+					self.indent_increase();
+					self.write_indent()?;
+				}
+
+
+				self.write_expr(&value)?;
+				writeln!(self.file, " match {{")?;
+				self.indent_increase();
+
+				for MatchCase { binding_name, case_name, body } in cases {
+					self.write_indent()?;
+					write!(self.file, "case ")?;
+					match &value_type {
+						LangType::Versioned(name, version, args) => {
+							self.write_qual_name(name)?;
+							write!(self.file, ".V{}.{}({})", version, case_name, binding_name)?;
+						},
+						_ => Err("Invalid enum type.")?,
+					}
+					
+					write!(self.file, " => ")?;
+
+					self.write_statement(body, use_io)?;
+				}
+				
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
+
+
+
+				for _ in &io_ops {
+					self.indent_decrease();
+					self.write_indent()?;
+					writeln!(self.file, "}}")?;
+				}
+			},
+
+			LangStmt::MatchDiscriminator { mut value, cases } => {
+				let mut io_ops = Vec::new();
+				if use_io {
+					self.gather_io_exprs(&mut value, &mut io_ops);
+				}
+
+				for (name, op) in &io_ops {
+					self.write_expr(op)?;
+					writeln!(self.file, ".flatMap {{ {} =>", name)?;
+					self.indent_increase();
+					self.write_indent()?;
+				}
+
+				self.write_expr(&value)?;
+				writeln!(self.file, " match {{")?;
+				self.indent_increase();
+
+				for (n, body) in cases {
+					self.write_indent()?;
+					write!(self.file, "case {}.Util.BigIntValue({}) => ", RUNTIME_PACKAGE, n)?;
+
+					self.write_statement(body, use_io)?;
+				}
+				
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
+
+				for _ in &io_ops {
+					self.indent_decrease();
+					self.write_indent()?;
+					writeln!(self.file, "}}")?;
+				}
+			},
+			
+
 		}
-		else {
-			write!(self.file, "\t\tdef codec")?;
-			self.write_type_params()?;
-			write!(self.file, "(")?;
-			for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-				write!(self.file, "{}_codec: {}.Codec[{}]", param, RUNTIME_PACKAGE, param)?;
-			});
-			write!(self.file, ")")?;
-		}
-		write!(self.file, ": {}.Codec[V{}", RUNTIME_PACKAGE, version)?;
-		self.write_type_params()?;
-		write!(self.file, "] = new {}.Codec[V{}", RUNTIME_PACKAGE, version)?;
-		self.write_type_params()?;
-		writeln!(self.file, "] {{")?;
-		write!(self.file, "\t\t\toverride def read[R, E](reader: {}.FormatReader[R, E]): zio.ZIO[R, E, V{}", RUNTIME_PACKAGE, version)?;
-		self.write_type_params()?;
-		writeln!(self.file, "] =")?;
-		self.write_codec_read(ver_type)?;
-
-
-		write!(self.file, "\t\t\toverride def write[R, E](writer: {}.FormatWriter[R, E], value: V{}", RUNTIME_PACKAGE, version)?;
-		self.write_type_params()?;
-		writeln!(self.file, "): zio.ZIO[R, E, Unit] = ")?;
-		self.write_codec_write(ver_type)?;
-
-		writeln!(self.file, "\t\t}}")?;
-
-		writeln!(self.file, "\t}}")?;
-
-		self.versions.insert(version.clone());
 
 		Ok(())
 	}
 
-	fn write_type_params(&mut self) -> Result<(), GeneratorError> {
-		self.write_type_params_with(|param| param.to_string())
-	}
-
-	fn write_type_params_with(&mut self, f: impl Fn(&str) -> String) -> Result<(), GeneratorError> {
-		if !self.type_def.type_params().is_empty() {
+	fn write_type_params(&mut self, params: &Vec<String>) -> Result<(), GeneratorError> {
+		if !params.is_empty() {
 			write!(self.file, "[")?;
-			for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-				write!(self.file, "{}", f(param))?;
+			for_sep!(param, params, { write!(self.file, ", ")?; }, {
+				write!(self.file, "{}", param)?;
 			});
 			write!(self.file, "]")?;
 		}
 	
 		Ok(())
 	}
-	
-	fn write_value_read(&mut self, version: &BigUint, t: &model::Type) -> Result<(), GeneratorError> {
-		self.write_codec(version, t)?;
-		write!(self.file, ".read(reader)")?;
-	
-		Ok(())
-	}
-	
-	fn write_value_write(&mut self, version: &BigUint, t: &model::Type, value: String) -> Result<(), GeneratorError> {
-		match t {
-			model::Type::U8 | model::Type::I8 => write!(self.file, "writer.writeByte({})", value)?,
-			model::Type::U16 | model::Type::I16 => write!(self.file, "writer.writeShort({})", value)?,
-			model::Type::U32 | model::Type::I32 => write!(self.file, "writer.writeInt({})", value)?,
-			model::Type::U64 | model::Type::I64 => write!(self.file, "writer.writeLong({})", value)?,
-			_ => {
-				self.write_codec(version, t)?;
-				write!(self.file, ".write(writer, {})", value)?;
-			},
-		}
-	
-		Ok(())
-	}
 }
 
-impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorOps for ScalaTypeGenerator<'model, 'opt, 'state, Output, ScalaStructType> {
+impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorOps for ScalaTypeGenerator<'model, 'opt, 'state, Output, GenStructType> {
 
 	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		write!(self.file, "\tfinal case class V{}", ver_type.version)?;
-		self.write_type_params()?;
+		self.write_indent()?;
+		write!(self.file, "final case class V{}", ver_type.version)?;
+		self.write_type_params(&self.type_def().type_params())?;
 		writeln!(self.file, "(")?;
+		self.indent_increase();
 
 		for (field_name, field) in &ver_type.ver_type.fields {
-			write!(self.file, "\t\t{}: ", field_name)?;
-			self.write_type(&ver_type.version, &field.field_type)?;
+			self.write_indent()?;
+			write!(self.file, "{}: ", field_name)?;
+			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?)?;
 			writeln!(self.file, ",")?;
 		}
 
-		writeln!(self.file, "\t) extends {}", self.type_def.name().name)?;
+		self.indent_decrease();
+		self.write_indent()?;
+		writeln!(self.file, ") extends {}", self.type_def.name().name)?;
 
 		Ok(())
 	}
@@ -603,136 +864,27 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorO
 	fn write_versioned_type_object_data(&mut self, _ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
 		Ok(())
 	}
-
-	fn write_from_prev_version(&mut self, ver_type: &model::TypeVersionInfo, prev_ver: &BigUint) -> Result<(), GeneratorError> {
-		if ver_type.ver_type.fields.is_empty() {
-			writeln!(self.file, "\t\t\tV{}()", ver_type.version)?;
-		}
-		else {
-			writeln!(self.file, "\t\t\tV{}(", ver_type.version)?;
-			for (field_name, field) in &ver_type.ver_type.fields {
-				write!(self.file, "\t\t\t\t")?;
-				self.write_version_convert(prev_ver, &ver_type.version, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
-				writeln!(self.file, ",")?;
-			}
-			writeln!(self.file, "\t\t\t)")?;
-		}
-		
-		Ok(())
-	}
-
-	fn write_codec_read(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		if ver_type.ver_type.fields.is_empty() {
-			writeln!(self.file, "\t\t\tzio.IO.succeed(V{}())", ver_type.version)?;
-		}
-		else {
-			writeln!(self.file, "\t\t\t\tfor {{")?;
-			for (field_name, field) in &ver_type.ver_type.fields {
-				write!(self.file, "\t\t\t\t\tfield_{} <- ", field_name)?;
-				self.write_value_read(&ver_type.version, &field.field_type)?;
-				writeln!(self.file, "")?;
-			}
-			writeln!(self.file, "\t\t\t\t}} yield V{}(", ver_type.version)?;
-			for (field_name, _) in &ver_type.ver_type.fields {
-				writeln!(self.file, "\t\t\t\t\tfield_{},", field_name)?;
-			}
-			writeln!(self.file, "\t\t\t\t)")?;
-		}
-
-		Ok(())
-	}
-
-	fn write_codec_write(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		if ver_type.ver_type.fields.is_empty() {
-			writeln!(self.file, "\t\t\t\tzio.IO.unit")?;
-		}
-		else {
-			writeln!(self.file, "\t\t\t\tfor {{")?;
-			for (field_name, field) in &ver_type.ver_type.fields {
-				write!(self.file, "\t\t\t\t\t_ <- ")?;
-				self.write_value_write(&ver_type.version, &field.field_type, format!("value.{}", field_name))?;
-				writeln!(self.file, "")?;
-			}
-			writeln!(self.file, "\t\t\t\t}} yield ()")?;
-		}
-
-		Ok(())
-	}
 }
 
-impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorOps for ScalaTypeGenerator<'model, 'opt, 'state, Output, ScalaEnumType> {
+impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorOps for ScalaTypeGenerator<'model, 'opt, 'state, Output, GenEnumType> {
 	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		write!(self.file, "\tsealed abstract class V{}", ver_type.version)?;
-		self.write_type_params()?;
+		self.write_indent()?;
+		write!(self.file, "sealed abstract class V{}", ver_type.version)?;
+		self.write_type_params(&self.type_def().type_params())?;
 		writeln!(self.file, " extends {}", self.type_def.name().name)?;
 		Ok(())
 	}
 
 	fn write_versioned_type_object_data(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
 		for (field_name, field) in &ver_type.ver_type.fields {
-			write!(self.file, "\t\tfinal case class {}", field_name)?;
-			self.write_type_params()?;
+			self.write_indent()?;
+			write!(self.file, "final case class {}", field_name)?;
+			self.write_type_params(&self.type_def().type_params())?;
 			write!(self.file, "({}: ", field_name)?;
-			self.write_type(&ver_type.version, &field.field_type)?;
+			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?)?;
 			write!(self.file, ") extends V{}", ver_type.version)?;
-			self.write_type_params()?;
+			self.write_type_params(&self.type_def().type_params())?;
 			writeln!(self.file)?;
-		}
-
-		Ok(())
-	}
-
-	fn write_from_prev_version(&mut self, ver_type: &model::TypeVersionInfo, prev_ver: &BigUint) -> Result<(), GeneratorError> {
-		if ver_type.ver_type.fields.is_empty() {
-			writeln!(self.file, "\t\t\tthrow new IllegalArgumentException();")?;
-		}
-		else {
-			writeln!(self.file, "\t\t\tprev match {{")?;
-			for (field_name, field) in &ver_type.ver_type.fields {
-				write!(self.file, "\t\t\t\tcase prev: V{}.{}", prev_ver, field_name)?;
-				self.write_type_params_with(|param| format!("{}_1", param))?;
-				write!(self.file, " => V{}.{}(", ver_type.version, field_name)?;
-				self.write_version_convert(prev_ver, &ver_type.version, &field.field_type, ConvertParam::Expression(format!("prev.{}", field_name)))?;
-				writeln!(self.file, ")")?;
-			}
-			writeln!(self.file, "\t\t\t}}")?;
-		}
-
-		Ok(())
-	}
-
-	fn write_codec_read(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		writeln!(self.file, "\t\t\t\t{}.StandardCodecs.natCodec.read(reader).flatMap {{", RUNTIME_PACKAGE)?;
-		for (index, (field_name, field)) in ver_type.ver_type.fields.iter().enumerate() {
-			writeln!(self.file, "\t\t\t\t\tcase {}.Util.BigIntValue({}) =>", RUNTIME_PACKAGE, index)?;
-			write!(self.file, "\t\t\t\t\t\t")?;
-			self.write_value_read(&ver_type.version, &field.field_type)?;
-			writeln!(self.file, ".map(V{}.{}.apply)", ver_type.version, field_name)?;
-		}
-		writeln!(self.file, "\t\t\t\t\tcase _ => zio.IO.die(new java.lang.RuntimeException(\"Invalid tag number.\"))")?;
-		writeln!(self.file, "\t\t\t\t}}")?;
-
-		Ok(())
-	}
-
-	fn write_codec_write(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		if ver_type.ver_type.fields.is_empty() {
-			writeln!(self.file, "\t\t\t\tzio.IO.die(new IllegalArgumentException())")?;
-		}
-		else {
-			writeln!(self.file, "\t\t\t\tvalue match {{")?;
-			for (index, (field_name, field)) in ver_type.ver_type.fields.iter().enumerate() {
-				write!(self.file, "\t\t\t\t\tcase value: V{}.{}", ver_type.version, field_name)?;
-				self.write_type_params()?;
-				writeln!(self.file, " =>")?;
-				writeln!(self.file, "\t\t\t\t\t\tfor {{")?;
-				writeln!(self.file, "\t\t\t\t\t\t\t_ <- {}.StandardCodecs.natCodec.write(writer, {})", RUNTIME_PACKAGE, index)?;
-				write!(self.file, "\t\t\t\t\t\t\t_ <- ")?;
-				self.write_value_write(&ver_type.version, &field.field_type, format!("value.{}", field_name))?;
-				writeln!(self.file, "")?;
-				writeln!(self.file, "\t\t\t\t\t\t}} yield ()")?;
-			}
-			writeln!(self.file, "\t\t\t\t}}")?;
 		}
 
 		Ok(())
@@ -794,11 +946,11 @@ impl Language for ScalaLanguage {
 		for t in model.types() {
 			match t {
 				model::NamedTypeDefinition::StructType(t) => {
-					let mut type_gen: ScalaTypeGenerator<_, ScalaStructType> = ScalaTypeGenerator::open(model, &options, output, t)?;
+					let mut type_gen: ScalaTypeGenerator<_, GenStructType> = ScalaTypeGenerator::open(model, &options, output, t)?;
 					type_gen.generate()?;		
 				},
 				model::NamedTypeDefinition::EnumType(t) => {
-					let mut type_gen: ScalaTypeGenerator<_, ScalaEnumType> = ScalaTypeGenerator::open(model, &options, output, t)?;
+					let mut type_gen: ScalaTypeGenerator<_, GenEnumType> = ScalaTypeGenerator::open(model, &options, output, t)?;
 					type_gen.generate()?;		
 				},
 			}

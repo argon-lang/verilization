@@ -147,37 +147,6 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + Genera
 		})
 	}
 
-	fn write_type_no_params(&mut self, t: &LangType<'model>) -> Result<(), GeneratorError> {
-		Ok(match t {
-			// Map built-in types to the equivalent Java type.
-			LangType::Nat | LangType::Int => write!(self.file(), "java.math.BigInteger")?,
-			
-	
-			LangType::U8 | LangType::I8 => write!(self.file(), "java.lang.Byte")?,
-			LangType::U16 | LangType::I16 => write!(self.file(), "java.lang.Short")?,
-			LangType::U32 | LangType::I32 => write!(self.file(), "java.lang.Integer")?,
-			LangType::U64 | LangType::I64 => write!(self.file(), "java.lang.Long")?,
-	
-			LangType::String => write!(self.file(), "java.lang.String")?,
-	
-			LangType::List(_) => write!(self.file(), "{}.List", RUNTIME_PACKAGE)?,
-			LangType::Option(_) => write!(self.file(), "java.util.Optional<")?,
-	
-			LangType::Versioned(name, version, _) => {
-				self.write_qual_name(name)?;
-				write!(self.file(), ".V{}", version)?;
-			},
-
-			LangType::TypeParameter(name) => {
-				write!(self.file(), "{}", name)?;
-			},
-
-			LangType::Converter(_, _) => write!(self.file(), "{}.Converter", RUNTIME_PACKAGE)?,
-
-			LangType::Codec(_) => write!(self.file(), "{}.Codec", RUNTIME_PACKAGE)?,
-		})
-	}
-
 	fn write_args(&mut self, args: &Vec<LangExpr<'model>>) -> Result<(), GeneratorError> {
 		if !args.is_empty() {
 			write!(self.file(), "(")?;
@@ -425,7 +394,6 @@ struct JavaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler, Extra> {
 	options: &'opt JavaOptions,
 	type_def: Named<'model, model::TypeDefinitionData>,
 	scope: model::Scope<'model>,
-	versions: HashSet<BigUint>,
 	indentation_level: u32,
 	_extra: Extra,
 }
@@ -598,7 +566,6 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra> JavaTypeGenerator<'mo
 			options: options,
 			type_def: type_def,
 			scope: type_def.scope(),
-			versions: HashSet::new(),
 			indentation_level: 0,
 			_extra: Extra::default(),
 		})

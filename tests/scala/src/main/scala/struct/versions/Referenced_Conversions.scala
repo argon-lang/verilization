@@ -1,6 +1,8 @@
 package struct.versions
 
+import dev.argon.verilization.scala_runtime.Converter
+
 object Referenced_Conversions {
-    def v1ToV2(prev: Referenced.V1): Referenced.V2 =
+    val v1ToV2: Converter[Referenced.V1, Referenced.V2] = prev =>
         Referenced.V2(x = prev.x)
 }
