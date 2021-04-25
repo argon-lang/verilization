@@ -8,4 +8,5 @@ crossPaths := false
 javacOptions ++= Seq(
     "-target", "11",
     "-encoding", "UTF-8",
+    "-Xlint:unchecked"
 )

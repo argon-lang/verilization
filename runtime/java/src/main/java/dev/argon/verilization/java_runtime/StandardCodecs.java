@@ -100,11 +100,7 @@ public abstract class StandardCodecs {
         @Override
         public String read(FormatReader reader) throws IOException {
             BigInteger length = natCodec.read(reader);
-            if(length.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0) {
-                throw new ArithmeticException("Length of string would overflow");
-            }
-
-            byte[] data = reader.readBytes(length.intValue());
+            byte[] data = reader.readBytes(length.intValueExact());
             return new String(data, StandardCharsets.UTF_8);
         }
 
@@ -117,137 +113,9 @@ public abstract class StandardCodecs {
 
     };
 
-    public static final Codec<byte[]> i8ListCodec = new Codec<byte[]>() {
-
-        @Override
-        public byte[] read(FormatReader reader) throws IOException {
-            BigInteger length = natCodec.read(reader);
-            if(length.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0) {
-                throw new ArithmeticException("Length of array would overflow");
-            }
-
-            return reader.readBytes(length.intValue());
-        }
-
-        @Override
-        public void write(FormatWriter writer, byte[] value) throws IOException {
-            natCodec.write(writer, BigInteger.valueOf(value.length));
-            writer.writeBytes(value);
-        }
-
-    };
-
-    public static final Codec<short[]> i16ListCodec = new Codec<short[]>() {
-
-        @Override
-        public short[] read(FormatReader reader) throws IOException {
-            BigInteger length = natCodec.read(reader);
-            if(length.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0) {
-                throw new ArithmeticException("Length of array would overflow");
-            }
-
-            short[] data = new short[length.intValue()];
-            for(int i = 0; i < data.length; ++i) {
-                data[i] = reader.readShort();
-            }
-            return data;
-        }
-
-        @Override
-        public void write(FormatWriter writer, short[] value) throws IOException {
-            natCodec.write(writer, BigInteger.valueOf(value.length));
-            for(int i = 0; i < value.length; ++i) {
-                writer.writeShort(value[i]);
-            }
-        }
-
-    };
-
-    public static final Codec<int[]> i32ListCodec = new Codec<int[]>() {
-
-        @Override
-        public int[] read(FormatReader reader) throws IOException {
-            BigInteger length = natCodec.read(reader);
-            if(length.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0) {
-                throw new ArithmeticException("Length of array would overflow");
-            }
-
-            int[] data = new int[length.intValue()];
-            for(int i = 0; i < data.length; ++i) {
-                data[i] = reader.readInt();
-            }
-            return data;
-        }
-
-        @Override
-        public void write(FormatWriter writer, int[] value) throws IOException {
-            natCodec.write(writer, BigInteger.valueOf(value.length));
-            for(int i = 0; i < value.length; ++i) {
-                writer.writeInt(value[i]);
-            }
-        }
-
-    };
-
-    public static final Codec<long[]> i64ListCodec = new Codec<long[]>() {
-
-        @Override
-        public long[] read(FormatReader reader) throws IOException {
-            BigInteger length = natCodec.read(reader);
-            if(length.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0) {
-                throw new ArithmeticException("Length of array would overflow");
-            }
-
-            long[] data = new long[length.intValue()];
-            for(int i = 0; i < data.length; ++i) {
-                data[i] = reader.readLong();
-            }
-            return data;
-        }
-
-        @Override
-        public void write(FormatWriter writer, long[] value) throws IOException {
-            natCodec.write(writer, BigInteger.valueOf(value.length));
-            for(int i = 0; i < value.length; ++i) {
-                writer.writeLong(value[i]);
-            }
-        }
-
-    };
-
-    public static <T> Codec<List<T>> listCodec(Codec<T> elementCodec) {
-        return new Codec<List<T>>() {
-
-            @Override
-            public List<T> read(FormatReader reader) throws IOException {
-                BigInteger length = natCodec.read(reader);
-                if(length.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0) {
-                    throw new ArithmeticException("Length of list would overflow");
-                }
-
-                int len = length.intValue();
-    
-                List<T> data = new ArrayList<>(len);
-                for(int i = 0; i < data.size(); ++i) {
-                    data.add(elementCodec.read(reader));
-                }
-                return data;
-            }
-    
-            @Override
-            public void write(FormatWriter writer, List<T> value) throws IOException {
-                natCodec.write(writer, BigInteger.valueOf(value.size()));
-                for(int i = 0; i < value.size(); ++i) {
-                    elementCodec.write(writer, value.get(i));
-                }
-            }
-    
-        };
-    }
-
     public static <T> Codec<Optional<T>> optionalCodec(Codec<T> elementCodec) {
         return new Codec<Optional<T>>() {
-
+            
             @Override
             public Optional<T> read(FormatReader reader) throws IOException {
                 boolean present = reader.readByte() != 0;

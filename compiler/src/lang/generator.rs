@@ -7,15 +7,8 @@ use num_bigint::{BigUint, BigInt, Sign};
 use std::io::Write;
 use std::marker::PhantomData;
 
-#[derive(Clone, Copy, Debug)]
-pub enum TypeContext {
-	Field,
-	ParameterOrResult,
-	TypeParameter,
-}
-
 #[derive(Clone, Debug)]
-pub enum LangTypeV<'model> {
+pub enum LangType<'model> {
 	Nat,
 	Int,
 	U8,
@@ -27,28 +20,12 @@ pub enum LangTypeV<'model> {
 	U64,
 	I64,
 	String,
-	Unit,
 	List(Box<LangType<'model>>),
 	Option(Box<LangType<'model>>),
 	Versioned(&'model model::QualifiedName, BigUint, Vec<LangType<'model>>),
 	TypeParameter(String),
 	Converter(Box<LangType<'model>>, Box<LangType<'model>>),
 	Codec(Box<LangType<'model>>),
-}
-
-#[derive(Clone, Debug)]
-pub struct LangType<'model> {
-	pub variant: LangTypeV<'model>,
-	pub context: TypeContext,
-}
-
-impl <'model> LangType<'model> {
-	pub fn new(variant: LangTypeV<'model>, context: TypeContext) -> Self {
-		LangType {
-			variant: variant,
-			context: context,
-		}
-	}
 }
 
 #[derive(Clone, Debug)]
@@ -118,7 +95,7 @@ pub struct OperationInfo<'model> {
 	pub type_params: Vec<String>,
 	pub params: Vec<(String, LangType<'model>)>,
 	pub result: LangType<'model>,
-	pub implementation: LangStmt<'model>,
+	pub implementation: LangExprStmt<'model>,
 }
 
 pub struct MatchCase<'model> {
@@ -127,8 +104,8 @@ pub struct MatchCase<'model> {
 	pub body: LangStmt<'model>,
 }
 
-pub enum LangStmt<'model> {
-	Expr(Vec<LangExpr<'model>>, Option<LangExpr<'model>>),
+pub enum LangExprStmt<'model> {
+	Expr(LangExpr<'model>),
 	CreateCodec {
 		t: LangType<'model>,
 		read: Box<LangStmt<'model>>,
@@ -139,6 +116,10 @@ pub enum LangStmt<'model> {
 		to_type: LangType<'model>,
 		body: Box<LangStmt<'model>>,
 	},
+}
+
+pub enum LangStmt<'model> {
+	Expr(Vec<LangExpr<'model>>, Option<LangExpr<'model>>),
 	MatchEnum {
 		value: LangExpr<'model>,
 		value_type: LangType<'model>,
@@ -153,9 +134,8 @@ pub enum LangStmt<'model> {
 impl <'model> LangStmt<'model> {
 	pub fn has_value(&self) -> bool {
 		match self {
-			LangStmt::Expr(_, result) => result.is_some(),
-			LangStmt::CreateCodec { .. } => true,
-			LangStmt::CreateConverter { .. } => true,
+			LangStmt::Expr(_, None) => false,
+			LangStmt::Expr(_, Some(_)) => true,
 			LangStmt::MatchEnum { cases, .. } => cases.iter().any(|MatchCase { body, .. }| body.has_value()),
 			LangStmt::MatchDiscriminator { cases, .. } => cases.iter().any(|(_, body)| body.has_value()),
 		}
@@ -167,7 +147,7 @@ pub enum ConvertParam<'model> {
 	Expression(LangExpr<'model>),
 }
 
-fn requires_conversion<'model, G: Generator<'model>>(gen: &G, t: &model::Type, prev_ver: &BigUint) -> bool {
+fn requires_conversion<'model, Lang, G: Generator<'model, Lang>>(gen: &G, t: &model::Type, prev_ver: &BigUint) -> bool {
 	match t {
 		model::Type::List(inner) => requires_conversion(gen, inner, prev_ver),
 		model::Type::Option(inner) => requires_conversion(gen, inner, prev_ver),
@@ -190,7 +170,7 @@ fn requires_conversion<'model, G: Generator<'model>>(gen: &G, t: &model::Type, p
 	}
 }
 
-pub trait GeneratorNameMapping {
+pub trait GeneratorNameMapping<Lang> {
 	fn convert_prev_type_param(param: &str) -> String;
 	fn convert_current_type_param(param: &str) -> String;
 	fn convert_conv_param_name(param: &str) -> String;
@@ -202,42 +182,39 @@ pub trait GeneratorNameMapping {
 	fn constant_version_name(version: &BigUint) -> String;
 }
 
-pub trait Generator<'model> : GeneratorNameMapping + Sized {
+pub trait Generator<'model, Lang> : GeneratorNameMapping<Lang> + Sized {
 	fn model(&self) -> &'model model::Verilization;
 	fn scope(&self) -> &model::Scope<'model>;
 
 
-	fn build_type(&self, version: &BigUint, t: &model::Type, context: TypeContext) -> Result<LangType<'model>, GeneratorError> {
+	fn build_type(&self, version: &BigUint, t: &model::Type) -> Result<LangType<'model>, GeneratorError> {
 		Ok(match t {
-			model::Type::Nat => LangType::new(LangTypeV::Nat, context),
-			model::Type::Int => LangType::new(LangTypeV::Int, context),
-			model::Type::U8 => LangType::new(LangTypeV::U8, context),
-			model::Type::I8 => LangType::new(LangTypeV::I8, context),
-			model::Type::U16 => LangType::new(LangTypeV::U16, context),
-			model::Type::I16 => LangType::new(LangTypeV::I16, context),
-			model::Type::U32 => LangType::new(LangTypeV::U32, context),
-			model::Type::I32 => LangType::new(LangTypeV::I32, context),
-			model::Type::U64 => LangType::new(LangTypeV::U64, context),
-			model::Type::I64 => LangType::new(LangTypeV::I64, context),
-			model::Type::String => LangType::new(LangTypeV::String, context),
-			model::Type::List(inner) => LangType::new(LangTypeV::List(Box::new(self.build_type(version, &*inner, TypeContext::TypeParameter)?)), context),
-			model::Type::Option(inner) => LangType::new(LangTypeV::Option(Box::new(self.build_type(version, &*inner, TypeContext::TypeParameter)?)), context),
+			model::Type::Nat => LangType::Nat,
+			model::Type::Int => LangType::Int,
+			model::Type::U8 => LangType::U8,
+			model::Type::I8 => LangType::I8,
+			model::Type::U16 => LangType::U16,
+			model::Type::I16 => LangType::I16,
+			model::Type::U32 => LangType::U32,
+			model::Type::I32 => LangType::I32,
+			model::Type::U64 => LangType::U64,
+			model::Type::I64 => LangType::I64,
+			model::Type::String => LangType::String,
+			model::Type::List(inner) => LangType::List(Box::new(self.build_type(version, &*inner)?)),
+			model::Type::Option(inner) => LangType::Option(Box::new(self.build_type(version, &*inner)?)),
 			model::Type::Defined(name, args) => match self.scope().lookup(name.clone()) {
 				model::ScopeLookup::NamedType(name) => match self.model().get_type(&name).ok_or("Could not find type")? {
 					model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
-						let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
+						let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
 
 						let lang_args = args.iter()
-							.map(|arg| self.build_type(version, arg, TypeContext::TypeParameter))
+							.map(|arg| self.build_type(version, arg))
 							.collect::<Result<Vec<_>, _>>()?;
 
-						LangType::new(
-							LangTypeV::Versioned(type_def.name(), ver_type.version.clone(), lang_args),
-							context
-						)
+						LangType::Versioned(type_def.name(), ver_type.version.clone(), lang_args)
 					},
 				},
-				model::ScopeLookup::TypeParameter(name) => LangType::new(LangTypeV::TypeParameter(name), context),
+				model::ScopeLookup::TypeParameter(name) => LangType::TypeParameter(name),
 			},
 		})
 	}
@@ -262,13 +239,13 @@ pub trait Generator<'model> : GeneratorNameMapping + Sized {
 					let named_type = self.model().get_type(&name).ok_or("Could not find type")?;
 					match named_type {
 						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
-							let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
+							let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
 
 							LangExpr::InvokeOperation(
 								Operation::VersionedTypeCodec,
 								named_type.name(),
 								ver_type.version.clone(),
-								args.iter().map(|arg| self.build_type(version, arg, TypeContext::TypeParameter)).collect::<Result<Vec<_>, _>>()?,
+								args.iter().map(|arg| self.build_type(version, arg)).collect::<Result<Vec<_>, _>>()?,
 								args.iter().map(|arg| self.build_codec(version, arg)).collect::<Result<Vec<_>, _>>()?,
 							)
 						},
@@ -282,7 +259,7 @@ pub trait Generator<'model> : GeneratorNameMapping + Sized {
 	fn build_conversion(&self, prev_ver: &BigUint, version: &BigUint, t: &model::Type, param: ConvertParam<'model>) -> Result<LangExpr<'model>, GeneratorError> {
 		if !requires_conversion(self, t, prev_ver) {
 			return Ok(match param {
-				ConvertParam::ConverterObject => LangExpr::IdentityConverter(self.build_type(version, t, TypeContext::TypeParameter)?),
+				ConvertParam::ConverterObject => LangExpr::IdentityConverter(self.build_type(version, t)?),
 				ConvertParam::Expression(expr) => expr,
 			})
 		}
@@ -294,14 +271,14 @@ pub trait Generator<'model> : GeneratorNameMapping + Sized {
 						let named_type_def = self.model().get_type(&name).ok_or("Could not find type")?;
 						match named_type_def {
 							model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
-								let ver_type = type_def.versioned(version).ok_or("Could not find version of type")?;
+								let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
 
 								let mut op_type_args = Vec::new();
 								let mut op_args = Vec::new();
 
 								for arg in args {
-									op_type_args.push(self.build_type(prev_ver, arg, TypeContext::TypeParameter)?);
-									op_type_args.push(self.build_type(version, arg, TypeContext::TypeParameter)?);
+									op_type_args.push(self.build_type(prev_ver, arg)?);
+									op_type_args.push(self.build_type(version, arg)?);
 									op_args.push(self.build_conversion(prev_ver, version, arg, ConvertParam::ConverterObject)?);
 								}
 
@@ -328,18 +305,18 @@ pub trait Generator<'model> : GeneratorNameMapping + Sized {
 			},
 	
 			model::Type::List(inner) => LangExpr::MapListConverter {
-				from_type: self.build_type(prev_ver, inner, TypeContext::TypeParameter)?,
-				to_type: self.build_type(version, inner, TypeContext::TypeParameter)?,
+				from_type: self.build_type(prev_ver, inner)?,
+				to_type: self.build_type(version, inner)?,
 				element_converter: Box::new(self.build_conversion(prev_ver, version, &*inner, ConvertParam::ConverterObject)?),
 			},
 	
 			model::Type::Option(inner) => LangExpr::MapOptionConverter {
-				from_type: self.build_type(prev_ver, inner, TypeContext::TypeParameter)?,
-				to_type: self.build_type(version, inner, TypeContext::TypeParameter)?,
+				from_type: self.build_type(prev_ver, inner)?,
+				to_type: self.build_type(version, inner)?,
 				element_converter: Box::new(self.build_conversion(prev_ver, version, &*inner, ConvertParam::ConverterObject)?),
 			},	
 	
-			_ => LangExpr::IdentityConverter(self.build_type(version, t, TypeContext::TypeParameter)?),
+			_ => LangExpr::IdentityConverter(self.build_type(version, t)?),
 		};
 
 					
@@ -368,11 +345,11 @@ pub struct GenStructType {}
 #[derive(Default)]
 pub struct GenEnumType {}
 
-pub trait GeneratorImpl<'model, GenType> {
+pub trait GeneratorImpl<'model, Lang, GenType> {
 	fn generate(&mut self) -> Result<(), GeneratorError>;
 }
 
-pub trait ConstGenerator<'model> : Generator<'model> {
+pub trait ConstGenerator<'model, Lang> : Generator<'model, Lang> {
 	fn constant(&self) -> Named<'model, model::Constant>;
 
 	fn write_header(&mut self) -> Result<(), GeneratorError>;
@@ -391,13 +368,13 @@ pub trait ConstGenerator<'model> : Generator<'model> {
 
 }
 
-impl <'model, TImpl> GeneratorImpl<'model, GenConstant> for TImpl where TImpl : ConstGenerator<'model> {
+impl <'model, TImpl, Lang> GeneratorImpl<'model, Lang, GenConstant> for TImpl where TImpl : ConstGenerator<'model, Lang> {
 	fn generate(&mut self) -> Result<(), GeneratorError> {
 		self.write_header()?;
 
 		for ver in self.constant().versions() {
 			let version_name = Self::constant_version_name(&ver.version);
-			let t = self.build_type(&ver.version, self.constant().value_type(), TypeContext::Field)?;
+			let t = self.build_type(&ver.version, self.constant().value_type())?;
 			let value =
 				if let Some(value) = &ver.value {
 					self.build_value(&ver.version, self.constant().value_type(), value)?
@@ -415,7 +392,7 @@ impl <'model, TImpl> GeneratorImpl<'model, GenConstant> for TImpl where TImpl : 
 	}
 }
 
-pub trait VersionedTypeGenerator<'model, GenTypeKind> : Generator<'model> {
+pub trait VersionedTypeGenerator<'model, Lang, GenTypeKind> : Generator<'model, Lang> {
 	fn type_def(&self) -> Named<'model, model::TypeDefinitionData>;
 
 	fn write_header(&mut self) -> Result<(), GeneratorError>;
@@ -425,15 +402,15 @@ pub trait VersionedTypeGenerator<'model, GenTypeKind> : Generator<'model> {
 	fn write_footer(&mut self) -> Result<(), GeneratorError>;
 }
 
-pub trait VersionedTypeGeneratorOps<'model, GenTypeKind> {
+pub trait VersionedTypeGeneratorOps<'model, Lang, GenTypeKind> {
 	fn convert_implementation(&self, ver_type: &model::TypeVersionInfo<'model>, prev_ver: &BigUint) -> Result<LangStmt<'model>, GeneratorError>;
 	fn codec_read_implementation(&self, ver_type: &model::TypeVersionInfo<'model>) -> Result<LangStmt<'model>, GeneratorError>;
 	fn codec_write_implementation(&self, ver_type: &model::TypeVersionInfo<'model>) -> Result<LangStmt<'model>, GeneratorError>;
 }
 
 
-fn build_converter_operation_common<'model, GenTypeKind, Gen>(gen: &Gen, op: Operation, ver_type: &model::TypeVersionInfo<'model>, prev_ver: &BigUint) -> Result<OperationInfo<'model>, GeneratorError> where
-	Gen : VersionedTypeGenerator<'model, GenTypeKind> + VersionedTypeGeneratorOps<'model, GenTypeKind>
+fn build_converter_operation_common<'model, Lang, GenTypeKind, Gen>(gen: &Gen, op: Operation, ver_type: &model::TypeVersionInfo<'model>, prev_ver: &BigUint) -> Result<OperationInfo<'model>, GeneratorError> where
+	Gen : VersionedTypeGenerator<'model, Lang, GenTypeKind> + VersionedTypeGeneratorOps<'model, Lang, GenTypeKind>
 {
 	let version = &ver_type.version;
 
@@ -450,52 +427,40 @@ fn build_converter_operation_common<'model, GenTypeKind, Gen>(gen: &Gen, op: Ope
 		let t2 = Gen::convert_current_type_param(&param);
 		type_params.push(t1.clone());
 		type_params.push(t2.clone());
-		let t1_arg = LangType::new(LangTypeV::TypeParameter(t1.clone()), TypeContext::TypeParameter);
-		let t2_arg = LangType::new(LangTypeV::TypeParameter(t2.clone()), TypeContext::TypeParameter);
+		let t1_arg = LangType::TypeParameter(t1.clone());
+		let t2_arg = LangType::TypeParameter(t2.clone());
 		type_args.push(t1_arg.clone());
 		type_args.push(t2_arg.clone());
 		prev_type_params.push(t1_arg);
 		result_type_params.push(t2_arg);
 
-		let conv_type = LangType {
-			variant: LangTypeV::Converter(
-				Box::new(LangType::new(LangTypeV::TypeParameter(t1), TypeContext::TypeParameter)),
-				Box::new(LangType::new(LangTypeV::TypeParameter(t2), TypeContext::TypeParameter)),
-			),
-			context: TypeContext::ParameterOrResult,
-		};
+		let conv_type = LangType::Converter(
+			Box::new(LangType::TypeParameter(t1)),
+			Box::new(LangType::TypeParameter(t2)),
+		);
 
 		let conv_param =  Gen::convert_conv_param_name(param);
 		params.push((conv_param.clone(), conv_type));
 		impl_call_args.push(LangExpr::Identifier(conv_param));
 	}
 
-	let prev_type = LangType::new(
-		LangTypeV::Versioned(gen.type_def().name(), prev_ver.clone(), prev_type_params),
-		TypeContext::TypeParameter,
-	);
+	let prev_type = LangType::Versioned(gen.type_def().name(), prev_ver.clone(), prev_type_params);
 
-	let result_type = LangType::new(
-		LangTypeV::Versioned(gen.type_def().name(), ver_type.version.clone(), result_type_params),
-		TypeContext::TypeParameter,
-	);
+	let result_type = LangType::Versioned(gen.type_def().name(), ver_type.version.clone(), result_type_params);
 
-	let converter_type = LangType::new(
-		LangTypeV::Converter(Box::new(prev_type.clone()), Box::new(result_type.clone())),
-		TypeContext::ParameterOrResult,
-	);
+	let converter_type = LangType::Converter(Box::new(prev_type.clone()), Box::new(result_type.clone()));
 
 	let implementation = if ver_type.explicit_version && ver_type.version != *prev_ver {
-		LangStmt::Expr(vec!(), Some(LangExpr::InvokeUserConverter {
+		LangExprStmt::Expr(LangExpr::InvokeUserConverter {
 			name: gen.type_def().name(),
 			prev_ver: prev_ver.clone(),
 			version: version.clone(),
 			type_args: type_args,
 			args: impl_call_args,
-		}))
+		})
 	}
 	else {
-		LangStmt::CreateConverter {
+		LangExprStmt::CreateConverter {
 			from_type: prev_type,
 			to_type: result_type,
 			body: Box::new(gen.convert_implementation(&ver_type, prev_ver)?),
@@ -512,8 +477,8 @@ fn build_converter_operation_common<'model, GenTypeKind, Gen>(gen: &Gen, op: Ope
 	})
 }
 
-impl <'model, TImpl, GenTypeKind> GeneratorImpl<'model, GenType<GenTypeKind>> for TImpl where
-	TImpl : VersionedTypeGenerator<'model, GenTypeKind> + VersionedTypeGeneratorOps<'model, GenTypeKind>
+impl <'model, TImpl, Lang, GenTypeKind> GeneratorImpl<'model, Lang, GenType<GenTypeKind>> for TImpl where
+	TImpl : VersionedTypeGenerator<'model, Lang, GenTypeKind> + VersionedTypeGeneratorOps<'model, Lang, GenTypeKind>
 {
 	fn generate(&mut self) -> Result<(), GeneratorError> {
 		self.write_header()?;
@@ -546,28 +511,16 @@ impl <'model, TImpl, GenTypeKind> GeneratorImpl<'model, GenType<GenTypeKind>> fo
 				let mut obj_type_args = Vec::new();
 
 				for param in self.type_def().type_params() {
-					let param_type = LangType::new(
-						LangTypeV::TypeParameter(param.clone()),
-						TypeContext::TypeParameter,
-					);
+					let param_type = LangType::TypeParameter(param.clone());
 
-					codec_params.push((format!("{}_codec", param), LangType::new(
-						LangTypeV::Codec(Box::new(param_type.clone())),
-						TypeContext::ParameterOrResult,
-					)));
+					codec_params.push((Self::codec_codec_param_name(param), LangType::Codec(Box::new(param_type.clone()))));
 
 					obj_type_args.push(param_type);
 				}
 
-				let obj_type = LangType::new(
-					LangTypeV::Versioned(self.type_def().name(), ver_type.version.clone(), obj_type_args),
-					TypeContext::TypeParameter,
-				);
+				let obj_type = LangType::Versioned(self.type_def().name(), ver_type.version.clone(), obj_type_args);
 
-				let codec_type = LangType::new(
-					LangTypeV::Codec(Box::new(obj_type.clone())),
-					TypeContext::ParameterOrResult
-				);
+				let codec_type = LangType::Codec(Box::new(obj_type.clone()));
 
 				let op = OperationInfo {
 					operation: Operation::VersionedTypeCodec,
@@ -575,7 +528,7 @@ impl <'model, TImpl, GenTypeKind> GeneratorImpl<'model, GenType<GenTypeKind>> fo
 					type_params: self.type_def().type_params().clone(),
 					params: codec_params,
 					result: codec_type,
-					implementation: LangStmt::CreateCodec {
+					implementation: LangExprStmt::CreateCodec {
 						t: obj_type,
 						read: Box::new(self.codec_read_implementation(&ver_type)?),
 						write: Box::new(self.codec_write_implementation(&ver_type)?),
@@ -594,15 +547,15 @@ impl <'model, TImpl, GenTypeKind> GeneratorImpl<'model, GenType<GenTypeKind>> fo
 	}
 }
 
-impl <'model, TImpl> VersionedTypeGeneratorOps<'model, GenStructType> for TImpl where
-	TImpl : VersionedTypeGenerator<'model, GenStructType>
+impl <'model, TImpl, Lang> VersionedTypeGeneratorOps<'model, Lang, GenStructType> for TImpl where
+	TImpl : VersionedTypeGenerator<'model, Lang, GenStructType>
 {
 	fn convert_implementation(&self, ver_type: &model::TypeVersionInfo<'model>, prev_ver: &BigUint) -> Result<LangStmt<'model>, GeneratorError> {
 		let mut fields = Vec::new();
 
 		let result_type_args = self.type_def().type_params()
 			.iter()
-			.map(|param| LangType::new(LangTypeV::TypeParameter(Self::convert_current_type_param(param)), TypeContext::TypeParameter))
+			.map(|param| LangType::TypeParameter(Self::convert_current_type_param(param)))
 			.collect::<Vec<_>>();
 
 		for (field_name, field) in &ver_type.ver_type.fields {
@@ -625,7 +578,7 @@ impl <'model, TImpl> VersionedTypeGeneratorOps<'model, GenStructType> for TImpl 
 
 		let type_args = self.type_def().type_params()
 			.iter()
-			.map(|param| LangType::new(LangTypeV::TypeParameter(param.clone()), TypeContext::TypeParameter))
+			.map(|param| LangType::TypeParameter(param.clone()))
 			.collect::<Vec<_>>();
 
 		for (field_name, field) in &ver_type.ver_type.fields {
@@ -656,20 +609,20 @@ impl <'model, TImpl> VersionedTypeGeneratorOps<'model, GenStructType> for TImpl 
 	}
 }
 
-impl <'model, TImpl> VersionedTypeGeneratorOps<'model, GenEnumType> for TImpl where
-	TImpl : VersionedTypeGenerator<'model, GenEnumType>
+impl <'model, TImpl, Lang> VersionedTypeGeneratorOps<'model, Lang, GenEnumType> for TImpl where
+	TImpl : VersionedTypeGenerator<'model, Lang, GenEnumType>
 {
 	fn convert_implementation(&self, ver_type: &model::TypeVersionInfo<'model>, prev_ver: &BigUint) -> Result<LangStmt<'model>, GeneratorError> {
 		let mut cases = Vec::new();
 
 		let prev_type_args = self.type_def().type_params()
 			.iter()
-			.map(|param| LangType::new(LangTypeV::TypeParameter(Self::convert_prev_type_param(param)), TypeContext::TypeParameter))
+			.map(|param| LangType::TypeParameter(Self::convert_prev_type_param(param)))
 			.collect::<Vec<_>>();
 
 		let result_type_args = self.type_def().type_params()
 			.iter()
-			.map(|param| LangType::new(LangTypeV::TypeParameter(Self::convert_current_type_param(param)), TypeContext::TypeParameter))
+			.map(|param| LangType::TypeParameter(Self::convert_current_type_param(param)))
 			.collect::<Vec<_>>();
 
 		for (field_name, field) in &ver_type.ver_type.fields {
@@ -687,7 +640,7 @@ impl <'model, TImpl> VersionedTypeGeneratorOps<'model, GenEnumType> for TImpl wh
 
 		Ok(LangStmt::MatchEnum {
 			value: LangExpr::Identifier(Self::convert_prev_param_name().to_string()),
-			value_type: LangType::new(LangTypeV::Versioned(self.type_def().name(), ver_type.version.clone(), prev_type_args), TypeContext::ParameterOrResult),
+			value_type: LangType::Versioned(self.type_def().name(), prev_ver.clone(), prev_type_args),
 			cases: cases,
 		})
 	}
@@ -698,7 +651,7 @@ impl <'model, TImpl> VersionedTypeGeneratorOps<'model, GenEnumType> for TImpl wh
 		for (index, (field_name, field)) in ver_type.ver_type.fields.iter().enumerate() {
 			let type_args = self.type_def().type_params()
 				.iter()
-				.map(|param| LangType::new(LangTypeV::TypeParameter(param.clone()), TypeContext::TypeParameter))
+				.map(|param| LangType::TypeParameter(param.clone()))
 				.collect::<Vec<_>>();
 
 
@@ -730,7 +683,7 @@ impl <'model, TImpl> VersionedTypeGeneratorOps<'model, GenEnumType> for TImpl wh
 
 		let type_args = self.type_def().type_params()
 			.iter()
-			.map(|param| LangType::new(LangTypeV::TypeParameter(param.clone()), TypeContext::TypeParameter))
+			.map(|param| LangType::TypeParameter(param.clone()))
 			.collect::<Vec<_>>();
 
 		for (index, (field_name, field)) in ver_type.ver_type.fields.iter().enumerate() {
@@ -753,7 +706,7 @@ impl <'model, TImpl> VersionedTypeGeneratorOps<'model, GenEnumType> for TImpl wh
 
 		Ok(LangStmt::MatchEnum {
 			value: LangExpr::Identifier(Self::codec_write_value_name().to_string()),
-			value_type: LangType::new(LangTypeV::Versioned(self.type_def().name(), ver_type.version.clone(), type_args), TypeContext::ParameterOrResult),
+			value_type: LangType::Versioned(self.type_def().name(), ver_type.version.clone(), type_args),
 			cases: cases,
 		})
 	}

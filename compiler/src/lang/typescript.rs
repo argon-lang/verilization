@@ -27,7 +27,7 @@ fn open_ts_file<'output, Output: OutputHandler>(options: &TSOptions, output: &'o
 	Ok(output.create_file(path)?)
 }
 
-pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
+pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + GeneratorWithFile {
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName>;
 	fn options(&self) -> &TSOptions;
 	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model>;
@@ -103,35 +103,34 @@ pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 	}
 
 	fn write_type(&mut self, t: &LangType<'model>) -> Result<(), GeneratorError> {
-		Ok(match &t.variant {
+		Ok(match t {
 			// Map built-in types to the equivalent JS type.
-			LangTypeV::Nat |
-			LangTypeV::Int |
-			LangTypeV::U64 |
-			LangTypeV::I64 => write!(self.file(), "bigint")?,
+			LangType::Nat |
+			LangType::Int |
+			LangType::U64 |
+			LangType::I64 => write!(self.file(), "bigint")?,
 	
-			LangTypeV::U8 |
-			LangTypeV::I8 |
-			LangTypeV::U16 |
-			LangTypeV::I16 |
-			LangTypeV::U32 |
-			LangTypeV::I32 => write!(self.file(), "number")?,
+			LangType::U8 |
+			LangType::I8 |
+			LangType::U16 |
+			LangType::I16 |
+			LangType::U32 |
+			LangType::I32 => write!(self.file(), "number")?,
 			
-			LangTypeV::String => write!(self.file(), "string")?,
-			LangTypeV::Unit => write!(self.file(), "void")?,
+			LangType::String => write!(self.file(), "string")?,
 	
 	
-			LangTypeV::List(inner) => {
+			LangType::List(inner) => {
 				// Use typed arrays for finite numeric types
-				match inner.variant {
-					LangTypeV::U8 => write!(self.file(), "Uint8Array")?,
-					LangTypeV::I8 => write!(self.file(), "Int8Array")?,
-					LangTypeV::U16 => write!(self.file(), "Uint16Array")?,
-					LangTypeV::I16 => write!(self.file(), "Int16Array")?,
-					LangTypeV::U32 => write!(self.file(), "Uint32Array")?,
-					LangTypeV::I32 => write!(self.file(), "Int32Array")?,
-					LangTypeV::U64 => write!(self.file(), "BigUint64Array")?,
-					LangTypeV::I64 => write!(self.file(), "BigInt64Array")?,
+				match **inner {
+					LangType::U8 => write!(self.file(), "Uint8Array")?,
+					LangType::I8 => write!(self.file(), "Int8Array")?,
+					LangType::U16 => write!(self.file(), "Uint16Array")?,
+					LangType::I16 => write!(self.file(), "Int16Array")?,
+					LangType::U32 => write!(self.file(), "Uint32Array")?,
+					LangType::I32 => write!(self.file(), "Int32Array")?,
+					LangType::U64 => write!(self.file(), "BigUint64Array")?,
+					LangType::I64 => write!(self.file(), "BigInt64Array")?,
 					_ => {
 						write!(self.file(), "ReadOnlyArray<")?;
 						self.write_type(&*inner)?;
@@ -141,13 +140,13 @@ pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 			},
 	
 			// Options map to { value: T } | null because option(option(T)) is distinct from option(T)
-			LangTypeV::Option(inner) => {
+			LangType::Option(inner) => {
 				write!(self.file(), "{{ readonly value: ")?;
 				self.write_type(&*inner)?;
 				write!(self.file(), "}} | null")?;
 			},
 	
-			LangTypeV::Versioned(name, version, args) => {
+			LangType::Versioned(name, version, args) => {
 				// Only use a qualifier if not a value of the current type.
 				if self.generator_element_name() != Some(name) {
 					self.write_import_name(name)?;
@@ -158,11 +157,11 @@ pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 				self.write_type_args(&args)?;
 			},
 
-			LangTypeV::TypeParameter(name) => {
+			LangType::TypeParameter(name) => {
 				write!(self.file(), "{}", name)?;
 			},
 
-			LangTypeV::Converter(from, to) => {
+			LangType::Converter(from, to) => {
 				write!(self.file(), "Converter<")?;
 				self.write_type(&*from)?;
 				write!(self.file(), ", ")?;
@@ -170,7 +169,7 @@ pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 				write!(self.file(), ">")?;
 			},
 
-			LangTypeV::Codec(t) => {
+			LangType::Codec(t) => {
 				write!(self.file(), "Codec<")?;
 				self.write_type(&*t)?;
 				write!(self.file(), ">")?;
@@ -307,7 +306,7 @@ pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 	}
 }
 
-impl <'model, TImpl> GeneratorNameMapping for TImpl where TImpl : TSGenerator<'model> {
+impl <'model, TImpl> GeneratorNameMapping<TypeScriptLanguage> for TImpl where TImpl : TSGenerator<'model> {
 	fn convert_prev_type_param(param: &str) -> String {
 		format!("{}_1", param)
 	}
@@ -354,7 +353,7 @@ struct TSConstGenerator<'model, 'opt, 'output, Output: OutputHandler> {
 	scope: model::Scope<'model>,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> Generator<'model> for TSConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler> Generator<'model, TypeScriptLanguage> for TSConstGenerator<'model, 'opt, 'output, Output> {
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -389,7 +388,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler> TSGenerator<'model> for TSCo
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> ConstGenerator<'model> for TSConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler> ConstGenerator<'model, TypeScriptLanguage> for TSConstGenerator<'model, 'opt, 'output, Output> {
 	fn constant(&self) -> Named<'model, model::Constant> {
 		self.constant
 	}
@@ -441,7 +440,7 @@ struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler, Extra> {
 	_extra: Extra,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, Extra> Generator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler, Extra> Generator<'model, TypeScriptLanguage> for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -486,7 +485,7 @@ trait TSExtraGeneratorOps {
 	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError>;
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> VersionedTypeGenerator<'model, GenTypeKind> for TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
+impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> VersionedTypeGenerator<'model, TypeScriptLanguage, GenTypeKind> for TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
 	where TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : TSExtraGeneratorOps
 {
 	fn type_def(&self) -> Named<'model, model::TypeDefinitionData> {
@@ -533,15 +532,8 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> VersionedTypeGe
 		}
 
 		self.write_operation_name(&operation.operation)?;
-		
 
-		if !operation.type_params.is_empty() {
-			write!(self.file, "<")?;
-			for_sep!(param, operation.type_params, { write!(self.file, ", ")?; }, {
-				write!(self.file, "{}", param)?;
-			});
-			write!(self.file, ">")?;
-		}
+		self.write_type_params(&operation.type_params)?;
 		if is_func {
 			write!(self.file, "(")?;
 			for_sep!((param_name, param), operation.params, { write!(self.file, ", ")?; }, {
@@ -554,22 +546,21 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> VersionedTypeGe
 		write!(self.file, ": ")?;
 		self.write_type(&operation.result)?;
 
-		if !is_func {
-			write!(self.file, " = (() =>")?;
+		if is_func {
+			writeln!(self.file, " {{")?;
+			self.indent_increase();
 		}
-		writeln!(self.file, " {{")?;
-		self.indent_increase();
+		else {
+			write!(self.file, " = ")?;
+		}
 
-		self.write_statement(&operation.implementation)?;
-
-		self.indent_decrease();
+		self.write_expr_statement(&operation.implementation, !is_func)?;
 		
-		self.write_indent()?;
-		write!(self.file, "}}")?;
-		if !is_func {
-			write!(self.file, ")();")?;
+		if is_func {
+			self.indent_decrease();
+			self.write_indent()?;
+			writeln!(self.file, "}}")?;
 		}
-		writeln!(self.file)?;
 
 		Ok(())
 	}
@@ -607,26 +598,20 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> TSTypeGenerator
 		})
 	}
 
-	fn write_statement(&mut self, stmt: &LangStmt<'model>) -> Result<(), GeneratorError> {
-		match stmt {
-			LangStmt::Expr(exprs, result_expr) => {
-				for expr in exprs {
-					self.write_indent()?;
-					self.write_expr(expr)?;
-					writeln!(self.file, ";")?;
-				}
+	fn write_expr_statement(&mut self, stmt: &LangExprStmt<'model>, is_expr: bool) -> Result<(), GeneratorError> {
+		if !is_expr {
+			self.write_indent()?;
+			write!(self.file, "return ")?;
+		}
 
-				if let Some(result_expr) = result_expr {
-					self.write_indent()?;
-					write!(self.file, "return ")?;
-					self.write_expr(result_expr)?;
-					writeln!(self.file, ";")?;
-				}
+		match stmt {
+			LangExprStmt::Expr(expr) => {
+				self.write_expr(expr)?;
+				writeln!(self.file, ";")?;
 			},
 
-			LangStmt::CreateCodec { t, read, write } => {
-				self.write_indent()?;
-				writeln!(self.file, "return {{")?;
+			LangExprStmt::CreateCodec { t, read, write } => {
+				writeln!(self.file, "{{")?;
 				self.indent_increase();
 
 		
@@ -647,7 +632,8 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> TSTypeGenerator
 				self.indent_increase();
 				self.write_statement(write)?;
 				self.indent_decrease();
-				writeln!(self.file, "\t\t}},")?;
+				self.write_indent()?;
+				writeln!(self.file, "}},")?;
 
 
 				self.indent_decrease();
@@ -655,9 +641,8 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> TSTypeGenerator
 				writeln!(self.file, "}};")?;
 			}
 
-			LangStmt::CreateConverter { from_type, to_type, body } => {
-				self.write_indent()?;
-				writeln!(self.file, "return {{")?;
+			LangExprStmt::CreateConverter { from_type, to_type, body } => {
+				writeln!(self.file, "{{")?;
 				self.indent_increase();
 
 		
@@ -677,59 +662,71 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> TSTypeGenerator
 				self.write_indent()?;
 				writeln!(self.file, "}};")?;
 			}
+		}
 
+		Ok(())
+	}
 
-			LangStmt::MatchEnum { value, value_type: _, cases } => {
-				if cases.is_empty() {
+	fn write_statement(&mut self, stmt: &LangStmt<'model>) -> Result<(), GeneratorError> {
+		match stmt {
+			LangStmt::Expr(exprs, result_expr) => {
+				for expr in exprs {
 					self.write_indent()?;
-					write!(self.file, "default: return ")?;
-					self.write_expr(value)?;
+					self.write_expr(expr)?;
 					writeln!(self.file, ";")?;
 				}
-				else {
+
+				if let Some(result_expr) = result_expr {
 					self.write_indent()?;
-					write!(self.file, "switch(")?;
-					self.write_expr(value)?;
-					writeln!(self.file, ".tag) {{")?;
+					write!(self.file, "return ")?;
+					self.write_expr(result_expr)?;
+					writeln!(self.file, ";")?;
+				}
+			},
+
+			LangStmt::MatchEnum { value, value_type: _, cases } => {
+				self.write_indent()?;
+				write!(self.file, "switch(")?;
+				self.write_expr(value)?;
+				writeln!(self.file, ".tag) {{")?;
+
+				self.indent_increase();
+
+				for MatchCase { binding_name, case_name, body } in cases {
+					self.write_indent()?;
+					writeln!(self.file, "case \"{}\":", case_name)?;
+					self.write_indent()?;
+					writeln!(self.file, "{{")?;
 
 					self.indent_increase();
 
-					for MatchCase { binding_name, case_name, body } in cases {
-						self.write_indent()?;
-						writeln!(self.file, "case \"{}\":", case_name)?;
-						self.write_indent()?;
-						writeln!(self.file, "{{")?;
-	
-						self.indent_increase();
+					self.write_indent()?;
+					write!(self.file, "const {} = ", binding_name)?;
+					self.write_expr(value)?;
+					writeln!(self.file, ".{};", case_name)?;
 
+					self.write_statement(body)?;
+					if !body.has_value() {
 						self.write_indent()?;
-						write!(self.file, "const {} = ", binding_name)?;
-						self.write_expr(value)?;
-						writeln!(self.file, ".{};", case_name)?;
-	
-						self.write_statement(body)?;
-						if !body.has_value() {
-							self.write_indent()?;
-							writeln!(self.file, "break;")?;
-						}
-						self.indent_decrease();
-	
-						self.write_indent()?;
-						writeln!(self.file, "}}")?;
+						writeln!(self.file, "break;")?;
 					}
-
-					if stmt.has_value() {
-						self.write_indent()?;
-						write!(self.file, "default: return ")?;
-						self.write_expr(value)?;
-						writeln!(self.file, ";")?;
-					}
-						
 					self.indent_decrease();
 
 					self.write_indent()?;
 					writeln!(self.file, "}}")?;
 				}
+
+				if stmt.has_value() {
+					self.write_indent()?;
+					write!(self.file, "default: return ")?;
+					self.write_expr(value)?;
+					writeln!(self.file, ";")?;
+				}
+					
+				self.indent_decrease();
+
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
 			},
 
 			LangStmt::MatchDiscriminator { value, cases } => {
@@ -772,15 +769,11 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> TSTypeGenerator
 		Ok(())
 	}
 
-	fn write_type_params(&mut self) -> Result<(), GeneratorError> {
-		self.write_type_params_with(|s| s.to_string())
-	}
-
-	fn write_type_params_with(&mut self, f: impl Fn(&str) -> String) -> Result<(), GeneratorError> {
-		if !self.type_def.type_params().is_empty() {
+	fn write_type_params(&mut self, params: &Vec<String>) -> Result<(), GeneratorError> {
+		if !params.is_empty() {
 			write!(self.file, "<")?;
-			for_sep!(param, self.type_def.type_params(), { write!(self.file, ", ")?; }, {
-				write!(self.file, "{}", f(param))?;
+			for_sep!(param, params, { write!(self.file, ", ")?; }, {
+				write!(self.file, "{}", param)?;
 			});
 			write!(self.file, ">")?;
 		}
@@ -792,13 +785,16 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> TSTypeGenerator
 impl <'model, 'opt, 'output, Output: OutputHandler> TSExtraGeneratorOps for TSTypeGenerator<'model, 'opt, 'output, Output, GenStructType> {
 	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
 		write!(self.file, "export interface V{}", ver_type.version)?;
-		self.write_type_params()?;
+		self.write_type_params(self.type_def().type_params())?;
 		writeln!(self.file, " {{")?;
+		self.indent_increase();
 		for (field_name, field) in &ver_type.ver_type.fields {
-			write!(self.file, "\treadonly {}: ", field_name)?;
-			self.write_type(&self.build_type(&ver_type.version, &field.field_type, TypeContext::Field)?)?;
+			self.write_indent()?;
+			write!(self.file, "readonly {}: ", field_name)?;
+			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?)?;
 			writeln!(self.file, ";")?;
 		}
+		self.indent_decrease();
 		writeln!(self.file, "}}")?;
 		Ok(())
 	}
@@ -807,24 +803,27 @@ impl <'model, 'opt, 'output, Output: OutputHandler> TSExtraGeneratorOps for TSTy
 impl <'model, 'opt, 'output, Output: OutputHandler> TSExtraGeneratorOps for TSTypeGenerator<'model, 'opt, 'output, Output, GenEnumType> {
 	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
 		write!(self.file, "export type V{}", ver_type.version)?;
-		self.write_type_params()?;
+		self.write_type_params(self.type_def().type_params())?;
 		write!(self.file, " = ")?;
+		self.indent_increase();
 		let mut is_first = true;
 		for (field_name, field) in &ver_type.ver_type.fields {
 			if !is_first {
 				writeln!(self.file)?;
-				write!(self.file, "\t| ")?;
+				self.write_indent()?;
+				write!(self.file, "| ")?;
 			}
 			else {
 				is_first = false;
 			}
 			write!(self.file, "{{ readonly tag: \"{}\", readonly {}: ", field_name, field_name)?;
-			self.write_type(&self.build_type(&ver_type.version, &field.field_type, TypeContext::Field)?)?;
+			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?)?;
 			write!(self.file, ", }}")?;
 		}
 		if is_first {
 			write!(self.file, "never")?;
 		}
+		self.indent_decrease();
 
 		writeln!(self.file, ";")?;
 		

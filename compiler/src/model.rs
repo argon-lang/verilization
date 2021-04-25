@@ -136,6 +136,15 @@ pub struct Named<'a, A> {
 	value: &'a A,
 }
 
+impl <'a, A: fmt::Debug> fmt::Debug for Named<'a, A> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+		f.debug_struct("Named")
+			.field("name", &self.name)
+			.field("value", &self.value)
+			.finish()
+	}
+}
+
 impl <'a, A> Clone for Named<'a, A> {
 	fn clone(&self) -> Self {
 		Named {
