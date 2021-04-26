@@ -5,7 +5,20 @@
   "type": "module",
   "main": "bin/index.js",
   "exports": {
-    ".": "./bin/index.js"
+    ".": "./bin/index.js",
+    "./nat.js": "./bin/Nat.js",
+    "./int.js": "./bin/Int.js",
+    "./u8.js": "./bin/U8.js",
+    "./i8.js": "./bin/I8.js",
+    "./u16.js": "./bin/U16.js",
+    "./i16.js": "./bin/I16.js",
+    "./u32.js": "./bin/U32.js",
+    "./i32.js": "./bin/I32.js",
+    "./u64.js": "./bin/U64.js",
+    "./i64.js": "./bin/I64.js",
+    "./string.js": "./bin/String.js",
+    "./list.js": "./bin/List.js",
+    "./option.js": "./bin/Option.js"
   },
   "scripts": {
     "build": "tsc --project tsconfig.json"

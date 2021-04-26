@@ -1,8 +1,9 @@
 use verilization_compiler::{lang, model};
 use lang::GeneratorError;
-use lang::typescript::{TSGenerator, TSOptions};
+use lang::typescript::{TSGenerator, TSOptions, make_field_name};
 use lang::generator::*;
 use model::{Verilization, Named};
+
 
 use crate::memory_format::MemoryFormatWriter;
 use crate::test_lang::{TestLanguage, TestGenerator};
@@ -23,7 +24,7 @@ struct TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
     imported_types: &'state mut HashSet<model::QualifiedName>,
     random: &'model mut R,
     model: &'model Verilization,
-	type_def: Named<'model, model::TypeDefinitionData>,
+	type_def: Named<'model, model::VersionedTypeDefinitionData>,
 	scope: model::Scope<'model>,
 }
 
@@ -66,6 +67,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> TSGenerator<'model> for TSTest
 impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
 
     fn generate(&mut self) -> Result<(), GeneratorError> {
+        self.add_imported_type(&model::QualifiedName::from_parts(&[], "u32"));
         self.add_imported_type(self.type_def.name())?;
 
         for t in self.type_def.referenced_types() {
@@ -86,12 +88,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
         };
 
         if !self.imported_types.contains(&t) {
-
-            let pkg_dir = self.options.package_mapping.get(&t.package).ok_or(format!("Unmapped package: {}", t.package))?;
-
-            write!(self.file, "import * as ")?;
-            self.write_import_name(&t)?;
-            writeln!(self.file, " from \"./{}/{}.js\";", pkg_dir.to_str().unwrap(), t.name)?;
+            self.write_import(&t, &self.options().output_dir.clone())?;
             self.imported_types.insert(t.clone());
         }
 
@@ -101,7 +98,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
     fn versioned_type(&mut self, version: &BigUint) -> Result<(), GeneratorError> {
         write!(self.file, "await check(")?;
 
-        let type_arg_map: HashMap<_, _> = self.type_def.type_params().iter().map(|param| (param.clone(), model::Type::U32)).collect();
+        let type_arg_map: HashMap<_, _> = self.type_def.type_params().iter().map(|param| (param.clone(), model::Type::Defined(model::QualifiedName { package: model::PackageName::new(), name: String::from("u32") }, Vec::new()))).collect();
         let type_args: Vec<_> = type_arg_map.values().map(|arg| arg.clone()).collect();
         let current_type = model::Type::Defined(self.type_def.name().clone(), type_args);
 
@@ -143,130 +140,139 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
 
     fn write_random_value<W: verilization_runtime::FormatWriter<Error = GeneratorError>>(&mut self, writer: &mut W, version: &BigUint, t: &model::Type, type_args: &HashMap<String, model::Type>) -> Result<(), GeneratorError> {
         match t {
-            model::Type::Nat => {
-                let n: BigUint = self.random.gen_biguint(256);
-                write!(self.file, "{}n", n)?;
-                n.write_verilization(writer)
-            },
-            model::Type::Int => {
-                let n: BigInt = self.random.gen_bigint(256);
-                write!(self.file, "{}n", n)?;
-                n.write_verilization(writer)
-            },
-            model::Type::U8 => {
-                let n: u8 = self.random.gen();
-                write!(self.file, "{}", n)?;
-                n.write_verilization(writer)
-            },
-            model::Type::I8 => {
-                let n: i8 = self.random.gen();
-                write!(self.file, "{}", n)?;
-                n.write_verilization(writer)
-            },
-            model::Type::U16 => {
-                let n: u16 = self.random.gen();
-                write!(self.file, "{}", n)?;
-                n.write_verilization(writer)
-            },
-            model::Type::I16 => {
-                let n: i16 = self.random.gen();
-                write!(self.file, "{}", n)?;
-                n.write_verilization(writer)
-            },
-            model::Type::U32 => {
-                let n: u32 = self.random.gen();
-                write!(self.file, "{}", n)?;
-                n.write_verilization(writer)
-            },
-            model::Type::I32 => {
-                let n: i32 = self.random.gen();
-                write!(self.file, "{}", n)?;
-                n.write_verilization(writer)
-            },
-            model::Type::U64 => {
-                let n: u64 = self.random.gen();
-                write!(self.file, "{}n", n)?;
-                n.write_verilization(writer)
-            },
-            model::Type::I64 => {
-                let n: i64 = self.random.gen();
-                write!(self.file, "{}n", n)?;
-                n.write_verilization(writer)
-            },
-            model::Type::String => {
-                let charset = random_string::Charset::new("abcdefABCDEF0123456789").unwrap();
-                let len = self.random.gen_range(0..2000);
-                let s = random_string::generate(len, &charset).to_string();
-                write!(self.file, "\"{}\"", s)?;
-                s.write_verilization(writer)?;
-    
-                Ok(())
-            },
-            model::Type::List(inner) => {
-                write!(self.file, "[ ")?;
-    
-                let len: u32 = self.random.gen_range(0..200);
-                BigUint::from(len).write_verilization(writer)?;
-                for _ in 0..len {
-                    self.write_random_value(writer, version, &*inner, type_args)?;
-                    write!(self.file, ", ")?;
-                }
-    
-                write!(self.file, "]")?;
-    
-                Ok(())
-            },
-            model::Type::Option(inner) => {
-                let b: bool = self.random.gen();
-                if b {
-                    BigUint::one().write_verilization(writer)?;
-                    write!(self.file, "{{ value: ")?;
-                    self.write_random_value(writer, version, &*inner, type_args)?;
-                    write!(self.file, "}}")?;
-                }
-                else {
-                    BigUint::zero().write_verilization(writer)?;
-                    write!(self.file, "null")?;
-                }
-    
-                Ok(())
-            },
             model::Type::Defined(name, args) => match self.scope.lookup(name.clone()) {
                 model::ScopeLookup::NamedType(name) => {
-                    let t = self.model.get_type(&name).ok_or("Could not find type")?;
-                    
-                    let resolved_args = t.type_params().iter().zip(args.iter())
-                        .map(|(param, arg)| Some((param.clone(), self.scope.resolve(arg.clone(), type_args)?)))
-                        .collect::<Option<HashMap<_, _>>>()
-                        .ok_or("Could not resolve args")?;
-        
-                    match t {
-                        model::NamedTypeDefinition::StructType(t) => {
-                            let ver_type = t.versioned(version).ok_or("Could not find version of type")?.ver_type;
-                            write!(self.file, "{{ ")?;
-        
-                            for (field_name, field) in &ver_type.fields {
-                                write!(self.file, "{}: ", field_name)?;
-                                self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type, &resolved_args)?;
-                                write!(self.file, ", ")?;
-                            }
-        
-                            write!(self.file, "}}")?;
-        
+                    match (name.name.as_ref(), &args[..]) {
+
+                        ("nat", []) => {
+                            let n: BigUint = self.random.gen_biguint(256);
+                            write!(self.file, "{}n", n)?;
+                            n.write_verilization(writer)
+                        },
+                        ("int", []) => {
+                            let n: BigInt = self.random.gen_bigint(256);
+                            write!(self.file, "{}n", n)?;
+                            n.write_verilization(writer)
+                        },
+                        ("u8", []) => {
+                            let n: u8 = self.random.gen();
+                            write!(self.file, "{}", n)?;
+                            n.write_verilization(writer)
+                        },
+                        ("i8", []) => {
+                            let n: i8 = self.random.gen();
+                            write!(self.file, "{}", n)?;
+                            n.write_verilization(writer)
+                        },
+                        ("u16", []) => {
+                            let n: u16 = self.random.gen();
+                            write!(self.file, "{}", n)?;
+                            n.write_verilization(writer)
+                        },
+                        ("i16", []) => {
+                            let n: i16 = self.random.gen();
+                            write!(self.file, "{}", n)?;
+                            n.write_verilization(writer)
+                        },
+                        ("u32", []) => {
+                            let n: u32 = self.random.gen();
+                            write!(self.file, "{}", n)?;
+                            n.write_verilization(writer)
+                        },
+                        ("i32", []) => {
+                            let n: i32 = self.random.gen();
+                            write!(self.file, "{}", n)?;
+                            n.write_verilization(writer)
+                        },
+                        ("u64", []) => {
+                            let n: u64 = self.random.gen();
+                            write!(self.file, "{}n", n)?;
+                            n.write_verilization(writer)
+                        },
+                        ("i64", []) => {
+                            let n: i64 = self.random.gen();
+                            write!(self.file, "{}n", n)?;
+                            n.write_verilization(writer)
+                        },
+                        ("string", []) => {
+                            let charset = random_string::Charset::new("abcdefABCDEF0123456789").unwrap();
+                            let len = self.random.gen_range(0..2000);
+                            let s = random_string::generate(len, &charset).to_string();
+                            write!(self.file, "\"{}\"", s)?;
+                            s.write_verilization(writer)?;
+                
                             Ok(())
                         },
-        
-                        model::NamedTypeDefinition::EnumType(t) => {
-                            let ver_type = t.versioned(version).ok_or("Could not find version of type")?.ver_type;
-                            let index = self.random.gen_range(0..ver_type.fields.len());
-                            let (field_name, field) = &ver_type.fields[index];
-        
-                            BigUint::from(index).write_verilization(writer)?;
-                            write!(self.file, "{{ tag: \"{}\", {}: ", field_name, field_name)?;
-                            self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type, &resolved_args)?;
-                            write!(self.file, "}}")?;
-        
+                        ("list", [inner]) => {
+                            write!(self.file, "[ ")?;
+                
+                            let len: u32 = self.random.gen_range(0..200);
+                            BigUint::from(len).write_verilization(writer)?;
+                            for _ in 0..len {
+                                self.write_random_value(writer, version, &*inner, type_args)?;
+                                write!(self.file, ", ")?;
+                            }
+                
+                            write!(self.file, "]")?;
+                
                             Ok(())
+                        },
+                        ("option", [inner]) => {
+                            let b: bool = self.random.gen();
+                            if b {
+                                BigUint::one().write_verilization(writer)?;
+                                write!(self.file, "{{ value: ")?;
+                                self.write_random_value(writer, version, &*inner, type_args)?;
+                                write!(self.file, "}}")?;
+                            }
+                            else {
+                                BigUint::zero().write_verilization(writer)?;
+                                write!(self.file, "null")?;
+                            }
+                
+                            Ok(())
+                        },
+                        _ => {
+                            let t = self.model.get_type(&name).ok_or("Could not find type")?;
+                            
+                            let resolved_args = t.type_params().iter().zip(args.iter())
+                                .map(|(param, arg)| Some((param.clone(), self.scope.resolve(arg.clone(), type_args)?)))
+                                .collect::<Option<HashMap<_, _>>>()
+                                .ok_or("Could not resolve args")?;
+                
+                            match t {
+                                model::NamedTypeDefinition::StructType(t) => {
+                                    let ver_type = t.versioned(version).ok_or("Could not find version of type")?.ver_type;
+                                    write!(self.file, "{{ ")?;
+                
+                                    for (field_name, field) in &ver_type.fields {
+                                        write!(self.file, "{}: ", make_field_name(&field_name))?;
+                                        self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type, &resolved_args)?;
+                                        write!(self.file, ", ")?;
+                                    }
+                
+                                    write!(self.file, "}}")?;
+                
+                                    Ok(())
+                                },
+                
+                                model::NamedTypeDefinition::EnumType(t) => {
+                                    let ver_type = t.versioned(version).ok_or("Could not find version of type")?.ver_type;
+                                    let index = self.random.gen_range(0..ver_type.fields.len());
+                                    let (field_name, field) = &ver_type.fields[index];
+                
+                                    BigUint::from(index).write_verilization(writer)?;
+                                    write!(self.file, "{{ tag: \"{}\", {}: ", field_name, make_field_name(&field_name))?;
+                                    self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type, &resolved_args)?;
+                                    write!(self.file, "}}")?;
+                
+                                    Ok(())
+                                },
+
+                                model::NamedTypeDefinition::ExternType(_) => {
+                                    Err(GeneratorError::from("Extern types not implemented"))
+                                },
+                            }
                         },
                     }
                 },
@@ -291,7 +297,6 @@ impl TestGenerator for TSTestGenerator {
     fn start() -> Result<TSTestGenerator, GeneratorError> {
         let mut file = File::create("../typescript/src/gen/tests.ts")?;
 
-        writeln!(file, "import {{StandardCodecs}} from \"@verilization/runtime\";")?;
         writeln!(file, "import {{check}} from \"../check.js\";")?;
         
 
@@ -308,6 +313,7 @@ impl TestGenerator for TSTestGenerator {
             let t = match t {
                 model::NamedTypeDefinition::StructType(t) => t,
                 model::NamedTypeDefinition::EnumType(t) => t,
+                model::NamedTypeDefinition::ExternType(_) => continue,
             };
 
             let mut gen = TSTestCaseGen {

@@ -72,6 +72,13 @@ fn kw_struct(input: &str) -> PResult<&str, ()> {
 	Ok((input, ()))
 }
 
+fn kw_extern(input: &str) -> PResult<&str, ()> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = tag("extern")(input)?;
+	let (input, _) = multispace1(input)?;
+	Ok((input, ()))
+}
+
 fn kw_final(input: &str) -> PResult<&str, ()> {
 	let (input, _) = multispace0(input)?;
 	let (input, _) = tag("final")(input)?;
@@ -230,31 +237,7 @@ fn type_expr(input: &str) -> PResult<&str, model::Type> {
 		(input, qual_name, args.unwrap_or(Vec::new()))
 	};
 	
-	if qual_name.package.package.is_empty() {
-		Ok((input, match (qual_name.name.as_str(), &args[..]) {
-			("nat", []) => model::Type::Nat,
-			("int", []) => model::Type::Int,
-			("u8", []) => model::Type::U8,
-			("i8", []) => model::Type::I8,
-			("u16", []) => model::Type::U16,
-			("i16", []) => model::Type::I16,
-			("u32", []) => model::Type::U32,
-			("i32", []) => model::Type::I32,
-			("u64", []) => model::Type::U64,
-			("i64", []) => model::Type::I64,
-			("string", []) => model::Type::String,
-			("list", [elem_type]) => {
-				model::Type::List(Box::new(elem_type.clone()))
-			},
-			("option", [elem_type]) => {
-				model::Type::Option(Box::new(elem_type.clone()))
-			},
-			(_, _) => model::Type::Defined(qual_name, args),
-		}))
-	}
-	else {
-		Ok((input, model::Type::Defined(qual_name, args)))
-	}
+	Ok((input, model::Type::Defined(qual_name, args)))
 }
 
 fn constant_value(input: &str) -> PResult<&str, model::ConstantValue> {
@@ -323,7 +306,7 @@ fn field_definition(input: &str) -> PResult<&str, (String, model::FieldInfo)> {
 // version 5 {
 //   ...	
 // }
-fn versioned_type(input: &str) -> PResult<&str, (BigUint, model::VersionedTypeDefinition)> {
+fn type_version_definition(input: &str) -> PResult<&str, (BigUint, model::TypeVersionDefinition)> {
 	let (input, _) = kw_version(input)?;
 	let (input, ver) = biguint(input)?;
 	let (input, _) = sym_open_curly(input)?;
@@ -333,14 +316,16 @@ fn versioned_type(input: &str) -> PResult<&str, (BigUint, model::VersionedTypeDe
 	let mut field_names: HashSet<String> = HashSet::new();
 	let mut fields: Vec<(String, model::FieldInfo)> = Vec::new();
 	for (name, field) in fields_orig {
-		if !field_names.insert(name.clone()) {
+		let mut case_name = name.clone();
+		case_name.make_ascii_uppercase();
+		if !field_names.insert(case_name) {
 			return Err(nom::Err::Failure(PErrorType::DuplicateField(input, ver, name)))
 		}
 
 		fields.push((name, field));
 	}
 
-	Ok((input, (ver, model::VersionedTypeDefinition {
+	Ok((input, (ver, model::TypeVersionDefinition {
 		fields: fields,
 		dummy: PhantomData {},
 	})))
@@ -363,7 +348,7 @@ fn type_param_list(input: &str) -> PResult<&str, Vec<String>> {
 //   version 5 {...}
 //   ...
 // }
-fn type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
+fn versioned_type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 	let (input, is_final) = opt(kw_final)(input)?;
 	let (input, is_enum) = alt((
 		map(kw_enum, |_| true),
@@ -375,10 +360,10 @@ fn type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 	let type_params = type_params.unwrap_or(Vec::new());
 	
 	let (input, _) = sym_open_curly(input)?;
-	let (input, versions) = many0(versioned_type)(input)?;
+	let (input, versions) = many0(type_version_definition)(input)?;
 	let (input, _) = sym_close_curly(input)?;
 
-	let mut version_map: HashMap<BigUint, model::VersionedTypeDefinition> = HashMap::new();
+	let mut version_map: HashMap<BigUint, model::TypeVersionDefinition> = HashMap::new();
 	for (ver, ver_type) in versions.into_iter() {
 		if version_map.contains_key(&ver) {
 			return Err(nom::Err::Failure(PErrorType::DuplicateVersion(input, name, ver)))
@@ -390,7 +375,7 @@ fn type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 	
 	Ok((input, (name, TopLevelDefinition::Type(
 		if is_enum {
-			model::TypeDefinition::EnumType(model::TypeDefinitionData {
+			model::TypeDefinition::EnumType(model::VersionedTypeDefinitionData {
 				imports: HashMap::new(),
 				type_params: type_params,
 				versions: version_map,
@@ -398,7 +383,7 @@ fn type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 			})
 		}
 		else {
-			model::TypeDefinition::StructType(model::TypeDefinitionData {
+			model::TypeDefinition::StructType(model::VersionedTypeDefinitionData {
 				imports: HashMap::new(),
 				type_params: type_params,
 				versions: version_map,
@@ -409,9 +394,26 @@ fn type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 	
 }
 
+fn extern_type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
+	let (input, _) = kw_extern(input)?;
+	let (input, name) = identifier(input)?;
+	let (input, type_params) = opt(type_param_list)(input)?;
+	let type_params = type_params.unwrap_or(Vec::new());
+
+	let (input, _) = sym_open_curly(input)?;
+	
+
+	
+	let (input, _) = sym_close_curly(input)?;
+
+	Ok((input, (name, TopLevelDefinition::Type(model::TypeDefinition::ExternType(model::ExternTypeDefinitionData {
+		type_params: type_params,
+	})))))
+}
+
 
 fn top_level_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
-	alt((constant_defn, type_definition))(input)
+	alt((constant_defn, versioned_type_definition, extern_type_definition))(input)
 }
 
 

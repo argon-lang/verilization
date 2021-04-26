@@ -1,7 +1,6 @@
 use verilization_compiler::{lang, model};
 use lang::{Language, GeneratorError};
-use model::PackageName;
-use model::Verilization;
+use model::{PackageName, QualifiedName, Verilization};
 
 use std::collections::HashMap;
 use core::array::IntoIter;
@@ -47,7 +46,10 @@ impl TestLanguage for lang::typescript::TypeScriptLanguage {
                 ( PackageName::from_parts(&["enum", "versions"]), OsString::from("enum/versions") ),
                 ( PackageName::from_parts(&["genericsTest"]), OsString::from("genericsTest") ),
                 ( PackageName::from_parts(&["finalTest"]), OsString::from("finalTest") ),
-            ]))
+            ])),
+            library_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
+                ( PackageName::from_parts(&[]), OsString::from("@verilization/runtime") ),
+            ])),
         }
     }
     
@@ -89,7 +91,24 @@ impl TestLanguage for lang::java::JavaLanguage {
                 ( PackageName::from_parts(&["enum", "versions"]), PackageName::from_parts(&["enum_", "versions"]) ),
                 ( PackageName::from_parts(&["genericsTest"]), PackageName::from_parts(&["genericsTest"]) ),
                 ( PackageName::from_parts(&["finalTest"]), PackageName::from_parts(&["finalTest"]) ),
-            ]))
+            ])),
+            library_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
+                ( PackageName::from_parts(&[]), PackageName::from_parts(&["dev", "argon", "verilization", "java_runtime"]) ),
+            ])),
+            extern_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
+                ( QualifiedName::from_parts(&[], "nat"), QualifiedName::from_parts(&["java", "math"], "BigInteger") ),
+                ( QualifiedName::from_parts(&[], "int"), QualifiedName::from_parts(&["java", "math"], "BigInteger") ),
+                ( QualifiedName::from_parts(&[], "u8"), QualifiedName::from_parts(&[], "byte") ),
+                ( QualifiedName::from_parts(&[], "i8"), QualifiedName::from_parts(&[], "byte") ),
+                ( QualifiedName::from_parts(&[], "u16"), QualifiedName::from_parts(&[], "short") ),
+                ( QualifiedName::from_parts(&[], "i16"), QualifiedName::from_parts(&[], "short") ),
+                ( QualifiedName::from_parts(&[], "u32"), QualifiedName::from_parts(&[], "int") ),
+                ( QualifiedName::from_parts(&[], "i32"), QualifiedName::from_parts(&[], "int") ),
+                ( QualifiedName::from_parts(&[], "u64"), QualifiedName::from_parts(&[], "long") ),
+                ( QualifiedName::from_parts(&[], "i64"), QualifiedName::from_parts(&[], "long") ),
+                ( QualifiedName::from_parts(&[], "string"), QualifiedName::from_parts(&["java", "lang"], "String") ),
+                ( QualifiedName::from_parts(&[], "option"), QualifiedName::from_parts(&["java", "util"], "Optional") ),
+            ])),
         }
     }
     
@@ -129,7 +148,10 @@ impl TestLanguage for lang::scala::ScalaLanguage {
                 ( PackageName::from_parts(&["enum", "versions"]), PackageName::from_parts(&["enum_", "versions"]) ),
                 ( PackageName::from_parts(&["genericsTest"]), PackageName::from_parts(&["genericsTest"]) ),
                 ( PackageName::from_parts(&["finalTest"]), PackageName::from_parts(&["finalTest"]) ),
-            ]))
+            ])),
+            library_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
+                ( PackageName::from_parts(&[]), PackageName::from_parts(&["dev", "argon", "verilization", "scala_runtime"]) ),
+            ])),
         }
     }
     

@@ -1,6 +1,17 @@
 use std::path::PathBuf;
 
 
+pub const RUNTIME_DIR: &str = "../../runtime/verilization/";
+
+pub const RUNTIME_FILES: &[&str] = &[
+    "integral",
+    "string",
+    "list",
+    "option",
+];
+
+
+
 pub const TEST_CASE_FILES: &[&str] = &[
     "struct_versions",
     "final",

@@ -9,11 +9,11 @@ final class Either_Conversions {
         return new Converter<Either.V3<A_1, B_1>, Either.V4<A_2, B_2>>() {
             @Override
             public Either.V4<A_2, B_2> convert(Either.V3<A_1, B_1> prev) {
-                if(prev instanceof Either.V3.left<?, ?>) {
-                    return new Either.V4.left<A_2, B_2>(A_conv.convert(((Either.V3.left<A_1, B_1>)prev).left));
+                if(prev instanceof Either.V3.Left<?, ?>) {
+                    return new Either.V4.Left<A_2, B_2>(A_conv.convert(((Either.V3.Left<A_1, B_1>)prev).left));
                 }
-                else if(prev instanceof Either.V3.right<?, ?>) {
-                    return new Either.V4.right<A_2, B_2>(B_conv.convert(((Either.V3.right<A_1, B_1>)prev).right));
+                else if(prev instanceof Either.V3.Right<?, ?>) {
+                    return new Either.V4.Right<A_2, B_2>(B_conv.convert(((Either.V3.Right<A_1, B_1>)prev).right));
                 }
                 else {
                     throw new IllegalArgumentException();

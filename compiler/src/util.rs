@@ -22,3 +22,18 @@ macro_rules! for_sep {
         }
     };
 }
+
+
+pub fn capitalize_identifier(word: &mut str) {
+    if let Some(start) = word.get_mut(0..1) {
+        start.make_ascii_uppercase()
+    }
+}
+
+pub fn uncapitalize_identifier(word: &mut str) {
+    if let Some(start) = word.get_mut(0..1) {
+        start.make_ascii_lowercase()
+    }
+}
+
+

@@ -1,72 +1,82 @@
 package dev.argon.verilization.scala_runtime
 
 import zio.{IO, ZIO, Chunk, ChunkBuilder}
-import java.nio.charset.StandardCharsets
 
-object StandardCodecs {
-    
-    val natCodec: Codec[BigInt] = new Codec[BigInt] {
+import scala.{Int => SInt}
+
+object Nat {
+    val codec: Codec[BigInt] = new Codec[BigInt] {
         override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, BigInt] =
             VLQ.decodeVLQ(reader, false)
 
         override def write[R, E](writer: FormatWriter[R, E], value: BigInt): ZIO[R, E, Unit] =
             VLQ.encodeVLQ(writer, false, value)
     }
-    
-    val intCodec: Codec[BigInt] = new Codec[BigInt] {
+}
+
+object Int {
+    val codec: Codec[BigInt] = new Codec[BigInt] {
         override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, BigInt] =
             VLQ.decodeVLQ(reader, true)
 
         override def write[R, E](writer: FormatWriter[R, E], value: BigInt): ZIO[R, E, Unit] =
             VLQ.encodeVLQ(writer, true, value)
     }
-    
-    val i8Codec: Codec[Byte] = new Codec[Byte] {
+}
+
+object I8 {
+    val codec: Codec[Byte] = new Codec[Byte] {
         override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, Byte] =
             reader.readByte()
 
         override def write[R, E](writer: FormatWriter[R, E], value: Byte): ZIO[R, E, Unit] =
             writer.writeByte(value)
     }
-    
-    val i16Codec: Codec[Short] = new Codec[Short] {
+}
+
+object U8 {
+    val codec: Codec[Byte] = I8.codec
+}
+
+object I16 {
+    val codec: Codec[Short] = new Codec[Short] {
         override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, Short] =
             reader.readShort()
 
         override def write[R, E](writer: FormatWriter[R, E], value: Short): ZIO[R, E, Unit] =
             writer.writeShort(value)
     }
-    
-    val i32Codec: Codec[Int] = new Codec[Int] {
-        override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, Int] =
+}
+
+object U16 {
+    val codec: Codec[Short] = I16.codec
+}
+
+object I32 {
+    val codec: Codec[SInt] = new Codec[SInt] {
+        override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, SInt] =
             reader.readInt()
 
-        override def write[R, E](writer: FormatWriter[R, E], value: Int): ZIO[R, E, Unit] =
+        override def write[R, E](writer: FormatWriter[R, E], value: SInt): ZIO[R, E, Unit] =
             writer.writeInt(value)
     }
-    
-    val i64Codec: Codec[Long] = new Codec[Long] {
+}
+
+object U32 {
+    val codec: Codec[SInt] = I32.codec
+}
+
+object I64 {
+    val codec: Codec[Long] = new Codec[Long] {
         override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, Long] =
             reader.readLong()
 
         override def write[R, E](writer: FormatWriter[R, E], value: Long): ZIO[R, E, Unit] =
             writer.writeLong(value)
     }
-
-    val stringCodec: Codec[String] = new Codec[String] {
-        override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, String] =
-            natCodec.read(reader).flatMap { length =>
-                if(length > Int.MaxValue)
-                    IO.die(new ArithmeticException("Length of string would overflow"))
-                else
-                    reader.readBytes(length.toInt)
-            }.map { data => new String(data.toArray, StandardCharsets.UTF_8) }
-
-        override def write[R, E](writer: FormatWriter[R, E], value: String): ZIO[R, E, Unit] = {
-            val data = value.getBytes(StandardCharsets.UTF_8)
-            natCodec.write(writer, value.length) *> writer.writeBytes(Chunk.fromArray(data))
-        }
-            
-    }
-
 }
+
+object U64 {
+    val codec: Codec[Long] = I64.codec
+}
+

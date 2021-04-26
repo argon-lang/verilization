@@ -1,0 +1,13 @@
+
+version 1;
+
+extern nat {}
+extern int {}
+extern u8 {}
+extern i8 {}
+extern u16 {}
+extern i16 {}
+extern u32 {}
+extern i32 {}
+extern u64 {}
+extern i64 {}

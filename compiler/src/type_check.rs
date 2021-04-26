@@ -54,9 +54,6 @@ impl <'model> TypeCheck<'model> {
                     Ok(())
                 }
             },
-            Type::List(inner) => self.check_type(version, inner),
-            Type::Option(inner) => self.check_type(version, inner),
-            _ => Ok(())
         }
     }
     
@@ -69,6 +66,7 @@ pub fn type_check_verilization(model: &Verilization) -> Result<(), TypeCheckErro
         let t = match t {
             NamedTypeDefinition::StructType(t) => t,
             NamedTypeDefinition::EnumType(t) => t,
+            NamedTypeDefinition::ExternType(_) => continue,
         };
 
         let tc = TypeCheck {

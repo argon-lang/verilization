@@ -34,7 +34,7 @@ impl PackageName {
 
 	pub fn from_parts(parts: &[&str]) -> PackageName {
 		PackageName {
-			package: Vec::from_iter(parts.iter().map(|x| x.to_string())),
+			package: parts.iter().map(|x| String::from(*x)).collect::<Vec<_>>(),
 		}
 	}
 }
@@ -82,6 +82,38 @@ pub struct QualifiedName {
 	pub name: String,
 }
 
+impl QualifiedName {
+	pub fn from_str(name: &str) -> Option<QualifiedName> {
+		let mut iter = name.split(".");
+		if let Some(part) = iter.next() {
+			let mut pkg_parts = Vec::new();
+			let mut name = String::from(part);
+
+			while let Some(part) = iter.next() {
+				pkg_parts.push(name);
+				name = String::from(part);
+			}
+
+			Some(QualifiedName {
+				package: PackageName {
+					package: pkg_parts,
+				},
+				name: name,
+			})
+		}
+		else {
+			None
+		}
+	}
+
+	pub fn from_parts(package: &[&str], name: &str) -> QualifiedName {
+		QualifiedName {
+			package: PackageName::from_parts(package),
+			name: String::from(name),
+		}
+	}
+}
+
 impl fmt::Display for QualifiedName {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		if self.package.package.is_empty() {
@@ -113,19 +145,6 @@ impl PartialOrd for QualifiedName {
 /// A data type. This can be a built-in or user-defined type.
 #[derive(Clone, Debug)]
 pub enum Type {
-	Nat,
-	Int,
-	U8,
-	I8,
-	U16,
-	I16,
-	U32,
-	I32,
-	U64,
-	I64,
-	String,
-	List(Box<Type>),
-	Option(Box<Type>),
 	Defined(QualifiedName, Vec<Type>),
 }
 
@@ -201,26 +220,11 @@ impl <'a> Named<'a, Constant> {
 	}
 
 	pub fn versions(self) -> ConstantVersionIterator<'a> {
-
-		let last_version = match self.scope().lookup(self.name.clone()) {
-			ScopeLookup::NamedType(name) => match self.model.get_type(&name) {
-				Some(NamedTypeDefinition::StructType(ver_type) | NamedTypeDefinition::EnumType(ver_type)) =>
-					if ver_type.is_final() {
-						Some(ver_type.last_explicit_version().map_or_else(|| BigUint::zero(), |ver| ver.clone()))
-					}
-					else {
-						None
-					},
-				None => None,
-			},
-			ScopeLookup::TypeParameter(_) => None,
-		};
-
 		ConstantVersionIterator {
 			constant: self,
 			version: BigUint::one(),
 			has_prev_version: false,
-			max_version: last_version.unwrap_or_else(|| self.model.metadata.latest_version.clone()),
+			max_version: self.model.metadata.latest_version.clone(),
 		}
 	}
 
@@ -245,7 +249,7 @@ pub struct FieldInfo {
 
 /// A versioned type defines the contents of a type for a specific format version.
 #[derive(Debug)]
-pub struct VersionedTypeDefinition {
+pub struct TypeVersionDefinition {
 	pub fields: Vec<(String, FieldInfo)>,
 
 	pub(crate) dummy: PhantomData<()>,
@@ -255,7 +259,7 @@ pub struct VersionedTypeDefinition {
 pub struct TypeVersionInfo<'a> {
 	pub version: BigUint,
 	pub explicit_version: bool,
-	pub ver_type: &'a VersionedTypeDefinition,
+	pub ver_type: &'a TypeVersionDefinition,
 
 	dummy: PhantomData<()>,
 }
@@ -274,14 +278,14 @@ impl <'a> Clone for TypeVersionInfo<'a> {
 
 /// A struct defines a product type. A struct can be defined differently in different format versions.
 #[derive(Debug)]
-pub struct TypeDefinitionData {
+pub struct VersionedTypeDefinitionData {
 	pub(crate) imports: HashMap<String, ScopeLookup>,
 	pub(crate) type_params: Vec<String>,
-	pub(crate) versions: HashMap<BigUint, VersionedTypeDefinition>,
+	pub(crate) versions: HashMap<BigUint, TypeVersionDefinition>,
 	pub(crate) is_final: bool,
 }
 
-impl <'a> Named<'a, TypeDefinitionData> {
+impl <'a> Named<'a, VersionedTypeDefinitionData> {
 	pub fn is_final(&self) -> bool {
 		self.value.is_final
 	}
@@ -347,16 +351,23 @@ impl <'a> Named<'a, TypeDefinitionData> {
 	}
 }
 
+#[derive(Debug)]
+pub struct ExternTypeDefinitionData {
+	pub(crate) type_params: Vec<String>,
+}
+
 /// A definition of a type. Either a struct or enum.
 pub enum TypeDefinition {
-	StructType(TypeDefinitionData),
-	EnumType(TypeDefinitionData),
+	StructType(VersionedTypeDefinitionData),
+	EnumType(VersionedTypeDefinitionData),
+	ExternType(ExternTypeDefinitionData),
 }
 
 #[derive(Copy, Clone)]
 pub enum NamedTypeDefinition<'a> {
-	StructType(Named<'a, TypeDefinitionData>),
-	EnumType(Named<'a, TypeDefinitionData>),
+	StructType(Named<'a, VersionedTypeDefinitionData>),
+	EnumType(Named<'a, VersionedTypeDefinitionData>),
+	ExternType(Named<'a, ExternTypeDefinitionData>),
 }
 
 impl <'a> NamedTypeDefinition<'a> {
@@ -364,6 +375,7 @@ impl <'a> NamedTypeDefinition<'a> {
 		match self {
 			NamedTypeDefinition::StructType(t) => t.name,
 			NamedTypeDefinition::EnumType(t) => t.name,
+			NamedTypeDefinition::ExternType(t) => t.name,
 		}
 	}
 
@@ -371,6 +383,7 @@ impl <'a> NamedTypeDefinition<'a> {
 		match self {
 			NamedTypeDefinition::StructType(t) => &t.value.type_params,
 			NamedTypeDefinition::EnumType(t) => &t.value.type_params,
+			NamedTypeDefinition::ExternType(t) => &t.value.type_params,
 		}
 	}
 
@@ -382,6 +395,7 @@ impl <'a> NamedTypeDefinition<'a> {
 		match self {
 			NamedTypeDefinition::StructType(t) => t.versioned(version).is_some(),
 			NamedTypeDefinition::EnumType(t) => t.versioned(version).is_some(),
+			NamedTypeDefinition::ExternType(_) => true,
 		}
 	}
 }
@@ -396,6 +410,7 @@ pub struct Verilization {
 	metadata: VerilizationMetadata,
 	constants: HashMap<QualifiedName, Constant>,
 	type_definitions: HashMap<QualifiedName, TypeDefinition>,
+	names: HashSet<QualifiedName>,
 }
 
 #[derive(Clone, Debug)]
@@ -462,19 +477,17 @@ impl <'a> Scope<'a> {
 					},
 				}
 			},
-			Type::Option(inner) => {
-				let res_inner = self.resolve(*inner, type_args)?;
-				Type::Option(Box::new(res_inner))
-			},
-			Type::List(inner) => {
-				let res_inner = self.resolve(*inner, type_args)?;
-				Type::List(Box::new(res_inner))
-			},
-			t => t,
 		})
 	}
 }
 
+fn make_name_uppercase(name: &mut QualifiedName) {
+	for part in &mut name.package.package {
+		part.make_ascii_uppercase();
+	}
+
+	name.name.make_ascii_uppercase();
+}
 
 impl Verilization {
 
@@ -484,28 +497,33 @@ impl Verilization {
 			metadata: metadata,
 			constants: HashMap::new(),
 			type_definitions: HashMap::new(),
+			names: HashSet::new(),
 		}
 	}
 
 	/// Adds a constant to the serialization format.
 	pub fn add_constant(&mut self, name: QualifiedName, constant: Constant) -> Result<(), QualifiedName> {
-		if self.constants.contains_key(&name) {
-			Err(name)
-		}
-		else {
+		let mut case_name = name.clone();
+		make_name_uppercase(&mut case_name);
+		if self.names.insert(case_name) {
 			self.constants.insert(name, constant);
 			Ok(())
+		}
+		else {
+			Err(name)
 		}
 	}
 
 	/// Adds a type definition to the serialization format.
 	pub fn add_type(&mut self, name: QualifiedName, t: TypeDefinition) -> Result<(), QualifiedName> {
-		if self.type_definitions.contains_key(&name) {
-			Err(name)
-		}
-		else {
+		let mut case_name = name.clone();
+		make_name_uppercase(&mut case_name);
+		if self.names.insert(case_name) {
 			self.type_definitions.insert(name, t);
 			Ok(())
+		}
+		else {
+			Err(name)
 		}
 	}
 
@@ -515,6 +533,7 @@ impl Verilization {
 		Some(match t {
 			TypeDefinition::StructType(t) => NamedTypeDefinition::StructType(Named::new(self, name, t)),
 			TypeDefinition::EnumType(t) => NamedTypeDefinition::EnumType(Named::new(self, name, t)),
+			TypeDefinition::ExternType(t) => NamedTypeDefinition::ExternType(Named::new(self, name,  t)),
 		})
 	}
 
@@ -617,15 +636,16 @@ impl <'a> Iterator for TypeIterator<'a> {
 		self.iter.next().map(|(name, t)| match t {
 			TypeDefinition::StructType(t) => NamedTypeDefinition::StructType(Named::new(self.model, name, t)),
 			TypeDefinition::EnumType(t) => NamedTypeDefinition::EnumType(Named::new(self.model, name, t)),
+			TypeDefinition::ExternType(t) => NamedTypeDefinition::ExternType(Named::new(self.model, name, t)),
 		})
 	}
 }
 
 pub struct TypeVersionIterator<'a> {
-	type_def: Named<'a, TypeDefinitionData>,
+	type_def: Named<'a, VersionedTypeDefinitionData>,
 	version: BigUint,
 	max_version: BigUint,
-	last_seen_version: Option<&'a VersionedTypeDefinition>,
+	last_seen_version: Option<&'a TypeVersionDefinition>,
 }
 
 impl <'a> Iterator for TypeVersionIterator<'a> {
@@ -662,24 +682,15 @@ impl <'a> Iterator for TypeVersionIterator<'a> {
 
 pub struct ReferencedTypeIterator<'a> {
 	seen_types: HashSet<&'a QualifiedName>,
-	ver_iter: std::collections::hash_map::Values<'a, BigUint, VersionedTypeDefinition>,
+	ver_iter: std::collections::hash_map::Values<'a, BigUint, TypeVersionDefinition>,
 	field_iter: std::slice::Iter<'a, (String, FieldInfo)>,
 	arg_iters: Vec<std::slice::Iter<'a, Type>>,
 }
 
 lazy_static! {
-	static ref REF_TYPE_ITER_EMPTY_VER_MAP: HashMap<BigUint, VersionedTypeDefinition> = HashMap::new();
+	static ref REF_TYPE_ITER_EMPTY_VER_MAP: HashMap<BigUint, TypeVersionDefinition> = HashMap::new();
 }
 const REF_TYPE_ITER_EMPTY_FIELD_SLICE: &[(String, FieldInfo)] = &[];
-
-fn find_defined_type_iter<'a>(t: &'a Type) -> Option<(&'a QualifiedName, &'a Vec<Type>)> {
-	match t {
-		Type::Defined(name, args) => Some((name, args)),
-		Type::List(inner) => find_defined_type_iter(inner),
-		Type::Option(inner) => find_defined_type_iter(inner),
-		_ => None,
-	}
-}
 
 impl <'a> Iterator for ReferencedTypeIterator<'a> {
 	type Item = &'a QualifiedName;
@@ -688,13 +699,12 @@ impl <'a> Iterator for ReferencedTypeIterator<'a> {
 		loop {
 			while let Some(arg_iter) = self.arg_iters.last_mut() {
 				if let Some(arg) = arg_iter.next() {
-					if let Some((name, args)) = find_defined_type_iter(arg) {
-						self.arg_iters.push(args.iter());
-						if self.seen_types.insert(name) {
-							return Some(name);
-						}
+					let Type::Defined(name, args) = arg;
+					self.arg_iters.push(args.iter());
+					if self.seen_types.insert(name) {
+						return Some(name);
 					}
-				}
+			}
 				else {
 					self.arg_iters.pop();
 				}
@@ -714,7 +724,7 @@ impl <'a> Iterator for ReferencedTypeIterator<'a> {
 }
 
 impl <'a> ReferencedTypeIterator<'a> {
-	fn from_versions(versions: &'a HashMap<BigUint, VersionedTypeDefinition>) -> ReferencedTypeIterator<'a> {
+	fn from_versions(versions: &'a HashMap<BigUint, TypeVersionDefinition>) -> ReferencedTypeIterator<'a> {
 		ReferencedTypeIterator {
 			seen_types: HashSet::new(),
 			ver_iter: versions.values(),

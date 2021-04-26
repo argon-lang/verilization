@@ -1,6 +1,5 @@
 package dev.argon.verilization.java_runtime;
 
-import java.lang.reflect.Array;
 import java.math.BigInteger;
 import java.io.IOException;
 
@@ -36,22 +35,22 @@ public abstract class List<A> {
     
 
     public static <A> Codec<List<A>> codec(Codec<A> elementCodec) {
-        if(elementCodec == StandardCodecs.i8Codec) {
+        if(elementCodec == I8.codec) {
             @SuppressWarnings("unchecked")
             var codec = (Codec<List<A>>)(Object)i8ListCodec;
             return codec;
         }
-        else if(elementCodec == StandardCodecs.i16Codec) {
+        else if(elementCodec == I16.codec) {
             @SuppressWarnings("unchecked")
             var codec = (Codec<List<A>>)(Object)i16ListCodec;
             return codec;
         }
-        else if(elementCodec == StandardCodecs.i32Codec) {
+        else if(elementCodec == I32.codec) {
             @SuppressWarnings("unchecked")
             var codec = (Codec<List<A>>)(Object)i32ListCodec;
             return codec;
         }
-        else if(elementCodec == StandardCodecs.i64Codec) {
+        else if(elementCodec == I64.codec) {
             @SuppressWarnings("unchecked")
             var codec = (Codec<List<A>>)(Object)i64ListCodec;
             return codec;
@@ -61,7 +60,7 @@ public abstract class List<A> {
 
             @Override
             public List<A> read(FormatReader reader) throws IOException {
-                BigInteger length = StandardCodecs.natCodec.read(reader);
+                BigInteger length = Nat.codec.read(reader);
 
                 @SuppressWarnings("unchecked")
                 A[] values = (A[])new Object[length.intValueExact()];
@@ -74,7 +73,7 @@ public abstract class List<A> {
     
             @Override
             public void write(FormatWriter writer, List<A> value) throws IOException {
-                StandardCodecs.natCodec.write(writer, BigInteger.valueOf(value.size()));
+                Nat.codec.write(writer, BigInteger.valueOf(value.size()));
                 for(int i = 0; i < value.size(); ++i) {
                     elementCodec.write(writer, value.get(i));
                 }
@@ -87,7 +86,7 @@ public abstract class List<A> {
 
         @Override
         public List<Byte> read(FormatReader reader) throws IOException {
-            BigInteger length = StandardCodecs.natCodec.read(reader);
+            BigInteger length = Nat.codec.read(reader);
 
             return new ByteList(reader.readBytes(length.intValueExact()));
         }
@@ -95,7 +94,7 @@ public abstract class List<A> {
         @Override
         public void write(FormatWriter writer, List<Byte> value) throws IOException {
             var list = ByteList.unbox(value);
-            StandardCodecs.natCodec.write(writer, BigInteger.valueOf(list.size()));
+            Nat.codec.write(writer, BigInteger.valueOf(list.size()));
             writer.writeBytes(list.values);
         }
 
@@ -105,7 +104,7 @@ public abstract class List<A> {
 
         @Override
         public List<Short> read(FormatReader reader) throws IOException {
-            BigInteger length = StandardCodecs.natCodec.read(reader);
+            BigInteger length = Nat.codec.read(reader);
 
             short[] data = new short[length.intValueExact()];
             for(int i = 0; i < data.length; ++i) {
@@ -117,7 +116,7 @@ public abstract class List<A> {
         @Override
         public void write(FormatWriter writer, List<Short> value) throws IOException {
             var list = ShortList.unbox(value);
-            StandardCodecs.natCodec.write(writer, BigInteger.valueOf(list.size()));
+            Nat.codec.write(writer, BigInteger.valueOf(list.size()));
             for(int i = 0; i < list.size(); ++i) {
                 writer.writeShort(list.getUnboxed(i));
             }
@@ -129,7 +128,7 @@ public abstract class List<A> {
 
         @Override
         public List<Integer> read(FormatReader reader) throws IOException {
-            BigInteger length = StandardCodecs.natCodec.read(reader);
+            BigInteger length = Nat.codec.read(reader);
 
             int[] data = new int[length.intValueExact()];
             for(int i = 0; i < data.length; ++i) {
@@ -141,7 +140,7 @@ public abstract class List<A> {
         @Override
         public void write(FormatWriter writer, List<Integer> value) throws IOException {
             var list = IntList.unbox(value);
-            StandardCodecs.natCodec.write(writer, BigInteger.valueOf(list.size()));
+            Nat.codec.write(writer, BigInteger.valueOf(list.size()));
             for(int i = 0; i < list.size(); ++i) {
                 writer.writeInt(list.getUnboxed(i));
             }
@@ -153,7 +152,7 @@ public abstract class List<A> {
 
         @Override
         public List<Long> read(FormatReader reader) throws IOException {
-            BigInteger length = StandardCodecs.natCodec.read(reader);
+            BigInteger length = Nat.codec.read(reader);
 
             long[] data = new long[length.intValueExact()];
             for(int i = 0; i < data.length; ++i) {
@@ -165,7 +164,7 @@ public abstract class List<A> {
         @Override
         public void write(FormatWriter writer, List<Long> value) throws IOException {
             var list = LongList.unbox(value);
-            StandardCodecs.natCodec.write(writer, BigInteger.valueOf(list.size()));
+            Nat.codec.write(writer, BigInteger.valueOf(list.size()));
             for(int i = 0; i < list.size(); ++i) {
                 writer.writeLong(list.getUnboxed(i));
             }

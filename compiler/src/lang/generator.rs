@@ -9,20 +9,8 @@ use std::marker::PhantomData;
 
 #[derive(Clone, Debug)]
 pub enum LangType<'model> {
-	Nat,
-	Int,
-	U8,
-	I8,
-	U16,
-	I16,
-	U32,
-	I32,
-	U64,
-	I64,
-	String,
-	List(Box<LangType<'model>>),
-	Option(Box<LangType<'model>>),
 	Versioned(&'model model::QualifiedName, BigUint, Vec<LangType<'model>>),
+	Extern(&'model model::QualifiedName, Vec<LangType<'model>>),
 	TypeParameter(String),
 	Converter(Box<LangType<'model>>, Box<LangType<'model>>),
 	Codec(Box<LangType<'model>>),
@@ -32,7 +20,13 @@ pub enum LangType<'model> {
 pub enum Operation {
 	FromPreviousVersion(BigUint),
 	FinalTypeConverter,
-	VersionedTypeCodec,
+	TypeCodec,
+}
+
+#[derive(Debug)]
+pub enum OperationTarget<'model> {
+	VersionedType(&'model model::QualifiedName, BigUint),
+	ExternType(&'model model::QualifiedName)
 }
 
 #[derive(Debug)]
@@ -43,29 +37,6 @@ pub enum LangExpr<'model> {
 		value: Box<LangExpr<'model>>,
 	},
 	IdentityConverter(LangType<'model>),
-	MapListConverter {
-		from_type: LangType<'model>,
-		to_type: LangType<'model>,
-		element_converter: Box<LangExpr<'model>>,
-	},
-	MapOptionConverter {
-		from_type: LangType<'model>,
-		to_type: LangType<'model>,
-		element_converter: Box<LangExpr<'model>>,
-	},
-	NatCodec,
-	IntCodec,
-	U8Codec,
-	I8Codec,
-	U16Codec,
-	I16Codec,
-	U32Codec,
-	I32Codec,
-	U64Codec,
-	I64Codec,
-	StringCodec,
-	ListCodec(Box<LangExpr<'model>>),
-	OptionCodec(Box<LangExpr<'model>>),
 	ReadDiscriminator,
 	WriteDiscriminator(BigUint),
 	CodecRead {
@@ -75,7 +46,7 @@ pub enum LangExpr<'model> {
 		codec: Box<LangExpr<'model>>,
 		value: Box<LangExpr<'model>>,
 	},
-	InvokeOperation(Operation, &'model model::QualifiedName, BigUint, Vec<LangType<'model>>, Vec<LangExpr<'model>>),
+	InvokeOperation(Operation, OperationTarget<'model>, Vec<LangType<'model>>, Vec<LangExpr<'model>>),
 	InvokeUserConverter {
 		name: &'model model::QualifiedName,
 		prev_ver: BigUint,
@@ -149,8 +120,6 @@ pub enum ConvertParam<'model> {
 
 fn requires_conversion<'model, Lang, G: Generator<'model, Lang>>(gen: &G, t: &model::Type, prev_ver: &BigUint) -> bool {
 	match t {
-		model::Type::List(inner) => requires_conversion(gen, inner, prev_ver),
-		model::Type::Option(inner) => requires_conversion(gen, inner, prev_ver),
 		model::Type::Defined(name, args) => match gen.scope().lookup(name.clone()) {
 			model::ScopeLookup::NamedType(name) => match gen.model().get_type(&name) {
 				Some(model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def)) => {
@@ -162,11 +131,12 @@ fn requires_conversion<'model, Lang, G: Generator<'model, Lang>>(gen: &G, t: &mo
 						args.iter().any(|arg| requires_conversion(gen, arg, prev_ver))
 				},
 
+				Some(model::NamedTypeDefinition::ExternType(_)) => false,
+
 				None => true, // Error condition, assume conversion required. Should fail when determining the conversion.
 			},
 			model::ScopeLookup::TypeParameter(_) => true,
 		},
-		_ => false,
 	}
 }
 
@@ -189,67 +159,51 @@ pub trait Generator<'model, Lang> : GeneratorNameMapping<Lang> + Sized {
 
 	fn build_type(&self, version: &BigUint, t: &model::Type) -> Result<LangType<'model>, GeneratorError> {
 		Ok(match t {
-			model::Type::Nat => LangType::Nat,
-			model::Type::Int => LangType::Int,
-			model::Type::U8 => LangType::U8,
-			model::Type::I8 => LangType::I8,
-			model::Type::U16 => LangType::U16,
-			model::Type::I16 => LangType::I16,
-			model::Type::U32 => LangType::U32,
-			model::Type::I32 => LangType::I32,
-			model::Type::U64 => LangType::U64,
-			model::Type::I64 => LangType::I64,
-			model::Type::String => LangType::String,
-			model::Type::List(inner) => LangType::List(Box::new(self.build_type(version, &*inner)?)),
-			model::Type::Option(inner) => LangType::Option(Box::new(self.build_type(version, &*inner)?)),
-			model::Type::Defined(name, args) => match self.scope().lookup(name.clone()) {
-				model::ScopeLookup::NamedType(name) => match self.model().get_type(&name).ok_or("Could not find type")? {
-					model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
-						let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
+			model::Type::Defined(name, args) => {
+				let lang_args = args.iter()
+					.map(|arg| self.build_type(version, arg))
+					.collect::<Result<Vec<_>, _>>()?;
 
-						let lang_args = args.iter()
-							.map(|arg| self.build_type(version, arg))
-							.collect::<Result<Vec<_>, _>>()?;
+				match self.scope().lookup(name.clone()) {
+					model::ScopeLookup::NamedType(name) => match self.model().get_type(&name).ok_or("Could not find type")? {
+						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
+							let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
+							LangType::Versioned(type_def.name(), ver_type.version.clone(), lang_args)
+						},
 
-						LangType::Versioned(type_def.name(), ver_type.version.clone(), lang_args)
+						model::NamedTypeDefinition::ExternType(type_def) =>
+							LangType::Extern(type_def.name(), lang_args),
 					},
-				},
-				model::ScopeLookup::TypeParameter(name) => LangType::TypeParameter(name),
+					model::ScopeLookup::TypeParameter(name) => LangType::TypeParameter(name),
+				}
 			},
 		})
 	}
 
 	fn build_codec(&self, version: &BigUint, t: &model::Type) -> Result<LangExpr<'model>, GeneratorError> {
 		Ok(match t {
-			model::Type::Nat => LangExpr::NatCodec,
-			model::Type::Int => LangExpr::IntCodec,
-			model::Type::U8 => LangExpr::U8Codec,
-			model::Type::I8 => LangExpr::I8Codec,
-			model::Type::U16 => LangExpr::U16Codec,
-			model::Type::I16 => LangExpr::I16Codec,
-			model::Type::U32 => LangExpr::U32Codec,
-			model::Type::I32 => LangExpr::I32Codec,
-			model::Type::U64 => LangExpr::U64Codec,
-			model::Type::I64 => LangExpr::I64Codec,
-			model::Type::String => LangExpr::StringCodec,
-			model::Type::List(inner) => LangExpr::ListCodec(Box::new(self.build_codec(version, &*inner)?)),
-			model::Type::Option(inner) => LangExpr::OptionCodec(Box::new(self.build_codec(version, &*inner)?)),
 			model::Type::Defined(name, args) => match self.scope().lookup(name.clone()) {
 				model::ScopeLookup::NamedType(name) => {
+
+					let target;
+
 					let named_type = self.model().get_type(&name).ok_or("Could not find type")?;
 					match named_type {
 						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
 							let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
-
-							LangExpr::InvokeOperation(
-								Operation::VersionedTypeCodec,
-								named_type.name(),
-								ver_type.version.clone(),
-								args.iter().map(|arg| self.build_type(version, arg)).collect::<Result<Vec<_>, _>>()?,
-								args.iter().map(|arg| self.build_codec(version, arg)).collect::<Result<Vec<_>, _>>()?,
-							)
+							target = OperationTarget::VersionedType(named_type.name(), ver_type.version.clone());
 						},
+
+						model::NamedTypeDefinition::ExternType(_) =>
+							target = OperationTarget::ExternType(named_type.name()),
 					}
+
+					LangExpr::InvokeOperation(
+						Operation::TypeCodec,
+						target,
+						args.iter().map(|arg| self.build_type(version, arg)).collect::<Result<Vec<_>, _>>()?,
+						args.iter().map(|arg| self.build_codec(version, arg)).collect::<Result<Vec<_>, _>>()?,
+					)
 				},
 				model::ScopeLookup::TypeParameter(name) => LangExpr::Identifier(Self::codec_codec_param_name(&name)),
 			},
@@ -268,21 +222,25 @@ pub trait Generator<'model, Lang> : GeneratorNameMapping<Lang> + Sized {
 			model::Type::Defined(name, args) => {
 				match self.scope().lookup(name.clone()) {
 					model::ScopeLookup::NamedType(name) => {
+
+						let mut op_type_args = Vec::new();
+						let mut op_args = Vec::new();
+
+						for arg in args {
+							op_type_args.push(self.build_type(prev_ver, arg)?);
+							op_type_args.push(self.build_type(version, arg)?);
+							op_args.push(self.build_conversion(prev_ver, version, arg, ConvertParam::ConverterObject)?);
+						}
+
+
 						let named_type_def = self.model().get_type(&name).ok_or("Could not find type")?;
+						let operation;
+						let target;
 						match named_type_def {
 							model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
 								let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
 
-								let mut op_type_args = Vec::new();
-								let mut op_args = Vec::new();
-
-								for arg in args {
-									op_type_args.push(self.build_type(prev_ver, arg)?);
-									op_type_args.push(self.build_type(version, arg)?);
-									op_args.push(self.build_conversion(prev_ver, version, arg, ConvertParam::ConverterObject)?);
-								}
-
-								let operation =
+								operation =
 									if ver_type.version < *version {
 										Operation::FinalTypeConverter
 									}
@@ -290,33 +248,25 @@ pub trait Generator<'model, Lang> : GeneratorNameMapping<Lang> + Sized {
 										Operation::FromPreviousVersion(prev_ver.clone())
 									};
 
-								LangExpr::InvokeOperation(
-									operation,
-									named_type_def.name(),
-									ver_type.version.clone(),
-									op_type_args,
-									op_args
-								)
+								target = OperationTarget::VersionedType(named_type_def.name(), ver_type.version.clone());
 							},
-						}
+
+							model::NamedTypeDefinition::ExternType(_) => {
+								operation = Operation::FinalTypeConverter;
+								target = OperationTarget::ExternType(named_type_def.name());
+							},
+						};
+
+						LangExpr::InvokeOperation(
+							operation,
+							target,
+							op_type_args,
+							op_args
+						)
 					},
 					model::ScopeLookup::TypeParameter(name) => LangExpr::Identifier(Self::convert_conv_param_name(&name)),
 				}
 			},
-	
-			model::Type::List(inner) => LangExpr::MapListConverter {
-				from_type: self.build_type(prev_ver, inner)?,
-				to_type: self.build_type(version, inner)?,
-				element_converter: Box::new(self.build_conversion(prev_ver, version, &*inner, ConvertParam::ConverterObject)?),
-			},
-	
-			model::Type::Option(inner) => LangExpr::MapOptionConverter {
-				from_type: self.build_type(prev_ver, inner)?,
-				to_type: self.build_type(version, inner)?,
-				element_converter: Box::new(self.build_conversion(prev_ver, version, &*inner, ConvertParam::ConverterObject)?),
-			},	
-	
-			_ => LangExpr::IdentityConverter(self.build_type(version, t)?),
 		};
 
 					
@@ -393,7 +343,7 @@ impl <'model, TImpl, Lang> GeneratorImpl<'model, Lang, GenConstant> for TImpl wh
 }
 
 pub trait VersionedTypeGenerator<'model, Lang, GenTypeKind> : Generator<'model, Lang> {
-	fn type_def(&self) -> Named<'model, model::TypeDefinitionData>;
+	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData>;
 
 	fn write_header(&mut self) -> Result<(), GeneratorError>;
 	fn write_version_header(&mut self, ver_type: &model::TypeVersionInfo<'model>) -> Result<(), GeneratorError>;
@@ -523,7 +473,7 @@ impl <'model, TImpl, Lang, GenTypeKind> GeneratorImpl<'model, Lang, GenType<GenT
 				let codec_type = LangType::Codec(Box::new(obj_type.clone()));
 
 				let op = OperationInfo {
-					operation: Operation::VersionedTypeCodec,
+					operation: Operation::TypeCodec,
 					version: version.clone(),
 					type_params: self.type_def().type_params().clone(),
 					params: codec_params,

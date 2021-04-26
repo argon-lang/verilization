@@ -3,6 +3,7 @@ package dev.argon.verilization.scala_runtime
 import zio.{ZIO, IO, Chunk}
 import java.math.BigInteger
 import scala.math.BigInt
+import scala.Int
 
 object VLQ {
 

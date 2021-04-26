@@ -22,7 +22,11 @@ fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), GeneratorError> {
 
     for file in test_cases::TEST_CASE_FILES {
         println!("Generating {} sources for test case {}", Lang::name(), file);
-        let input_files = vec!(OsString::from(format!("../verilization/{}.verilization", file)));
+        let mut input_files = vec!(OsString::from(format!("../verilization/{}.verilization", file)));
+
+        for rt_file in test_cases::RUNTIME_FILES {
+            input_files.push(OsString::from(format!("{}/{}.verilization", test_cases::RUNTIME_DIR, rt_file)));
+        }
         
         let model = verilization_compiler::load_files(input_files)?;
 

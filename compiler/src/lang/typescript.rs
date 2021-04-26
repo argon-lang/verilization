@@ -4,18 +4,21 @@ use crate::lang::{GeneratorError, Language, OutputHandler};
 use std::ffi::OsString;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use num_bigint::{BigUint, BigInt, Sign};
 use super::generator::*;
+use crate::util::{capitalize_identifier, uncapitalize_identifier};
 
 pub struct TSOptionsBuilder {
 	output_dir: Option<OsString>,
 	package_mapping: HashMap<model::PackageName, OsString>,
+	library_mapping: HashMap<model::PackageName, OsString>,
 }
 
 pub struct TSOptions {
 	pub output_dir: OsString,
 	pub package_mapping: HashMap<model::PackageName, OsString>,
+	pub library_mapping: HashMap<model::PackageName, OsString>,
 }
 
 
@@ -25,6 +28,18 @@ fn open_ts_file<'output, Output: OutputHandler>(options: &TSOptions, output: &'o
 	path.push(pkg_dir);
 	path.push(name.name.clone() + ".ts");
 	Ok(output.create_file(path)?)
+}
+
+fn make_type_name(name: &str) -> String {
+	let mut name = String::from(name);
+	capitalize_identifier(&mut name);
+	name
+}
+
+pub fn make_field_name(field_name: &str) -> String {
+	let mut name = String::from(field_name);
+	uncapitalize_identifier(&mut name);
+	name
 }
 
 pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + GeneratorWithFile {
@@ -41,6 +56,38 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 		}
 
 		write!(self.file(), "{}", &name.name)?;
+
+		Ok(())
+	}
+
+	fn write_import<P: AsRef<Path>>(&mut self, t: &model::QualifiedName, current_path: &P) -> Result<(), GeneratorError> {
+		let is_rel;
+
+		let mut import_path = if let Some(import_pkg_dir) = self.options().package_mapping.get(&t.package) {
+			let mut abs_import_path = PathBuf::from(&self.options().output_dir);
+			abs_import_path.push(import_pkg_dir);
+
+			is_rel = true;
+			pathdiff::diff_paths(abs_import_path, current_path).ok_or("Could not find relative path.")?
+		}
+		else if let Some(import_lib) = self.options().library_mapping.get(&t.package) {
+			is_rel = false;
+			PathBuf::from(import_lib)
+		}
+		else {
+			return Err(GeneratorError::from(format!("Unmapped package: {}", t.package)))
+		};
+
+		import_path.push(t.name.clone() + ".js");
+
+
+		write!(self.file(), "import * as ")?;
+		self.write_import_name(&t)?;
+		write!(self.file(), " from \"")?;
+		if is_rel {
+			write!(self.file(), "./")?;
+		}
+		writeln!(self.file(), "{}\";", import_path.to_str().unwrap())?;
 
 		Ok(())
 	}
@@ -62,17 +109,7 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 				model::ScopeLookup::NamedType(t) => t,
 			};
 
-			let import_pkg_dir = self.options().package_mapping.get(&t.package).ok_or(format!("Unmapped package: {}", t.package))?;
-			let mut abs_import_path = PathBuf::from(&self.options().output_dir);
-			abs_import_path.push(import_pkg_dir);
-
-			let mut import_path: PathBuf = pathdiff::diff_paths(abs_import_path, &current_path).ok_or("Could not find relative path.")?;
-			import_path.push(t.name.clone() + ".js");
-
-
-			write!(self.file(), "import * as ")?;
-			self.write_import_name(&t)?;
-			writeln!(self.file(), " from \"./{}\";", import_path.to_str().unwrap())?;
+			self.write_import(&t, &current_path)?;
 		}
 
 		Ok(())
@@ -103,49 +140,7 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 	}
 
 	fn write_type(&mut self, t: &LangType<'model>) -> Result<(), GeneratorError> {
-		Ok(match t {
-			// Map built-in types to the equivalent JS type.
-			LangType::Nat |
-			LangType::Int |
-			LangType::U64 |
-			LangType::I64 => write!(self.file(), "bigint")?,
-	
-			LangType::U8 |
-			LangType::I8 |
-			LangType::U16 |
-			LangType::I16 |
-			LangType::U32 |
-			LangType::I32 => write!(self.file(), "number")?,
-			
-			LangType::String => write!(self.file(), "string")?,
-	
-	
-			LangType::List(inner) => {
-				// Use typed arrays for finite numeric types
-				match **inner {
-					LangType::U8 => write!(self.file(), "Uint8Array")?,
-					LangType::I8 => write!(self.file(), "Int8Array")?,
-					LangType::U16 => write!(self.file(), "Uint16Array")?,
-					LangType::I16 => write!(self.file(), "Int16Array")?,
-					LangType::U32 => write!(self.file(), "Uint32Array")?,
-					LangType::I32 => write!(self.file(), "Int32Array")?,
-					LangType::U64 => write!(self.file(), "BigUint64Array")?,
-					LangType::I64 => write!(self.file(), "BigInt64Array")?,
-					_ => {
-						write!(self.file(), "ReadOnlyArray<")?;
-						self.write_type(&*inner)?;
-						write!(self.file(), ">")?;
-					}
-				}
-			},
-	
-			// Options map to { value: T } | null because option(option(T)) is distinct from option(T)
-			LangType::Option(inner) => {
-				write!(self.file(), "{{ readonly value: ")?;
-				self.write_type(&*inner)?;
-				write!(self.file(), "}} | null")?;
-			},
-	
+		Ok(match t {	
 			LangType::Versioned(name, version, args) => {
 				// Only use a qualifier if not a value of the current type.
 				if self.generator_element_name() != Some(name) {
@@ -154,6 +149,13 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 				}
 	
 				write!(self.file(), "V{}", version)?;
+				self.write_type_args(&args)?;
+			},
+
+			LangType::Extern(name, args) => {
+				self.write_import_name(name)?;
+
+				write!(self.file(), ".{}", make_type_name(&name.name))?;
 				self.write_type_args(&args)?;
 			},
 
@@ -181,7 +183,7 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 		match op {
 			Operation::FromPreviousVersion(prev_ver) => write!(self.file(), "fromV{}", prev_ver)?,
 			Operation::FinalTypeConverter => write!(self.file(), "converter")?,
-			Operation::VersionedTypeCodec => write!(self.file(), "codec")?,
+			Operation::TypeCodec => write!(self.file(), "codec")?,
 		}
 
 		Ok(())
@@ -201,48 +203,8 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 				self.write_type(t)?;
 				write!(self.file(), ">()")?;
 			},
-			LangExpr::MapListConverter { from_type, to_type, element_converter } => {
-				write!(self.file(), "Converter.convertList<")?;
-				self.write_type(from_type)?;
-				write!(self.file(), ", ")?;
-				self.write_type(to_type)?;
-				write!(self.file(), ">(")?;
-				self.write_expr(element_converter)?;
-				write!(self.file(), ")")?;
-				
-			},
-			LangExpr::MapOptionConverter { from_type, to_type, element_converter } => {
-				write!(self.file(), "Converter.convertOption<")?;
-				self.write_type(from_type)?;
-				write!(self.file(), ", ")?;
-				self.write_type(to_type)?;
-				write!(self.file(), ">(")?;
-				self.write_expr(element_converter)?;
-				write!(self.file(), ")")?;
-			},
-			LangExpr::NatCodec => write!(self.file(), "StandardCodecs.nat")?,
-			LangExpr::IntCodec => write!(self.file(), "StandardCodecs.int")?,
-			LangExpr::U8Codec => write!(self.file(), "StandardCodecs.u8")?,
-			LangExpr::I8Codec => write!(self.file(), "StandardCodecs.i8")?,
-			LangExpr::U16Codec => write!(self.file(), "StandardCodecs.u16")?,
-			LangExpr::I16Codec => write!(self.file(), "StandardCodecs.i16")?,
-			LangExpr::U32Codec => write!(self.file(), "StandardCodecs.u32")?,
-			LangExpr::I32Codec => write!(self.file(), "StandardCodecs.i32")?,
-			LangExpr::U64Codec => write!(self.file(), "StandardCodecs.u64")?,
-			LangExpr::I64Codec => write!(self.file(), "StandardCodecs.i64")?,
-			LangExpr::StringCodec => write!(self.file(), "StandardCodecs.string")?,
-			LangExpr::ListCodec(inner) => {
-				write!(self.file(), "List.codec(")?;
-				self.write_expr(&*inner)?;
-				write!(self.file(), ")")?;
-			},
-			LangExpr::OptionCodec(inner) => {
-				write!(self.file(), "StandardCodecs.option(")?;
-				self.write_expr(&*inner)?;
-				write!(self.file(), ")")?;
-			},
-			LangExpr::ReadDiscriminator => write!(self.file(), "await StandardCodecs.nat.read(reader)")?,
-			LangExpr::WriteDiscriminator(value) => write!(self.file(), "await StandardCodecs.nat.write(writer, {}n)", value)?,
+			LangExpr::ReadDiscriminator => write!(self.file(), "await natCodec.read(reader)")?,
+			LangExpr::WriteDiscriminator(value) => write!(self.file(), "await natCodec.write(writer, {}n)", value)?,
 			LangExpr::CodecRead { codec } => {
 				write!(self.file(), "await ")?;
 				self.write_expr(&*codec)?;
@@ -255,14 +217,22 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 				self.write_expr(value)?;
 				write!(self.file(), ")")?;
 			},
-			LangExpr::InvokeOperation(op, name, version, type_args, args) => {
-				// Only use a qualifier if not a value of the current type.
-				if self.generator_element_name() != Some(name) {
-					self.write_import_name(name)?;
-					write!(self.file(), ".")?;
+			LangExpr::InvokeOperation(op, target, type_args, args) => {
+				match target {
+					OperationTarget::VersionedType(name, version) => {
+						// Only use a qualifier if not a value of the current type.
+						if self.generator_element_name() != Some(name) {
+							self.write_import_name(name)?;
+							write!(self.file(), ".")?;
+						}
+			
+						write!(self.file(), "V{}.", version)?;
+					},
+					OperationTarget::ExternType(name) => {
+						self.write_import_name(name)?;
+						write!(self.file(), ".")?;
+					},
 				}
-	
-				write!(self.file(), "V{}.", version)?;
 				self.write_operation_name(op)?;
 
 				self.write_type_args(type_args)?;
@@ -285,20 +255,20 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 			LangExpr::CreateStruct(_, _, _, fields) => {
 				write!(self.file(), "{{ ")?;
 				for (field_name, value) in fields {
-					write!(self.file(), "{}: ", field_name)?;
+					write!(self.file(), "{}: ", make_field_name(field_name))?;
 					self.write_expr(value)?;
 					write!(self.file(), ", ")?;
 				}
 				write!(self.file(), "}}")?;
 			},
 			LangExpr::CreateEnum(_, _, _, field_name, value) => {
-				write!(self.file(), "{{ tag: \"{}\", {}: ", field_name, field_name)?;
+				write!(self.file(), "{{ tag: \"{}\", {}: ", field_name, make_field_name(field_name))?;
 				self.write_expr(value)?;
 				write!(self.file(), "}}")?;
 			},
 			LangExpr::StructField(_, _, field_name, value) => {
 				self.write_expr(value)?;
-				write!(self.file(), ".{}", field_name)?;
+				write!(self.file(), ".{}", make_field_name(field_name))?;
 			},
 		}
 
@@ -337,7 +307,9 @@ impl <'model, TImpl> GeneratorNameMapping<TypeScriptLanguage> for TImpl where TI
 }
 
 fn current_dir_of_name<'model, Gen: TSGenerator<'model>>(gen: &Gen, name: &model::QualifiedName) -> Result<PathBuf, GeneratorError> {
-	let current_pkg_dir = gen.options().package_mapping.get(&name.package).ok_or(format!("Unmapped package: {}", name.package))?;
+	let current_pkg_dir = gen.options().package_mapping.get(&name.package)
+		.or_else(|| gen.options().library_mapping.get(&name.package))
+		.ok_or_else(|| format!("Unmapped package: {}", name.package))?;
 	let mut current_path = PathBuf::from(&gen.options().output_dir);
 	current_path.push(current_pkg_dir);
 	Ok(current_path)
@@ -433,7 +405,7 @@ struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler, Extra> {
 	file: Output::FileHandle<'output>,
 	model: &'model model::Verilization,
 	options: &'opt TSOptions,
-	type_def: Named<'model, model::TypeDefinitionData>,
+	type_def: Named<'model, model::VersionedTypeDefinitionData>,
 	scope: model::Scope<'model>,
 	versions: HashSet<BigUint>,
 	indentation_level: u32,
@@ -488,12 +460,12 @@ trait TSExtraGeneratorOps {
 impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> VersionedTypeGenerator<'model, TypeScriptLanguage, GenTypeKind> for TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
 	where TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : TSExtraGeneratorOps
 {
-	fn type_def(&self) -> Named<'model, model::TypeDefinitionData> {
+	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
 		self.type_def
 	}
 
 	fn write_header(&mut self) -> Result<(), GeneratorError> {
-		writeln!(self.file, "import {{Codec, FormatWriter, FormatReader, StandardCodecs, Converter, List}} from \"@verilization/runtime\";")?;
+		writeln!(self.file, "import {{Codec, FormatWriter, FormatReader, Converter, natCodec}} from \"@verilization/runtime\";")?;
 		self.write_imports()?;
 		
 		Ok(())
@@ -584,7 +556,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> VersionedTypeGe
 
 impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> where TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : TSExtraGeneratorOps {
 
-	fn open(model: &'model model::Verilization, options: &'opt TSOptions, output: &'output mut Output, type_def: Named<'model, model::TypeDefinitionData>) -> Result<Self, GeneratorError> where GenTypeKind : Default {
+	fn open(model: &'model model::Verilization, options: &'opt TSOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> where GenTypeKind : Default {
 		let file = open_ts_file(options, output, type_def.name())?;
 		Ok(TSTypeGenerator {
 			file: file,
@@ -703,7 +675,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> TSTypeGenerator
 					self.write_indent()?;
 					write!(self.file, "const {} = ", binding_name)?;
 					self.write_expr(value)?;
-					writeln!(self.file, ".{};", case_name)?;
+					writeln!(self.file, ".{};", make_field_name(case_name))?;
 
 					self.write_statement(body)?;
 					if !body.has_value() {
@@ -790,7 +762,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler> TSExtraGeneratorOps for TSTy
 		self.indent_increase();
 		for (field_name, field) in &ver_type.ver_type.fields {
 			self.write_indent()?;
-			write!(self.file, "readonly {}: ", field_name)?;
+			write!(self.file, "readonly {}: ", make_field_name(field_name))?;
 			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?)?;
 			writeln!(self.file, ";")?;
 		}
@@ -816,7 +788,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler> TSExtraGeneratorOps for TSTy
 			else {
 				is_first = false;
 			}
-			write!(self.file, "{{ readonly tag: \"{}\", readonly {}: ", field_name, field_name)?;
+			write!(self.file, "{{ readonly tag: \"{}\", readonly {}: ", field_name, make_field_name(field_name))?;
 			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?)?;
 			write!(self.file, ", }}")?;
 		}
@@ -843,6 +815,7 @@ impl Language for TypeScriptLanguage {
 		TSOptionsBuilder {
 			output_dir: None,
 			package_mapping: HashMap::new(),
+			library_mapping: HashMap::new(),
 		}
 	}
 
@@ -858,7 +831,15 @@ impl Language for TypeScriptLanguage {
 		else if let Some(pkg) = name.strip_prefix("pkg:") {
 			let package = model::PackageName::from_str(pkg);
 
-			if builder.package_mapping.insert(package, value).is_some() {
+			if builder.library_mapping.contains_key(&package) || builder.package_mapping.insert(package, value).is_some() {
+				return Err(GeneratorError::from(format!("Package already mapped: {}", pkg)))
+			}
+			Ok(())
+		}
+		else if let Some(pkg) = name.strip_prefix("lib:") {
+			let package = model::PackageName::from_str(pkg);
+
+			if builder.package_mapping.contains_key(&package) || builder.library_mapping.insert(package, value).is_some() {
 				return Err(GeneratorError::from(format!("Package already mapped: {}", pkg)))
 			}
 			Ok(())
@@ -869,20 +850,28 @@ impl Language for TypeScriptLanguage {
 	}
 
 	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
-		let output_dir = builder.output_dir.ok_or("Output directory not specified")?;
 		Ok(TSOptions {
-			output_dir: output_dir,
+			output_dir: builder.output_dir.ok_or("Output directory not specified")?,
 			package_mapping: builder.package_mapping,
+			library_mapping: builder.library_mapping,
 		})
 	}
 
 	fn generate<Output: OutputHandler>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
 		for constant in model.constants() {
+			if options.library_mapping.contains_key(&constant.name().package) {
+				continue;
+			}
+
 			let mut const_gen = TSConstGenerator::open(model, &options, output, constant)?;
 			const_gen.generate()?;
 		}
 
 		for t in model.types() {
+			if options.library_mapping.contains_key(&t.name().package) {
+				continue;
+			}
+
 			match t {
 				model::NamedTypeDefinition::StructType(t) => {
 					let mut type_gen: TSTypeGenerator<_, GenStructType> = TSTypeGenerator::open(model, &options, output, t)?;
@@ -892,6 +881,7 @@ impl Language for TypeScriptLanguage {
 					let mut type_gen: TSTypeGenerator<_, GenEnumType> = TSTypeGenerator::open(model, &options, output, t)?;
 					type_gen.generate()?;		
 				},
+				model::NamedTypeDefinition::ExternType(_) => (),
 			}
 		}
 

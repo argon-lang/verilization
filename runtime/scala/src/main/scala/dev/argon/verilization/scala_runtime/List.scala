@@ -10,10 +10,9 @@ object List {
         }
     }
 
-    def listCodec[A](elementCodec: Codec[A]): Codec[Chunk[A]] = new Codec[Chunk[A]] {
-
+    def codec[A](elementCodec: Codec[A]): Codec[Chunk[A]] = new Codec[Chunk[A]] {
         override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, Chunk[A]] =
-            StandardCodecs.natCodec.read(reader).flatMap { length =>
+            Nat.codec.read(reader).flatMap { length =>
                 IO.effectTotal { length.bigInteger.intValueExact }
             }.flatMap { length =>
                 IO.effectTotal { ChunkBuilder.make[A](length) }.flatMap { chunkBuilder =>
@@ -27,7 +26,6 @@ object List {
             }
 
         override def write[R, E](writer: FormatWriter[R, E], value: Chunk[A]): ZIO[R, E, Unit] =
-            StandardCodecs.natCodec.write(writer, value.size) *> ZIO.foreach_(value) { elem => elementCodec.write(writer, elem) }
-            
+            Nat.codec.write(writer, value.size) *> ZIO.foreach_(value) { elem => elementCodec.write(writer, elem) }
     }
 }

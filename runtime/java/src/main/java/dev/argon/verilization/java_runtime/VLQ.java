@@ -3,7 +3,7 @@ package dev.argon.verilization.java_runtime;
 import java.io.IOException;
 import java.math.BigInteger;
 
-public abstract class VLQ {
+abstract class VLQ {
 	private VLQ() {}
 
 	private static final class Encoder {

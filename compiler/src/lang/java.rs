@@ -7,24 +7,46 @@ use std::io::Write;
 use std::path::PathBuf;
 use num_bigint::{BigUint, BigInt, Sign};
 use super::generator::*;
+use crate::util::{capitalize_identifier, uncapitalize_identifier};
 
 type PackageMap = HashMap<model::PackageName, model::PackageName>;
+type ExternMap = HashMap<model::QualifiedName, model::QualifiedName>;
 const RUNTIME_PACKAGE: &str = "dev.argon.verilization.java_runtime";
 
 
 pub struct JavaOptionsBuilder {
 	output_dir: Option<OsString>,
 	package_mapping: PackageMap,
+	library_mapping: PackageMap,
+	extern_mapping: ExternMap,
 }
 
 pub struct JavaOptions {
 	pub output_dir: OsString,
 	pub package_mapping: PackageMap,
+	pub library_mapping: PackageMap,
+	pub extern_mapping: ExternMap,
+}
+
+pub fn make_type_name(name: &str) -> String {
+	let mut name = String::from(name);
+	capitalize_identifier(&mut name);
+	name
+}
+
+fn make_field_name(field_name: &str) -> String {
+	let mut name = String::from(field_name);
+	uncapitalize_identifier(&mut name);
+	name
 }
 
 
 fn java_package_impl<'opt>(options: &'opt JavaOptions, package: &model::PackageName) -> Result<&'opt model::PackageName, GeneratorError> {
-	Ok(options.package_mapping.get(&package).ok_or(format!("Unmapped package: {}", package))?)
+	Ok(
+		options.package_mapping.get(&package)
+			.or_else(|| options.library_mapping.get(&package))
+			.ok_or_else(|| format!("Unmapped package: {}", package))?
+	)
 }
 
 fn open_java_file<'output, Output: OutputHandler>(options: &JavaOptions, output: &'output mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle<'output>, GeneratorError> {
@@ -34,7 +56,7 @@ fn open_java_file<'output, Output: OutputHandler>(options: &JavaOptions, output:
 		path.push(part);
 	}
 	
-	path.push(name.name.clone() + ".java");
+	path.push(make_type_name(&name.name) + ".java");
 	Ok(output.create_file(path)?)
 }
 
@@ -69,7 +91,7 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + Genera
 			write!(self.file(), "{}.", part)?;
 		}
 	
-		write!(self.file(), "{}", &name.name)?;
+		write!(self.file(), "{}", make_type_name(&name.name))?;
 	
 		Ok(())
 	}
@@ -87,43 +109,51 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + Genera
 		Ok(())
 	}
 	
+	fn extern_type_name(&self, name: &model::QualifiedName, erased: bool) -> Result<model::QualifiedName, GeneratorError> {
+		Ok(if let Some(mapped_name) = self.options().extern_mapping.get(name) {
+			if erased {
+				match (&mapped_name.package.package[..], mapped_name.name.as_ref()) {
+					([], "byte") => model::QualifiedName::from_parts(&["java", "lang"], "Byte"),
+					([], "short") => model::QualifiedName::from_parts(&["java", "lang"], "Short"),
+					([], "int") => model::QualifiedName::from_parts(&["java", "lang"], "Integer"),
+					([], "long") => model::QualifiedName::from_parts(&["java", "lang"], "Long"),
+					([], "float") => model::QualifiedName::from_parts(&["java", "lang"], "Float"),
+					([], "double") => model::QualifiedName::from_parts(&["java", "lang"], "Double"),
+					([], "boolean") => model::QualifiedName::from_parts(&["java", "lang"], "Boolean"),
+					([], "char") => model::QualifiedName::from_parts(&["java", "lang"], "Character"),
+					_ => mapped_name.clone(),
+				}
+			}
+			else {
+				mapped_name.clone()
+			}
+		}
+		else {
+			model::QualifiedName {
+				package: self.java_package(&name.package)?.clone(),
+				name: make_type_name(&name.name),
+			}
+		})
+	}
 	
 	fn write_type(&mut self, t: &LangType<'model>, erased: bool) -> Result<(), GeneratorError> {
 		Ok(match t {
-			// Map built-in types to the equivalent Java type.
-			LangType::Nat | LangType::Int => write!(self.file(), "java.math.BigInteger")?,
-			
-	
-			LangType::U8 | LangType::I8 if erased => write!(self.file(), "java.lang.Byte")?,
-			LangType::U8 | LangType::I8 => write!(self.file(), "byte")?,
-			
-			LangType::U16 | LangType::I16 if erased => write!(self.file(), "java.lang.Short")?,
-			LangType::U16 | LangType::I16 => write!(self.file(), "short")?,
-	
-			LangType::U32 | LangType::I32 if erased => write!(self.file(), "java.lang.Integer")?,
-			LangType::U32 | LangType::I32 => write!(self.file(), "int")?,
-	
-			LangType::U64 | LangType::I64 if erased => write!(self.file(), "java.lang.Long")?,
-			LangType::U64 | LangType::I64 => write!(self.file(), "long")?,
-	
-			LangType::String => write!(self.file(), "java.lang.String")?,
-	
-	
-			LangType::List(inner) => {
-				write!(self.file(), "{}.List<", RUNTIME_PACKAGE)?;
-				self.write_type(inner, true)?;
-				write!(self.file(), ">")?;
-			},
-	
-			LangType::Option(inner) => {
-				write!(self.file(), "java.util.Optional<")?;
-				self.write_type(inner, true)?;
-				write!(self.file(), ">")?;
-			},
-	
 			LangType::Versioned(name, version, args) => {
 				self.write_qual_name(name)?;
 				write!(self.file(), ".V{}", version)?;
+				self.write_type_args(args)?;
+			},
+
+			LangType::Extern(name, args) => {
+				let mapped_name = self.extern_type_name(name, erased)?;
+
+				for part in &mapped_name.package.package {
+					write!(self.file(), "{}.", part)?;
+				}
+			
+				write!(self.file(), "{}", mapped_name.name)?;
+
+
 				self.write_type_args(args)?;
 			},
 
@@ -163,7 +193,7 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + Genera
 		match op {
 			Operation::FromPreviousVersion(prev_ver) => write!(self.file(), "fromV{}", prev_ver)?,
 			Operation::FinalTypeConverter => write!(self.file(), "converter")?,
-			Operation::VersionedTypeCodec => write!(self.file(), "codec")?,
+			Operation::TypeCodec => write!(self.file(), "codec")?,
 		}
 
 		Ok(())
@@ -183,42 +213,6 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + Genera
 				self.write_type(t, true)?;
 				write!(self.file(), ">identity()")?;
 			},
-			LangExpr::MapListConverter { from_type, to_type, element_converter } => {
-				write!(self.file(), "{}.List.<", RUNTIME_PACKAGE)?;
-				self.write_type(from_type, true)?;
-				write!(self.file(), ", ")?;
-				self.write_type(to_type, true)?;
-				write!(self.file(), ">converter(")?;
-				self.write_expr(element_converter)?;
-				write!(self.file(), ")")?;
-				
-			},
-			LangExpr::MapOptionConverter { from_type, to_type, element_converter } => {
-				write!(self.file(), "{}.Option.<", RUNTIME_PACKAGE)?;
-				self.write_type(from_type, true)?;
-				write!(self.file(), ", ")?;
-				self.write_type(to_type, true)?;
-				write!(self.file(), ">converter(")?;
-				self.write_expr(element_converter)?;
-				write!(self.file(), ")")?;
-			},
-			LangExpr::NatCodec => write!(self.file(), "{}.StandardCodecs.natCodec", RUNTIME_PACKAGE)?,
-			LangExpr::IntCodec => write!(self.file(), "{}.StandardCodecs.intCodec", RUNTIME_PACKAGE)?,
-			LangExpr::U8Codec | LangExpr::I8Codec => write!(self.file(), "{}.StandardCodecs.i8Codec", RUNTIME_PACKAGE)?,
-			LangExpr::U16Codec | LangExpr::I16Codec => write!(self.file(), "{}.StandardCodecs.i16Codec", RUNTIME_PACKAGE)?,
-			LangExpr::U32Codec | LangExpr::I32Codec => write!(self.file(), "{}.StandardCodecs.i32Codec", RUNTIME_PACKAGE)?,
-			LangExpr::U64Codec | LangExpr::I64Codec => write!(self.file(), "{}.StandardCodecs.i64Codec", RUNTIME_PACKAGE)?,
-			LangExpr::StringCodec => write!(self.file(), "{}.StandardCodecs.stringCodec", RUNTIME_PACKAGE)?,
-			LangExpr::ListCodec(inner) => {
-				write!(self.file(), "{}.List.codec(", RUNTIME_PACKAGE)?;
-				self.write_expr(&*inner)?;
-				write!(self.file(), ")")?
-			},
-			LangExpr::OptionCodec(inner) => {
-				write!(self.file(), "{}.StandardCodecs.option(", RUNTIME_PACKAGE)?;
-				self.write_expr(&*inner)?;
-				write!(self.file(), ")")?
-			},
 			LangExpr::ReadDiscriminator => write!(self.file(), "{}.StandardCodecs.natCodec.read(reader)", RUNTIME_PACKAGE)?,
 			LangExpr::WriteDiscriminator(value) => write!(self.file(), "{}.StandardCodecs.natCodec.write(writer, java.math.BigInteger.valueOf({}))", RUNTIME_PACKAGE, value)?,
 			LangExpr::CodecRead { codec } => {
@@ -231,9 +225,17 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + Genera
 				self.write_expr(value)?;
 				write!(self.file(), ")")?;
 			},
-			LangExpr::InvokeOperation(op, name, version, type_args, args) => {
-				self.write_qual_name(name)?;
-				write!(self.file(), ".V{}.", version)?;
+			LangExpr::InvokeOperation(op, target, type_args, args) => {
+				match target {
+					OperationTarget::VersionedType(name, version) => {
+						self.write_qual_name(name)?;
+						write!(self.file(), ".V{}.", version)?;
+					},
+					OperationTarget::ExternType(name) => {
+						self.write_qual_name(name)?;
+						write!(self.file(), ".")?;
+					},
+				}
 				self.write_type_args(type_args)?;
 				self.write_operation_name(op)?;
 				self.write_args(args)?;
@@ -263,7 +265,7 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + Genera
 			LangExpr::CreateEnum(name, version, type_args, field_name, value) => {
 				write!(self.file(), "new ")?;
 				self.write_qual_name(name)?;
-				write!(self.file(), ".V{}.{}", version, field_name)?;
+				write!(self.file(), ".V{}.{}", version, make_type_name(field_name))?;
 				self.write_type_args(type_args)?;
 				write!(self.file(), "(")?;
 				self.write_expr(value)?;
@@ -271,7 +273,7 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + Genera
 			},
 			LangExpr::StructField(_, _, field_name, value) => {
 				self.write_expr(value)?;
-				write!(self.file(), ".{}", field_name)?;
+				write!(self.file(), ".{}", make_field_name(field_name))?;
 			},
 		}
 
@@ -353,7 +355,8 @@ impl <'model, 'opt, 'output, Output: OutputHandler> ConstGenerator<'model, JavaL
 	fn write_header(&mut self) -> Result<(), GeneratorError> {
         self.write_package(&self.constant.name().package)?;
 
-		writeln!(self.file, "public final class {} {{", self.constant.name().name)?;
+		writeln!(self.file, "public final class {} {{", make_type_name(&self.constant.name().name))?;
+		writeln!(self.file, "\tprivate {}() {{}}", make_type_name(&self.constant.name().name))?;
 
 		Ok(())
 	}
@@ -392,7 +395,7 @@ struct JavaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler, Extra> {
 	file: Output::FileHandle<'output>,
 	model: &'model model::Verilization,
 	options: &'opt JavaOptions,
-	type_def: Named<'model, model::TypeDefinitionData>,
+	type_def: Named<'model, model::VersionedTypeDefinitionData>,
 	scope: model::Scope<'model>,
 	indentation_level: u32,
 	_extra: Extra,
@@ -439,16 +442,16 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra> JavaGenerator<'model,
 impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> VersionedTypeGenerator<'model, JavaLanguage, GenTypeKind> for JavaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
 	where JavaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : JavaExtraGeneratorOps
 {
-	fn type_def(&self) -> Named<'model, model::TypeDefinitionData> {
+	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
 		self.type_def
 	}
 
 	fn write_header(&mut self) -> Result<(), GeneratorError> {
 		self.write_package(&self.type_def.name().package)?;
-		writeln!(self.file, "public abstract class {} {{", self.type_def.name().name)?;
+		writeln!(self.file, "public abstract class {} {{", make_type_name(&self.type_def.name().name))?;
 		self.indent_increase();
 		self.write_indent()?;
-		writeln!(self.file, "private {}() {{}}", self.type_def.name().name)?;
+		writeln!(self.file, "private {}() {{}}", make_type_name(&self.type_def.name().name))?;
 		
 		Ok(())
 	}
@@ -535,7 +538,7 @@ fn write_enum_case_type<'model, 'opt, Gen>(gen: &mut Gen, value_type: &LangType<
 	match value_type {
 		LangType::Versioned(name, version, args) => {
 			gen.write_qual_name(name)?;
-			write!(gen.file(), ".V{}.{}", version, case_name)?;
+			write!(gen.file(), ".V{}.{}", version, make_type_name(case_name))?;
 			if !args.is_empty() {
 				write!(gen.file(), "<")?;
 				for_sep!(arg, args, { write!(gen.file(), ", ")?; }, {
@@ -558,7 +561,7 @@ fn write_enum_case_type<'model, 'opt, Gen>(gen: &mut Gen, value_type: &LangType<
 impl <'model, 'opt, 'output, Output: OutputHandler, Extra> JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> where JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> : JavaExtraGeneratorOps {
 
 
-	fn open(model: &'model model::Verilization, options: &'opt JavaOptions, output: &'output mut Output, type_def: Named<'model, model::TypeDefinitionData>) -> Result<Self, GeneratorError> where Extra : Default {
+	fn open(model: &'model model::Verilization, options: &'opt JavaOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> where Extra : Default {
 		let file = open_java_file(options, output, type_def.name())?;
 		Ok(JavaTypeGenerator {
 			file: file,
@@ -693,7 +696,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra> JavaTypeGenerator<'mo
 					write_enum_case_type(self, value_type, case_name, false)?;
 					write!(self.file, ")")?;
 					self.write_expr(value)?;
-					writeln!(self.file, ").{};", case_name)?;
+					writeln!(self.file, ").{};", make_field_name(case_name))?;
 
 					self.write_statement(body)?;
 
@@ -786,7 +789,7 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> JavaExtraGeneratorOp
 
 		for_sep!((field_name, field), &ver_type.ver_type.fields, { write!(self.file, ",")?; }, {
 			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?, false)?;
-			write!(self.file, " {}", field_name)?;
+			write!(self.file, " {}", make_field_name(field_name))?;
 		});
 
 		writeln!(self.file, ") {{")?;
@@ -794,7 +797,7 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> JavaExtraGeneratorOp
 		
 		for (field_name, _) in &ver_type.ver_type.fields {
 			self.write_indent()?;
-			writeln!(self.file, "this.{} = {};", field_name, field_name)?;
+			writeln!(self.file, "this.{} = {};", make_field_name(field_name), make_field_name(field_name))?;
 		}
 
 		self.indent_decrease();
@@ -805,7 +808,7 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> JavaExtraGeneratorOp
 			self.write_indent()?;
 			write!(self.file, "public final ")?;
 			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?, false)?;
-			writeln!(self.file, " {};", field_name)?;
+			writeln!(self.file, " {};", make_field_name(field_name))?;
 		}
 
 		self.write_indent()?;
@@ -818,7 +821,7 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> JavaExtraGeneratorOp
 		self.write_indent()?;
 		write!(self.file, "return java.util.Objects.hash(")?;
 		for_sep!((field_name, _), &ver_type.ver_type.fields, { write!(self.file, ", ")?; }, {
-			write!(self.file, "{}", field_name)?;
+			write!(self.file, "{}", make_field_name(field_name))?;
 		});
 		writeln!(self.file, ");")?;
 		self.indent_decrease();
@@ -836,7 +839,7 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> JavaExtraGeneratorOp
 		writeln!(self.file, "V{} other = (V{})obj;", ver_type.version, ver_type.version)?;
 		for (field_name, _) in &ver_type.ver_type.fields {
 			self.write_indent()?;
-			writeln!(self.file, "if(!java.util.Objects.deepEquals(this.{}, other.{})) return false;", field_name, field_name)?;
+			writeln!(self.file, "if(!java.util.Objects.deepEquals(this.{}, other.{})) return false;", make_field_name(field_name), make_field_name(field_name))?;
 		}
 		self.write_indent()?;
 		writeln!(self.file, "return true;")?;
@@ -859,7 +862,7 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> JavaExtraGeneratorOp
 
 		for (index, (field_name, field)) in ver_type.ver_type.fields.iter().enumerate() {
 			self.write_indent()?;
-			write!(self.file, "public static final class {}", field_name)?;
+			write!(self.file, "public static final class {}", make_type_name(field_name))?;
 			self.write_type_params(self.type_def().type_params())?;
 			write!(self.file, " extends V{}", ver_type.version)?;
 			self.write_type_params(self.type_def().type_params())?;
@@ -867,19 +870,19 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> JavaExtraGeneratorOp
 
 			self.indent_increase();
 			self.write_indent()?;
-			write!(self.file, "public {}(", field_name)?;
+			write!(self.file, "public {}(", make_type_name(field_name))?;
 			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?, false)?;
-			writeln!(self.file, " {}) {{", field_name)?;
+			writeln!(self.file, " {}) {{", make_field_name(field_name))?;
 			self.indent_increase();
 			self.write_indent()?;
-			writeln!(self.file, "this.{} = {};", field_name, field_name)?;
+			writeln!(self.file, "this.{} = {};", make_field_name(field_name), make_field_name(field_name))?;
 			self.indent_decrease();
 			self.write_indent()?;
 			writeln!(self.file, "}}")?;
 			self.write_indent()?;
 			write!(self.file, "public final ")?;
 			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?, false)?;
-			writeln!(self.file, " {};", field_name)?;
+			writeln!(self.file, " {};", make_field_name(field_name))?;
 			
 			self.write_indent()?;
 			writeln!(self.file, "@Override")?;
@@ -887,7 +890,7 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> JavaExtraGeneratorOp
 			writeln!(self.file, "public int hashCode() {{")?;
 			self.indent_increase();
 			self.write_indent()?;
-			writeln!(self.file, "return java.util.Objects.hash({}, this.{});", index, field_name)?;
+			writeln!(self.file, "return java.util.Objects.hash({}, this.{});", index, make_field_name(field_name))?;
 			self.indent_decrease();
 			self.write_indent()?;
 			writeln!(self.file, "}}")?;
@@ -898,11 +901,11 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> JavaExtraGeneratorOp
 			writeln!(self.file, "public boolean equals(Object obj) {{")?;
 			self.indent_increase();
 			self.write_indent()?;
-			writeln!(self.file, "if(!(obj instanceof {})) return false;", field_name)?;
+			writeln!(self.file, "if(!(obj instanceof {})) return false;", make_type_name(field_name))?;
 			self.write_indent()?;
-			writeln!(self.file, "{} other = ({})obj;", field_name, field_name)?;
+			writeln!(self.file, "{} other = ({})obj;", make_type_name(field_name), make_type_name(field_name))?;
 			self.write_indent()?;
-			writeln!(self.file, "return java.util.Objects.deepEquals(this.{}, other.{});", field_name, field_name)?;
+			writeln!(self.file, "return java.util.Objects.deepEquals(this.{}, other.{});", make_field_name(field_name), make_field_name(field_name))?;
 			self.indent_decrease();
 			self.write_indent()?;
 			writeln!(self.file, "}}")?;
@@ -927,6 +930,8 @@ impl Language for JavaLanguage {
 		JavaOptionsBuilder {
 			output_dir: None,
 			package_mapping: HashMap::new(),
+			library_mapping: HashMap::new(),
+			extern_mapping: HashMap::new(),
 		}
 	}
 
@@ -944,9 +949,30 @@ impl Language for JavaLanguage {
 
             let java_package = model::PackageName::from_str(value.to_str().unwrap());
 
-			if builder.package_mapping.insert(package, java_package).is_some() {
+			if builder.library_mapping.contains_key(&package) || builder.package_mapping.insert(package, java_package).is_some() {
 				return Err(GeneratorError::from(format!("Package already mapped: {}", pkg)))
 			}
+			Ok(())
+		}
+		else if let Some(pkg) = name.strip_prefix("lib:") {
+			let package = model::PackageName::from_str(pkg);
+
+            let java_package = model::PackageName::from_str(value.to_str().unwrap());
+
+			if builder.package_mapping.contains_key(&package) || builder.library_mapping.insert(package, java_package).is_some() {
+				return Err(GeneratorError::from(format!("Package already mapped: {}", pkg)))
+			}
+			Ok(())
+		}
+		else if let Some(extern_name) = name.strip_prefix("extern:") {
+			let qual_name = model::QualifiedName::from_str(extern_name).ok_or_else(|| format!("Invalid extern type name: {}", extern_name))?;
+
+			let java_name = model::QualifiedName::from_str(value.to_str().unwrap()).ok_or_else(|| format!("Invalid Java type name: {}", value.to_str().unwrap()))?;
+
+			if builder.extern_mapping.insert(qual_name, java_name).is_some() {
+				return Err(GeneratorError::from(format!("Extern type already mapped: {}", extern_name)))
+			}
+
 			Ok(())
 		}
 		else {
@@ -955,10 +981,11 @@ impl Language for JavaLanguage {
 	}
 
 	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
-		let output_dir = builder.output_dir.ok_or("Output directory not specified")?;
 		Ok(JavaOptions {
-			output_dir: output_dir,
+			output_dir: builder.output_dir.ok_or("Output directory not specified")?,
 			package_mapping: builder.package_mapping,
+			library_mapping: builder.library_mapping,
+			extern_mapping: builder.extern_mapping,
 		})
 	}
 
@@ -978,6 +1005,7 @@ impl Language for JavaLanguage {
 					let mut type_gen: JavaTypeGenerator<_, GenEnumType> = JavaTypeGenerator::open(model, &options, output, t)?;
 					type_gen.generate()?;		
 				},
+				model::NamedTypeDefinition::ExternType(_) => (),
 			}
 		}
 
