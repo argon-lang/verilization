@@ -16,11 +16,13 @@ pub enum LangType<'model> {
 	Codec(Box<LangType<'model>>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum Operation {
 	FromPreviousVersion(BigUint),
 	FinalTypeConverter,
 	TypeCodec,
+	FromInteger,
+	FromString,
 }
 
 #[derive(Debug)]
@@ -32,6 +34,8 @@ pub enum OperationTarget<'model> {
 #[derive(Debug)]
 pub enum LangExpr<'model> {
 	Identifier(String),
+	IntegerLiteral(BigInt),
+	StringLiteral(String),
 	InvokeConverter {
 		converter: Box<LangExpr<'model>>,
 		value: Box<LangExpr<'model>>,
@@ -306,11 +310,39 @@ pub trait ConstGenerator<'model, Lang> : Generator<'model, Lang> {
 	fn write_constant(&mut self, version_name: String, t: LangType<'model>, value: LangExpr<'model>) -> Result<(), GeneratorError>;
 	fn write_footer(&mut self) -> Result<(), GeneratorError>;
 
-	fn build_value(&mut self, _version: &BigUint, _t: &model::Type, _value: &model::ConstantValue) -> Result<LangExpr<'model>, GeneratorError> {
-		Err(GeneratorError::from("Not implemented"))
+	fn constant_invoke_operation(&self, op: Operation, values: Vec<LangExpr<'model>>, version: &BigUint, t: &model::Type) -> Result<LangExpr<'model>, GeneratorError> {
+		match t {
+			model::Type::Defined(name, args) => match self.scope().lookup(name.clone()) {
+				model::ScopeLookup::NamedType(name) => {
+					let named_type_def = self.model().get_type(&name).ok_or("Could not find type")?;
+
+					let target = match named_type_def {
+						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
+							let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
+							OperationTarget::VersionedType(named_type_def.name(), ver_type.version)
+						},
+
+						model::NamedTypeDefinition::ExternType(_) =>
+							OperationTarget::ExternType(named_type_def.name()),
+					};
+
+					Ok(LangExpr::InvokeOperation(op, target, Vec::new(), values))
+				},
+
+				model::ScopeLookup::TypeParameter(_) => Err(GeneratorError::from("Cannot create constant for type parameter")),
+			},
+		}
+	} 
+
+	fn build_value(&self, version: &BigUint, t: &model::Type, value: &'model model::ConstantValue) -> Result<LangExpr<'model>, GeneratorError> {
+		Ok(match value {
+			model::ConstantValue::Integer(n) => self.constant_invoke_operation(Operation::FromInteger, vec!(LangExpr::IntegerLiteral(n.clone())), version, t)?,
+			model::ConstantValue::String(s) => self.constant_invoke_operation(Operation::FromString, vec!(LangExpr::StringLiteral(s.clone())), version, t)?,
+			model::ConstantValue::Constant(name) => LangExpr::ConstantValue(name, version.clone())
+		})
 	}
 
-	fn build_value_from_prev(&mut self, prev_ver: &BigUint, version: &BigUint, t: &model::Type) -> Result<LangExpr<'model>, GeneratorError> {
+	fn build_value_from_prev(&self, prev_ver: &BigUint, version: &BigUint, t: &model::Type) -> Result<LangExpr<'model>, GeneratorError> {
 		self.build_conversion(prev_ver, version, t, ConvertParam::Expression(LangExpr::ConstantValue(self.constant().name(), prev_ver.clone())))
 	}
 

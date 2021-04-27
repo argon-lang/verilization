@@ -193,6 +193,10 @@ impl <'a, A> Named<'a, A> {
 /// The value of a constant.
 pub enum ConstantValue {
 	Integer(BigInt),
+	String(String),
+	//Case(Vec<ConstantValue>),
+	//Record(HashMap<String, ConstantValue>),
+	Constant(QualifiedName),
 }
 
 pub struct ConstantVersionInfo<'a> {
@@ -354,7 +358,24 @@ impl <'a> Named<'a, VersionedTypeDefinitionData> {
 #[derive(Debug)]
 pub struct ExternTypeDefinitionData {
 	pub(crate) type_params: Vec<String>,
+	pub(crate) literals: Vec<ExternLiteralSpecifier>,
 }
+
+#[derive(Debug)]
+pub enum ExternLiteralIntBound {
+	Inclusive,
+	Exclusive,
+}
+
+#[derive(Debug)]
+pub enum ExternLiteralSpecifier {
+	Integer(ExternLiteralIntBound, BigInt, ExternLiteralIntBound, BigInt),
+	String,
+	Case(Vec<Type>),
+	Record(Vec<(String, FieldInfo)>),
+}
+
+
 
 /// A definition of a type. Either a struct or enum.
 pub enum TypeDefinition {

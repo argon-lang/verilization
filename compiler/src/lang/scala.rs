@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use num_bigint::{BigUint, BigInt, Sign};
 use super::generator::*;
 use crate::util::{capitalize_identifier, uncapitalize_identifier};
+use num_traits::ToPrimitive;
 
 type PackageMap = HashMap<model::PackageName, model::PackageName>;
 const RUNTIME_PACKAGE: &str = "dev.argon.verilization.scala_runtime";
@@ -162,6 +163,8 @@ pub trait ScalaGenerator<'model, 'opt> : Generator<'model, ScalaLanguage> + Gene
 			Operation::FromPreviousVersion(prev_ver) => write!(self.file(), "fromV{}", prev_ver)?,
 			Operation::FinalTypeConverter => write!(self.file(), "converter")?,
 			Operation::TypeCodec => write!(self.file(), "codec")?,
+			Operation::FromInteger => write!(self.file(), "fromInteger")?,
+			Operation::FromString => write!(self.file(), "fromString")?,
 		}
 
 		Ok(())
@@ -170,6 +173,30 @@ pub trait ScalaGenerator<'model, 'opt> : Generator<'model, ScalaLanguage> + Gene
 	fn write_expr(&mut self, expr: &LangExpr<'model>) -> Result<(), GeneratorError> {
 		match expr {
 			LangExpr::Identifier(name) => write!(self.file(), "{}", name)?,
+			LangExpr::IntegerLiteral(n) => {
+				if let Some(n) = n.to_i32() {
+					write!(self.file(), "{}", n)?;
+				}
+				else if let Some(n) = n.to_i64() {
+					write!(self.file(), "{}L", n)?;
+				}
+				else {
+					write!(self.file(), "scala.math.BigInt(\"{}\")", n)?;
+				}
+			},
+			LangExpr::StringLiteral(s) => {
+				write!(self.file(), "\"")?;
+				for codepoint in s.chars() {
+					match codepoint {
+						'"' => write!(self.file(), "\\\"")?,
+						'\\' => write!(self.file(), "\\\\")?,
+						'\n' => write!(self.file(), "\\n")?,
+						'\r' => write!(self.file(), "\\r")?,
+						_ => write!(self.file(), "{}", codepoint)?,
+					}
+				}
+				write!(self.file(), "\"")?;
+			},
 			LangExpr::InvokeConverter { converter, value } => {
 				self.write_expr(&*converter)?;
 				write!(self.file(), ".convert(")?;

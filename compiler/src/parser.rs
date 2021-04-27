@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use nom::{
 	IResult,
 	branch::{alt},
-	multi::{many0, separated_list1},
+	multi::{many0, separated_list1, separated_list0},
 	character::complete::{multispace0, multispace1, alphanumeric1, one_of, char},
 	combinator::{map, opt, eof},
 	bytes::complete::tag,
@@ -86,6 +86,13 @@ fn kw_final(input: &str) -> PResult<&str, ()> {
 	Ok((input, ()))
 }
 
+fn kw_literal(input: &str) -> PResult<&str, ()> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = tag("literal")(input)?;
+	let (input, _) = multispace1(input)?;
+	Ok((input, ()))
+}
+
 // Symbols
 fn sym_semicolon(input: &str) -> PResult<&str, ()> {
 	let (input, _) = multispace0(input)?;
@@ -101,6 +108,13 @@ fn sym_colon(input: &str) -> PResult<&str, ()> {
 
 fn sym_dot(input: &str) -> PResult<&str, ()> {
 	let (input, _) = multispace0(input)?;
+	let (input, _) = char('.')(input)?;
+	Ok((input, ()))
+}
+
+fn sym_dotdot(input: &str) -> PResult<&str, ()> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = char('.')(input)?;
 	let (input, _) = char('.')(input)?;
 	Ok((input, ()))
 }
@@ -394,6 +408,81 @@ fn versioned_type_definition(input: &str) -> PResult<&str, (String, TopLevelDefi
 	
 }
 
+
+
+fn extern_literal_integer(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = tag("integer")(input)?;
+	let (input, _) = multispace0(input)?;
+	let (input, open) = one_of("[(")(input)?;
+	let (input, _) = multispace0(input)?;
+	let (input, lower) = bigint(input)?;
+	let (input, _) = sym_dotdot(input)?;
+	let (input, upper) = bigint(input)?;
+	let (input, _) = multispace0(input)?;
+	let (input, close) = one_of("])")(input)?;
+
+	let bound = |ch: char| if ch == '(' { model::ExternLiteralIntBound::Exclusive } else { model::ExternLiteralIntBound::Inclusive };
+
+	Ok((input, model::ExternLiteralSpecifier::Integer(bound(open), lower, bound(close), upper)))
+}
+
+fn extern_literal_string(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = tag("string")(input)?;
+
+	Ok((input, model::ExternLiteralSpecifier::String))
+}
+
+
+fn extern_literal_case(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = tag("case")(input)?;
+	let (input, _) = sym_open_paren(input)?;
+	let (input, params) = separated_list0(sym_comma, type_expr)(input)?;
+	let (input, _) = sym_close_paren(input)?;
+
+	Ok((input, model::ExternLiteralSpecifier::Case(params)))
+}
+
+
+fn extern_literal_record(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = tag("record")(input)?;
+	let (input, _) = sym_open_curly(input)?;
+	let (input, fields) = many0(field_definition)(input)?;
+	let (input, _) = sym_close_curly(input)?;
+
+	Ok((input, model::ExternLiteralSpecifier::Record(fields)))
+}
+
+fn extern_literal(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
+	let (input, literal) = alt((extern_literal_integer, extern_literal_string, extern_literal_case, extern_literal_record))(input)?;
+
+	Ok((input, literal))
+}
+
+
+// Ex:
+// literal {
+//   ...
+// }
+fn extern_literal_block(input: &str) -> PResult<&str, Vec<model::ExternLiteralSpecifier>> {
+	let (input, _) = kw_literal(input)?;
+	let (input, _) = sym_open_curly(input)?;
+	
+	let (input, literals) = many0(extern_literal)(input)?;
+	
+	let (input, _) = sym_close_curly(input)?;
+
+	Ok((input, literals))
+}
+
+
+// Ex:
+// extern Name {
+//   ...
+// }
 fn extern_type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
 	let (input, _) = kw_extern(input)?;
 	let (input, name) = identifier(input)?;
@@ -402,12 +491,14 @@ fn extern_type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinit
 
 	let (input, _) = sym_open_curly(input)?;
 	
-
+	let (input, literals) = opt(extern_literal_block)(input)?;
+	let literals = literals.unwrap_or_else(|| Vec::new());
 	
 	let (input, _) = sym_close_curly(input)?;
 
 	Ok((input, (name, TopLevelDefinition::Type(model::TypeDefinition::ExternType(model::ExternTypeDefinitionData {
 		type_params: type_params,
+		literals: literals,
 	})))))
 }
 

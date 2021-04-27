@@ -67,7 +67,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> TSGenerator<'model> for TSTest
 impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
 
     fn generate(&mut self) -> Result<(), GeneratorError> {
-        self.add_imported_type(&model::QualifiedName::from_parts(&[], "u32"));
+        self.add_imported_type(&model::QualifiedName::from_parts(&[], "u32"))?;
         self.add_imported_type(self.type_def.name())?;
 
         for t in self.type_def.referenced_types() {

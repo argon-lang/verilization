@@ -184,6 +184,8 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 			Operation::FromPreviousVersion(prev_ver) => write!(self.file(), "fromV{}", prev_ver)?,
 			Operation::FinalTypeConverter => write!(self.file(), "converter")?,
 			Operation::TypeCodec => write!(self.file(), "codec")?,
+			Operation::FromInteger => write!(self.file(), "fromInteger")?,
+			Operation::FromString => write!(self.file(), "fromString")?,
 		}
 
 		Ok(())
@@ -192,6 +194,23 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 	fn write_expr(&mut self, expr: &LangExpr<'model>) -> Result<(), GeneratorError> {
 		match expr {
 			LangExpr::Identifier(name) => write!(self.file(), "{}", name)?,
+			LangExpr::IntegerLiteral(n) => write!(self.file(), "{}n", n)?,
+			LangExpr::StringLiteral(s) => {
+				write!(self.file(), "\"")?;
+				for codepoint in s.chars() {
+					match codepoint {
+						'"' => write!(self.file(), "\\\"")?,
+						'\\' => write!(self.file(), "\\\\")?,
+						'\n' => write!(self.file(), "\\n")?,
+						'\r' => write!(self.file(), "\\r")?,
+						'\u{2028}' => write!(self.file(), "\\u2028")?,
+						'\u{2029}' => write!(self.file(), "\\u2029")?,
+						_ => write!(self.file(), "{}", codepoint)?,
+					}
+				}
+				write!(self.file(), "\"")?;
+			},
+
 			LangExpr::InvokeConverter { converter, value } => {
 				self.write_expr(&*converter)?;
 				write!(self.file(), ".convert(")?;
