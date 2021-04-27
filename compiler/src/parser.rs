@@ -8,8 +8,8 @@ use nom::{
 	IResult,
 	branch::{alt},
 	multi::{many0, separated_list1, separated_list0},
-	character::complete::{multispace0, multispace1, alphanumeric1, one_of, char},
-	combinator::{map, opt, eof},
+	character::complete::{multispace0, multispace1, alphanumeric1, one_of, none_of, char},
+	combinator::{map, opt, eof, value},
 	bytes::complete::tag,
 	sequence::preceded,
 	error::{ParseError, ErrorKind},
@@ -197,6 +197,29 @@ fn bigint(input: &str) -> PResult<&str, BigInt> {
 	Ok((input, BigInt::from_biguint(sign, n)))
 }
 
+fn string_literal(input: &str) -> PResult<&str, String> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = char('\"')(input)?;
+
+	let (input, chars) = many0(
+		alt((
+			none_of("\"\\\r\n"),
+			preceded(char('\\'),
+				alt((
+					value('\\', char('\\')),
+					value('\"', char('\"')),
+					value('n', char('\n')),
+					value('\r', char('\r')),
+				))
+			)
+		))
+	)(input)?;
+
+	let (input, _) = char('\"')(input)?;
+
+	Ok((input, chars.into_iter().collect()))
+}
+
 fn identifier(input: &str) -> PResult<&str, String> {
 	let (input, _) = multispace0(input)?;
 	let (input, str) = alphanumeric1(input)?;
@@ -255,7 +278,10 @@ fn type_expr(input: &str) -> PResult<&str, model::Type> {
 }
 
 fn constant_value(input: &str) -> PResult<&str, model::ConstantValue> {
-	map(bigint, model::ConstantValue::Integer)(input)
+	alt((
+		map(bigint, model::ConstantValue::Integer),
+		map(string_literal, model::ConstantValue::String),
+	))(input)
 }
 
 
