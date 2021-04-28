@@ -1,5 +1,7 @@
 use crate::model::*;
 use num_bigint::BigUint;
+use num_traits::One;
+use std::collections::HashSet;
 
 #[derive(Debug)]
 pub enum TypeCheckError {
@@ -8,6 +10,7 @@ pub enum TypeCheckError {
     CouldNotFindLastVersion(QualifiedName),
     ArityMismatch(usize, usize),
     TypeNotFinal(QualifiedName),
+    DuplicateLiteral(QualifiedName),
 }
 
 struct TypeCheck<'model> {
@@ -120,7 +123,39 @@ fn type_check_extern_type<'model>(model: &'model Verilization, t: Named<'model, 
         scope: t.scope(),
     };
 
+    let mut has_integer = false;
+    let mut has_string = false;
+    let mut has_sequence = false;
+    let mut literal_cases = HashSet::new();
+    let mut has_record = false;
 
+    for literal in t.literals() {
+        match literal {
+            ExternLiteralSpecifier::Integer(_, _, _, _) if has_integer => return Err(TypeCheckError::DuplicateLiteral(t.name().clone())),
+            ExternLiteralSpecifier::Integer(_, _, _, _) => has_integer = true,
+            ExternLiteralSpecifier::String if has_string => return Err(TypeCheckError::DuplicateLiteral(t.name().clone())),
+            ExternLiteralSpecifier::String => has_string = true,
+            ExternLiteralSpecifier::Sequence(inner) if has_sequence => return Err(TypeCheckError::DuplicateLiteral(t.name().clone())),
+            ExternLiteralSpecifier::Sequence(inner) => {
+                has_sequence = true;
+                tc.check_type(&BigUint::one(), inner)?;
+            },
+            ExternLiteralSpecifier::Case(name, params) => {
+                if !literal_cases.insert(name) {
+                    return Err(TypeCheckError::DuplicateLiteral(t.name().clone()));
+                }
+
+                for param in params {
+                    tc.check_type(&BigUint::one(), param)?;
+                }
+            },
+            ExternLiteralSpecifier::Record(fields) => {
+                for (_, field) in fields {
+                    tc.check_type(&BigUint::one(), &field.field_type)?;
+                }
+            },
+        }
+    }
 
     Ok(())
 }
