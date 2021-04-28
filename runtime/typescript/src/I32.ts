@@ -12,3 +12,7 @@ export const codec: Codec<I32> = {
         return writer.writeU32(value >>> 0);
     },
 };
+
+export function fromInteger(n: bigint): I32 {
+    return Number(n) | 0;
+}

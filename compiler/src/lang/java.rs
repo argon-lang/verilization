@@ -197,6 +197,7 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + Genera
 			Operation::TypeCodec => write!(self.file(), "codec")?,
 			Operation::FromInteger => write!(self.file(), "fromInteger")?,
 			Operation::FromString => write!(self.file(), "fromString")?,
+			Operation::FromSequence => write!(self.file(), "fromSequence")?,
 			Operation::FromRecord(_) => write!(self.file(), "fromRecord")?,
 			Operation::FromCase(name) => write!(self.file(), "fromCase{}", make_type_name(name))?,
 		}

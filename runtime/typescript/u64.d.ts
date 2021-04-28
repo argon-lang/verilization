@@ -1,1 +1,1 @@
-export {U64, codec} from "./bin/U64.js";
+export {U64, codec, fromInteger} from "./bin/U64.js";

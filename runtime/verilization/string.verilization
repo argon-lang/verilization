@@ -1,3 +1,7 @@
 version 1;
 
-extern string {}
+extern string {
+    literal {
+        string;
+    }
+}

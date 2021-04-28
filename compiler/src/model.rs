@@ -194,6 +194,7 @@ impl <'a, A> Named<'a, A> {
 pub enum ConstantValue {
 	Integer(BigInt),
 	String(String),
+	Sequence(Vec<ConstantValue>),
 	Case(String, Vec<ConstantValue>),
 	Record(HashMap<String, ConstantValue>),
 	Constant(QualifiedName),
@@ -370,8 +371,9 @@ pub enum ExternLiteralIntBound {
 
 #[derive(Debug)]
 pub enum ExternLiteralSpecifier {
-	Integer(ExternLiteralIntBound, BigInt, ExternLiteralIntBound, BigInt),
+	Integer(ExternLiteralIntBound, Option<BigInt>, ExternLiteralIntBound, Option<BigInt>),
 	String,
+	Sequence(Type),
 	Case(String, Vec<Type>),
 	Record(Vec<(String, FieldInfo)>),
 }

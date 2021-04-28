@@ -13,3 +13,7 @@ export const codec: Codec<Nat> = {
         return encodeVLQ(writer, false, value);
     },
 };
+
+export function fromInteger(n: bigint): Nat {
+    return n;
+}

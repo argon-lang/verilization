@@ -7,6 +7,10 @@ import java.math.BigInteger;
 public final class String {
     private String() {}
 
+    public static java.lang.String fromString(java.lang.String s) {
+        return s;
+    }
+
     public static final Codec<java.lang.String> codec = new Codec<java.lang.String>() {
         @Override
         public java.lang.String read(FormatReader reader) throws IOException {

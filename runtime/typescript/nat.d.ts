@@ -1,1 +1,1 @@
-export {Nat, codec} from "./bin/Nat.js";
+export {Nat, codec, fromInteger} from "./bin/Nat.js";

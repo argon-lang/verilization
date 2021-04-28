@@ -165,6 +165,7 @@ pub trait ScalaGenerator<'model, 'opt> : Generator<'model, ScalaLanguage> + Gene
 			Operation::TypeCodec => write!(self.file(), "codec")?,
 			Operation::FromInteger => write!(self.file(), "fromInteger")?,
 			Operation::FromString => write!(self.file(), "fromString")?,
+			Operation::FromSequence => write!(self.file(), "fromSequence")?,
 			Operation::FromRecord(_) => write!(self.file(), "fromRecord")?,
 			Operation::FromCase(name) => write!(self.file(), "fromCase{}", make_type_name(name))?,
 		}
@@ -761,7 +762,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra> ScalaTypeGenerator<'m
 					self.write_indent()?;
 					write!(self.file, "case ")?;
 					match &value_type {
-						LangType::Versioned(name, version, args) => {
+						LangType::Versioned(name, version, _) => {
 							self.write_qual_name(name)?;
 							write!(self.file, ".V{}.{}({})", version, make_type_name(&case_name), binding_name)?;
 						},

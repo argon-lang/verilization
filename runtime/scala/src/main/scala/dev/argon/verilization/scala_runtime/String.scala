@@ -5,6 +5,8 @@ import scala.Predef.{String => SString}
 import java.nio.charset.StandardCharsets
 
 object String {
+    def fromString(s: SString): String = s
+
     val codec: Codec[SString] = new Codec[SString] {
         override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, SString] =
             Nat.codec.read(reader).flatMap { length =>

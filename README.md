@@ -23,14 +23,68 @@ The following types are supported.
 
 |Type|Encoding|
 |---|---|
-| `{i,u}{8,16,32,64}` | Fixed-width sequence of bytes in little endian order |
-| `int` | A variable-length format |
-| `nat` | Similar format to `int`, but without the sign bit |
-| `string` | A length `nat` followed by a sequence of UTF-8 bytes with the specified length |
-| `list T` | A length `nat` followed by a sequence of `T` |
-| `option T` | A byte `b`. If `b` is non-zero, then it is followed by a `T` |
-| `struct` types | The concatenation of its fields |
-| `enum` types | A tag `nat` followed by the field represented by the tag |
+| `struct` types | The encoding of each field in order |
+| `enum` types | A tag (encoded in the same format as `nat`) followed by the encoding of the field represented by the tag |
+| `extern` types | Defined by code written in the target language |
+
+### Structs
+
+A `struct` type is defined with multiple [versions](#versioning). Each version defines a list of fields.
+
+    struct Rectangle {
+        version 1 {
+            width: u32;
+            height: u32;
+        }
+    }
+
+### Enums
+
+An `enum` type is defined with multiple [versions](#versioning). Each version defines a list of fields used as cases. An enum value consists of exactly one of these fields.
+
+    struct StringOrInt {
+        version 1 {
+            str: string;
+            num: int;
+        }
+    }
+
+### Externs
+
+An `extern` type is defined in user code. The type definition, conversions, and codecs must be implemented in the target language.
+
+An `extern` type may declare what literals may be used for the type.
+
+    extern MyString {
+        literal {
+            string;
+        }
+    }
+
+The following literal specifications are supported.
+
+| Name | Example | Syntax | Notes |
+|---|---|---|---|
+| Integer | integer [0, 256) | `'integer' open_bracket integer_literal? ',' integer_literal? close_bracket` <br /> where `open_bracket : '[' | '('` and `close_bracket : ']' | ')'` | Defines the range of allowed integers. Square brackets are inclusive, parentheses are exclusive. Omit the number for an infinite range.
+| String | `string` | `'string'` | The contents of the string cannot be restricted. |
+| Sequence | `sequence T` | `'sequence' type_expr` | Defines a sequence of the specified type. |
+| Case | `case Positive()` | `'case' identifier '(' [ type_expr { ',' type_expr } ] ')'` | Defines a case. Multiple case literals may be specified if the names are distinct. |
+| Record| `record { a: A; b: B; }` | `'record' '{' { identifier ':' type_expr ';' } '}'` | Defines a record. |
+
+ * `integer` - 
+
+### Runtime Library Types
+
+There are a number of `extern` types provided by the runtime library.
+
+|Type|Literals|Encoding|
+|---|---|---|
+| `{i,u}{8,16,32,64}` | Integers within the range of the type | Fixed-width sequence of bytes in little endian order |
+| `int` | Integers | A variable-length format |
+| `nat` | Non-negative integers | Similar format to `int`, but without the sign bit |
+| `string` | Strings | A length `nat` followed by a sequence of UTF-8 bytes with the specified length |
+| `list T` | sequence of `T` | A length `nat` followed by a sequence of `T` |
+| `option T` | Two cases `some(x)` and `none()` | A byte `b`. If `b` is non-zero, then it is followed by a `T` |
 
 The encodings for `int` and `nat` define a sequence of bits in little-endian order.
 The highest bit in each byte is set if there are more bytes in the number.
@@ -44,7 +98,7 @@ The sequence of bits is mapped as follows:
  * For the `int` type, if b<sub>m-1</sub> = 1, then k = -(b<sub>0</sub> * 2<sup>0</sup> + ... + b<sub>m - 2</sub> * 2<sup>m-2</sup>) - 1
  * For the `nat` type, k = b<sub>0</sub> * 2<sup>0</sup> + ... + b<sub>m - 1</sub> * 2<sup>m-1</sup>
 
-## Versioning
+## <a name="versioning">Versioning</a>
 
 In the following example, a user has a username and birth date.
 
@@ -91,6 +145,18 @@ Generic types allow a type to be parameterized.
         }
     }
 
+## Constants
+
+Constants allow for values to be defined that are shared between any generated languages.
+
+| Literal | Example | Usage |
+|---|---|---|
+| Integer | `88` | `extern` types with `integer` literal |
+| String| `"Hello World"` | `extern` types with `string` literal |
+| Sequence | `[ a, b, c ]` | `extern` types with `sequence` literal |
+| Record | `{ x = 1; y = 2; }` | `struct` types and `extern` types with `record` literal |
+| Case | `Name(a)` | `enum` types and `extern` types with `case Name` literal |
+
 ## Command Line
 
 Verilization has a command line interface. The following options are supported.
@@ -108,6 +174,7 @@ The following languages are supported.
 
  * `out_dir` - the base output directory
  * `pkg:package.name` - the subdirectory for the package
+ * `lib:package.name` - the module import for the library, types in this package will not be generated
 
 ### Java
 
@@ -117,6 +184,7 @@ The following languages are supported.
 
  * `out_dir` - the base output directory
  * `pkg:package.name` - the java package for the original verilization package
+ * `lib:package.name` - the java package, types in this package will not be generated
 
 ### Scala
 
@@ -126,6 +194,7 @@ The following languages are supported.
 
  * `out_dir` - the base output directory
  * `pkg:package.name` - the scala package for the original verilization package
+ * `lib:package.name` - the scala package, types in this package will not be generated
 
 ## Compiler Bindings
 
@@ -135,7 +204,5 @@ This has the advantage that a tool can be distributed (for example, as an NPM pa
 These bindings expose both an interface that can be used directly from the runtime, as well as a command line interface that depends only on the associated runtime.
 
 Currently, there are bindings for the following runtimes.
-
- * Node
 
 

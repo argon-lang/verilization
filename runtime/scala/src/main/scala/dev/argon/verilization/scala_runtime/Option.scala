@@ -4,6 +4,9 @@ import zio.{ZIO, IO}
 import scala.{Option => SOption}
 
 object Option {
+    def fromCaseSome[A](value: A): Option[A] = Some(value)
+    def fromCaseNone[A](): Option[A] = None
+
     def converter[A, B](elementConverter: Converter[A, B]): Converter[SOption[A], SOption[B]] = elementConverter match {
         case elementConverter: IdentityConverter[A] => new IdentityConverter[SOption[A]]
         case _ => new Converter[SOption[A], SOption[B]] {

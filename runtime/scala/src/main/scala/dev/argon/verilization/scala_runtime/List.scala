@@ -3,6 +3,8 @@ package dev.argon.verilization.scala_runtime
 import zio.{ZIO, IO, Chunk, ChunkBuilder}
 
 object List {
+    def fromSequence[A](seq: A*): Chunk[A] = Chunk.fromIterable(seq)
+
     def converter[A, B](elementConverter: Converter[A, B]): Converter[Chunk[A], Chunk[B]] = elementConverter match {
         case elementConverter: IdentityConverter[A] => new IdentityConverter[Chunk[A]]
         case _ => new Converter[Chunk[A], Chunk[B]] {

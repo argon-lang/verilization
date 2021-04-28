@@ -19,6 +19,11 @@ type ValueTypeList<A> =
 export type List<A> = readonly A[] | ValueTypeList<A>;
 
 
+export function fromSequence<A>(...values: A[]): List<A> {
+    return values;
+}
+
+
 export function converter<A, B>(elemConv: Converter<A, B>): Converter<List<A>, List<B>> {
     if(elemConv instanceof IdentityConverter) {
         return Converter.identity<List<A>>() as unknown as Converter<List<A>, List<B>>;

@@ -12,3 +12,7 @@ export const codec: Codec<I64> = {
         return writer.writeU64(BigInt.asUintN(64, value));
     },
 };
+
+export function fromInteger(n: bigint): I64 {
+    return BigInt.asIntN(64, n);
+}

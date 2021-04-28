@@ -1,1 +1,1 @@
-export {U16, codec} from "./bin/U16.js";
+export {U16, codec, fromInteger} from "./bin/U16.js";

@@ -12,3 +12,7 @@ export const codec: Codec<U8> = {
         return writer.writeU8(value);
     },
 };
+
+export function fromInteger(n: bigint): U8 {
+    return Number(n) & 0xFF;
+}

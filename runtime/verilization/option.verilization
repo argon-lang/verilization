@@ -1,3 +1,8 @@
 version 1;
 
-extern option(A) {}
+extern option(A) {
+    literal {
+        case some(A);
+        case none();
+    }
+}

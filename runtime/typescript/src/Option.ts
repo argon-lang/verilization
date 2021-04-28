@@ -4,6 +4,14 @@ import { Codec } from "./Codec.js";
 
 export type Option<A> = { readonly value: A; } | null;
 
+export function fromCaseSome<A>(value: A): Option<A> {
+    return { value };
+}
+
+export function fromCaseNone<A>(): Option<A> {
+    return null;
+}
+
 export function converter<A, B>(elementConverter: Converter<A, B>): Converter<Option<A>, Option<B>> {
     return {
         convert(prev: Option<A>): Option<B> {

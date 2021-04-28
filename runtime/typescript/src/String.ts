@@ -4,6 +4,10 @@ import { codec as natCodec } from "./Nat.js";
 
 export type String = string;
 
+export function fromString(s: string): string {
+    return s;
+}
+
 export const codec: Codec<string> = {
     async read(reader: FormatReader): Promise<string> {
         const length = await natCodec.read(reader);

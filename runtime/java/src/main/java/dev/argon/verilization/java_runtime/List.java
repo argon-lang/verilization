@@ -9,7 +9,15 @@ public abstract class List<A> {
     public abstract int size();
     public abstract A get(int index);
 
-
+    @SafeVarargs
+    public static <A> List<A> fromSequence(A... values) {
+        @SuppressWarnings("unchecked")
+        A[] copy = (A[])new Object[values.length];
+        for(int i = 0; i < values.length; ++i) {
+            copy[i] = values[i];
+        }
+        return new ObjectList<>(copy);
+    }
 
     public static <A, B> Converter<List<A>, List<B>> converter(Converter<A, B> elementConverter) {
         if(elementConverter instanceof IdentityConverter<?>) {

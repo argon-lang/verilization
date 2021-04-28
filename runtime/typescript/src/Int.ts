@@ -4,7 +4,7 @@ import { encodeVLQ, decodeVLQ } from "./VLQ.js";
 
 export type Int = bigint;
 
-export const int: Codec<Int> = {
+export const codec: Codec<Int> = {
     read(reader: FormatReader): Promise<Int> {
         return decodeVLQ(reader, true);
     },
@@ -13,3 +13,7 @@ export const int: Codec<Int> = {
         return encodeVLQ(writer, true, value);
     },
 };
+
+export function fromInteger(n: bigint): Int {
+    return n;
+}

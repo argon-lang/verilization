@@ -12,3 +12,7 @@ export const codec: Codec<U16> = {
         return writer.writeU16(value);
     },
 };
+
+export function fromInteger(n: bigint): U16 {
+    return Number(n) & 0xFFFF;
+}

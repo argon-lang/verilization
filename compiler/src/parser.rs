@@ -149,6 +149,18 @@ fn sym_close_paren(input: &str) -> PResult<&str, ()> {
 	Ok((input, ()))
 }
 
+fn sym_open_bracket(input: &str) -> PResult<&str, ()> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = char('[')(input)?;
+	Ok((input, ()))
+}
+
+fn sym_close_bracket(input: &str) -> PResult<&str, ()> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = char(']')(input)?;
+	Ok((input, ()))
+}
+
 
 fn dec_digit(input: &str) -> PResult<&str, u8> {
 	let (input, ch) = one_of("0123456789")(input)?;
@@ -271,6 +283,19 @@ fn type_expr(input: &str) -> PResult<&str, model::Type> {
 	Ok((input, model::Type::Defined(qual_name, args)))
 }
 
+fn sequence_literal(input: &str) -> PResult<&str, model::ConstantValue> {
+	let (input, _) = sym_open_bracket(input)?;
+	let (input, values) = opt(
+		terminated(
+			separated_list1(sym_comma, constant_value),
+			opt(sym_comma)
+		)
+	)(input)?;
+	let (input, _) = sym_close_bracket(input)?;
+
+	Ok((input, model::ConstantValue::Sequence(values.unwrap_or_else(|| Vec::new()))))
+}
+
 fn case_literal(input: &str) -> PResult<&str, model::ConstantValue> {
 	let (input, name) = identifier(input)?;
 	let (input, _) = sym_open_paren(input)?;
@@ -286,6 +311,7 @@ fn record_field_literal(input: &str) -> PResult<&str, (String, model::ConstantVa
 	let (input, name) = identifier(input)?;
 	let (input, _) = sym_eq(input)?;
 	let (input, value) = constant_value(input)?;
+	let (input, _) = sym_semicolon(input)?;
 	Ok((input, (name, value)))
 }
 
@@ -501,9 +527,9 @@ fn extern_literal_integer(input: &str) -> PResult<&str, model::ExternLiteralSpec
 	let (input, _) = multispace0(input)?;
 	let (input, open) = one_of("[(")(input)?;
 	let (input, _) = multispace0(input)?;
-	let (input, lower) = bigint(input)?;
+	let (input, lower) = opt(bigint)(input)?;
 	let (input, _) = sym_comma(input)?;
-	let (input, upper) = bigint(input)?;
+	let (input, upper) = opt(bigint)(input)?;
 	let (input, _) = multispace0(input)?;
 	let (input, close) = one_of("])")(input)?;
 
@@ -517,6 +543,15 @@ fn extern_literal_string(input: &str) -> PResult<&str, model::ExternLiteralSpeci
 	let (input, _) = tag("string")(input)?;
 
 	Ok((input, model::ExternLiteralSpecifier::String))
+}
+
+fn extern_literal_sequence(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = tag("sequence")(input)?;
+	let (input, _) = multispace1(input)?;
+	let (input, element_type) = type_expr(input)?;
+
+	Ok((input, model::ExternLiteralSpecifier::Sequence(element_type)))
 }
 
 
@@ -543,7 +578,8 @@ fn extern_literal_record(input: &str) -> PResult<&str, model::ExternLiteralSpeci
 }
 
 fn extern_literal(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
-	let (input, literal) = alt((extern_literal_integer, extern_literal_string, extern_literal_case, extern_literal_record))(input)?;
+	let (input, literal) = alt((extern_literal_integer, extern_literal_string, extern_literal_sequence, extern_literal_case, extern_literal_record))(input)?;
+	let (input, _) = sym_semicolon(input)?;
 
 	Ok((input, literal))
 }

@@ -5,6 +5,10 @@ import java.io.IOException;
 public final class I8 {
     private I8() {}
 
+    public static byte fromInteger(int i) {
+        return (byte)i;
+    }
+
     public static final Codec<Byte> codec = new Codec<Byte>() {
         @Override
         public Byte read(FormatReader reader) throws IOException {

@@ -6,6 +6,14 @@ import java.io.IOException;
 public final class Option {
     private Option() {}
 
+    public static <A> Optional<A> fromCaseSome(A value) {
+        return Optional.of(value);
+    }
+
+    public static <A> Optional<A> fromCaseNone() {
+        return Optional.empty();
+    }
+
     public static <A, B> Converter<Optional<A>, Optional<B>> converter(Converter<A, B> elementConverter) {
         return prev -> prev.map(elementConverter::convert);
     }
