@@ -1,18 +1,13 @@
-use crate::model::{
-    Type,
-    QualifiedName,
-    Verilization,
-    NamedTypeDefinition,
-    Scope,
-    ScopeLookup,
-};
+use crate::model::*;
 use num_bigint::BigUint;
 
 #[derive(Debug)]
 pub enum TypeCheckError {
     TypeNotDefined(QualifiedName),
     TypeAddedInNewerVersion(QualifiedName, BigUint),
+    CouldNotFindLastVersion(QualifiedName),
     ArityMismatch(usize, usize),
+    TypeNotFinal(QualifiedName),
 }
 
 struct TypeCheck<'model> {
@@ -56,28 +51,86 @@ impl <'model> TypeCheck<'model> {
             },
         }
     }
+
+    fn check_is_final(&self, t: &Type, version: &BigUint) -> Result<bool, TypeCheckError> {
+        Ok(match t {
+            Type::Defined(name, args) => {
+                match self.scope.lookup(name.clone()) {
+                    ScopeLookup::NamedType(name) => {
+                        match self.model.get_type(&name).ok_or_else(|| TypeCheckError::TypeNotDefined(name.clone()))? {
+                            NamedTypeDefinition::StructType(type_def) | NamedTypeDefinition::EnumType(type_def) => {
+                                if !type_def.is_final() {
+                                    return Ok(false);
+                                }
+                                
+                                if !(type_def.last_explicit_version().ok_or_else(|| TypeCheckError::CouldNotFindLastVersion(name.clone()))? <= version) {
+                                    return Ok(false);
+                                }
+                            },
+    
+                            NamedTypeDefinition::ExternType(_) => (),
+                        }
+    
+                        for arg in args {
+                            if !self.check_is_final(arg, version)? {
+                                return Ok(false);
+                            }
+                        }
+    
+                        true
+                    },
+                    ScopeLookup::TypeParameter(_) => true,
+                }
+            },
+        })
+    }
     
 }
 
+fn type_check_versioned_type<'model>(model: &'model Verilization, t: Named<'model, VersionedTypeDefinitionData>) -> Result<(), TypeCheckError> {
+    let tc = TypeCheck {
+        model: model,
+        scope: t.scope(),
+    };
+
+    for ver in t.versions() {
+        for (_, field) in &ver.ver_type.fields {
+            tc.check_type(&ver.version, &field.field_type)?;
+        }
+    }
+
+    if t.is_final() {
+        if let Some(last_ver) = t.versions().last() {
+            let args = t.type_params().iter().map(|param| Type::Defined(QualifiedName::from_parts(&[], &param), vec!())).collect::<Vec<_>>();
+
+            for (_, field) in &last_ver.ver_type.fields {
+                if !tc.check_is_final(&field.field_type, &last_ver.version)? {
+                    return Err(TypeCheckError::TypeNotFinal(t.name().clone()))
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn type_check_extern_type<'model>(model: &'model Verilization, t: Named<'model, ExternTypeDefinitionData>) -> Result<(), TypeCheckError> {
+    let tc = TypeCheck {
+        model: model,
+        scope: t.scope(),
+    };
+
+
+
+    Ok(())
+}
 
 pub fn type_check_verilization(model: &Verilization) -> Result<(), TypeCheckError> {
     
     for t in model.types() {
-        let t = match t {
-            NamedTypeDefinition::StructType(t) => t,
-            NamedTypeDefinition::EnumType(t) => t,
-            NamedTypeDefinition::ExternType(_) => continue,
-        };
-
-        let tc = TypeCheck {
-            model: model,
-            scope: t.scope(),
-        };
-
-        for ver in t.versions() {
-            for (_, field) in &ver.ver_type.fields {
-                tc.check_type(&ver.version, &field.field_type)?;
-            }
+        match t {
+            NamedTypeDefinition::StructType(t) | NamedTypeDefinition::EnumType(t) => type_check_versioned_type(model, t)?,
+            NamedTypeDefinition::ExternType(t) => type_check_extern_type(model, t)?,
         }
     }
 
