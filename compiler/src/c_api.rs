@@ -18,7 +18,7 @@ impl APIString {
         let ptr = verilization_mem_alloc(std::mem::size_of::<APIString>() + s.len());
         let api_str = ptr as *mut APIString;
         (*api_str).length = s.len();
-        std::ptr::copy_nonoverlapping(s.as_ptr(), &mut (*api_str).data as *mut u8, s.len());
+        std::ptr::copy_nonoverlapping(s.as_ptr(), (*api_str).data.as_mut_ptr(), s.len());
         api_str
     }
 
@@ -64,7 +64,7 @@ impl OutputFileMap {
         let ptr = verilization_mem_alloc(std::mem::size_of::<OutputFileMap>() + map.len() * std::mem::size_of::<OutputFileEntry>()) as *mut OutputFileMap;
         (*ptr).length = map.len();
 
-        let entries = std::slice::from_raw_parts_mut(&mut (*ptr).entries as *mut OutputFileEntry, map.len());
+        let entries = std::slice::from_raw_parts_mut((*ptr).entries.as_mut_ptr(), map.len());
         for (index, (name, data)) in map.iter().enumerate() {
             let entry: &mut OutputFileEntry = &mut entries[index];
             entry.name = APIString::allocate(name);
@@ -185,7 +185,7 @@ unsafe fn verilization_generate_impl(verilization: *const model::Verilization, l
     Ok(OutputFileMap::allocate(&output.files))
 }
 
-unsafe fn verilization_generate_lang<Lang: lang::Language, Output: lang::OutputHandler>(verilization: &model::Verilization, options: &[LanguageOption], output: &mut Output) -> Result<(), GeneratorError> {
+unsafe fn verilization_generate_lang<Lang: lang::Language, Output: for<'output> lang::OutputHandler<'output>>(verilization: &model::Verilization, options: &[LanguageOption], output: &mut Output) -> Result<(), GeneratorError> {
     let mut lang_options = Lang::empty_options();
     for option in options {
         let name = option.name.as_ref().ok_or("Option name is null")?.to_str().ok_or("Invalid option name text")?;

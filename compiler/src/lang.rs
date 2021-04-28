@@ -66,9 +66,9 @@ impl From<TypeCheckError> for GeneratorError {
 }
 
 
-pub trait OutputHandler {
-	type FileHandle<'state> : io::Write;
-	fn create_file<'state, P: AsRef<Path>>(&'state mut self, path: P) -> Result<Self::FileHandle<'state>, GeneratorError>;
+pub trait OutputHandler<'state> {
+	type FileHandle : io::Write;
+	fn create_file<P: AsRef<Path>>(&'state mut self, path: P) -> Result<Self::FileHandle, GeneratorError>;
 }
 
 
@@ -80,7 +80,7 @@ pub trait Language {
 	fn add_option(builder: &mut Self::OptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError>;
 	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError>;
 	
-	fn generate<Output: OutputHandler>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError>;
+	fn generate<Output: for<'output> OutputHandler<'output>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError>;
 
 }
 

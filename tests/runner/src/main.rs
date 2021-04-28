@@ -1,8 +1,6 @@
-#![feature(generic_associated_types)]
-
 use verilization_test_runner::*;
 
-use verilization_compiler::{lang, file_output_handler};
+use verilization_compiler::{lang, file_output_handler, type_check};
 use lang::GeneratorError;
 
 use test_lang::{TestLanguage, TestGenerator};

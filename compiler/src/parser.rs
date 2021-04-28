@@ -1,6 +1,6 @@
 use crate::model;
 use num_bigint::{ BigUint, BigInt, Sign };
-use num_traits::{Zero, One};
+use num_traits::Zero;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 
@@ -363,6 +363,7 @@ fn constant_value(input: &str) -> PResult<&str, model::ConstantValue> {
 	alt((
 		map(bigint, model::ConstantValue::Integer),
 		map(string_literal, model::ConstantValue::String),
+		sequence_literal,
 		case_literal,
 		record_literal,
 		other_constant,

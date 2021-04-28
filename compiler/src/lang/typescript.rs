@@ -22,7 +22,7 @@ pub struct TSOptions {
 }
 
 
-fn open_ts_file<'output, Output: OutputHandler>(options: &TSOptions, output: &'output mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle<'output>, GeneratorError> {
+fn open_ts_file<'output, Output: OutputHandler<'output>>(options: &TSOptions, output: &'output mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle, GeneratorError> {
 	let pkg_dir = options.package_mapping.get(&name.package).ok_or(format!("Unmapped package: {}", name.package))?;
 	let mut path = PathBuf::from(&options.output_dir);
 	path.push(pkg_dir);
@@ -350,15 +350,15 @@ fn current_dir_of_name<'model, Gen: TSGenerator<'model>>(gen: &Gen, name: &model
 
 
 
-struct TSConstGenerator<'model, 'opt, 'output, Output: OutputHandler> {
-	file: Output::FileHandle<'output>,
+struct TSConstGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>> {
+	file: Output::FileHandle,
 	model: &'model model::Verilization,
 	options: &'opt TSOptions,
 	constant: Named<'model, model::Constant>,
 	scope: model::Scope<'model>,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> Generator<'model, TypeScriptLanguage> for TSConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model, TypeScriptLanguage> for TSConstGenerator<'model, 'opt, 'output, Output> {
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -368,14 +368,14 @@ impl <'model, 'opt, 'output, Output: OutputHandler> Generator<'model, TypeScript
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> GeneratorWithFile for TSConstGenerator<'model, 'opt, 'output, Output> {
-	type GeneratorFile = Output::FileHandle<'output>;
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> GeneratorWithFile for TSConstGenerator<'model, 'opt, 'output, Output> {
+	type GeneratorFile = Output::FileHandle;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> TSGenerator<'model> for TSConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSGenerator<'model> for TSConstGenerator<'model, 'opt, 'output, Output> {
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName> {
 		Some(self.constant.name())
 	}
@@ -393,7 +393,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler> TSGenerator<'model> for TSCo
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> ConstGenerator<'model, TypeScriptLanguage> for TSConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'model, TypeScriptLanguage> for TSConstGenerator<'model, 'opt, 'output, Output> {
 	fn constant(&self) -> Named<'model, model::Constant> {
 		self.constant
 	}
@@ -419,7 +419,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler> ConstGenerator<'model, TypeS
 
 
 
-impl <'model, 'opt, 'output, Output: OutputHandler> TSConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSConstGenerator<'model, 'opt, 'output, Output> {
 
 	fn open(model: &'model model::Verilization, options: &'opt TSOptions, output: &'output mut Output, constant: Named<'model, model::Constant>) -> Result<Self, GeneratorError> {
 		let file = open_ts_file(options, output, constant.name())?;
@@ -434,8 +434,8 @@ impl <'model, 'opt, 'output, Output: OutputHandler> TSConstGenerator<'model, 'op
 
 }
 
-struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler, Extra> {
-	file: Output::FileHandle<'output>,
+struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> {
+	file: Output::FileHandle,
 	model: &'model model::Verilization,
 	options: &'opt TSOptions,
 	type_def: Named<'model, model::VersionedTypeDefinitionData>,
@@ -445,7 +445,7 @@ struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler, Extra> {
 	_extra: Extra,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, Extra> Generator<'model, TypeScriptLanguage> for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'model, TypeScriptLanguage> for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -455,20 +455,20 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra> Generator<'model, Typ
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, Extra> GeneratorWithFile for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
-	type GeneratorFile = Output::FileHandle<'output>;
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> GeneratorWithFile for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+	type GeneratorFile = Output::FileHandle;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, Extra> Indentation for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Indentation for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
 	fn indentation_size(&mut self) -> &mut u32 {
 		&mut self.indentation_level
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, Extra> TSGenerator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> TSGenerator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName> {
 		Some(self.type_def.name())
 	}
@@ -490,7 +490,7 @@ trait TSExtraGeneratorOps {
 	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError>;
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> VersionedTypeGenerator<'model, TypeScriptLanguage, GenTypeKind> for TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, TypeScriptLanguage, GenTypeKind> for TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
 	where TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : TSExtraGeneratorOps
 {
 	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
@@ -587,7 +587,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> VersionedTypeGe
 
 
 
-impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> where TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : TSExtraGeneratorOps {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> where TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : TSExtraGeneratorOps {
 
 	fn open(model: &'model model::Verilization, options: &'opt TSOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> where GenTypeKind : Default {
 		let file = open_ts_file(options, output, type_def.name())?;
@@ -787,7 +787,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> TSTypeGenerator
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> TSExtraGeneratorOps for TSTypeGenerator<'model, 'opt, 'output, Output, GenStructType> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSExtraGeneratorOps for TSTypeGenerator<'model, 'opt, 'output, Output, GenStructType> {
 	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
 		write!(self.file, "export interface V{}", ver_type.version)?;
 		self.write_type_params(self.type_def().type_params())?;
@@ -805,7 +805,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler> TSExtraGeneratorOps for TSTy
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> TSExtraGeneratorOps for TSTypeGenerator<'model, 'opt, 'output, Output, GenEnumType> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSExtraGeneratorOps for TSTypeGenerator<'model, 'opt, 'output, Output, GenEnumType> {
 	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
 		write!(self.file, "export type V{}", ver_type.version)?;
 		self.write_type_params(self.type_def().type_params())?;
@@ -890,7 +890,7 @@ impl Language for TypeScriptLanguage {
 		})
 	}
 
-	fn generate<Output: OutputHandler>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
+	fn generate<Output: for<'output> OutputHandler<'output>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
 		for constant in model.constants() {
 			if options.library_mapping.contains_key(&constant.name().package) {
 				continue;

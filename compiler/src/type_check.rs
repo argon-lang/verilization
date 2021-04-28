@@ -104,8 +104,6 @@ fn type_check_versioned_type<'model>(model: &'model Verilization, t: Named<'mode
 
     if t.is_final() {
         if let Some(last_ver) = t.versions().last() {
-            let args = t.type_params().iter().map(|param| Type::Defined(QualifiedName::from_parts(&[], &param), vec!())).collect::<Vec<_>>();
-
             for (_, field) in &last_ver.ver_type.fields {
                 if !tc.check_is_final(&field.field_type, &last_ver.version)? {
                     return Err(TypeCheckError::TypeNotFinal(t.name().clone()))
@@ -135,7 +133,7 @@ fn type_check_extern_type<'model>(model: &'model Verilization, t: Named<'model, 
             ExternLiteralSpecifier::Integer(_, _, _, _) => has_integer = true,
             ExternLiteralSpecifier::String if has_string => return Err(TypeCheckError::DuplicateLiteral(t.name().clone())),
             ExternLiteralSpecifier::String => has_string = true,
-            ExternLiteralSpecifier::Sequence(inner) if has_sequence => return Err(TypeCheckError::DuplicateLiteral(t.name().clone())),
+            ExternLiteralSpecifier::Sequence(_) if has_sequence => return Err(TypeCheckError::DuplicateLiteral(t.name().clone())),
             ExternLiteralSpecifier::Sequence(inner) => {
                 has_sequence = true;
                 tc.check_type(&BigUint::one(), inner)?;
@@ -149,7 +147,9 @@ fn type_check_extern_type<'model>(model: &'model Verilization, t: Named<'model, 
                     tc.check_type(&BigUint::one(), param)?;
                 }
             },
+            ExternLiteralSpecifier::Record(_) if has_record => return Err(TypeCheckError::DuplicateLiteral(t.name().clone())),
             ExternLiteralSpecifier::Record(fields) => {
+                has_record = true;
                 for (_, field) in fields {
                     tc.check_type(&BigUint::one(), &field.field_type)?;
                 }

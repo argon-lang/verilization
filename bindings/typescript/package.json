@@ -8,7 +8,7 @@
     ".": "./bin/index.js"
   },
   "scripts": {
-    "build-wasm": "cd ../../compiler && cargo +nightly build --lib --release --target wasm32-unknown-unknown",
+    "build-wasm": "cd ../../compiler && cargo build --lib --release --target wasm32-unknown-unknown",
     "build": "npm run build-wasm && mkdirp bin && cpy ../../compiler/target/wasm32-unknown-unknown/release/verilization_compiler.wasm bin/ && tsc --project tsconfig.json"
   },
   "devDependencies": {

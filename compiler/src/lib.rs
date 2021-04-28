@@ -1,5 +1,3 @@
-#![feature(generic_associated_types)]
-
 mod util;
 pub mod model;
 mod parser;

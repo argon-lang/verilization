@@ -60,6 +60,10 @@ impl TestLanguage for lang::typescript::TypeScriptLanguage {
             command.arg(format!("-o:pkg:{}", pkg));
             command.arg(dir);
         }
+        for (pkg, dir) in &options.library_mapping {
+            command.arg(format!("-o:lib:{}", pkg));
+            command.arg(dir);
+        }
     }
     
     fn test_command() -> Command {
@@ -119,6 +123,14 @@ impl TestLanguage for lang::java::JavaLanguage {
             command.arg(format!("-o:pkg:{}", pkg));
             command.arg(format!("{}", java_pkg));
         }
+        for (pkg, java_pkg) in &options.library_mapping {
+            command.arg(format!("-o:lib:{}", pkg));
+            command.arg(format!("{}", java_pkg));
+        }
+        for (extern_name, mapped) in &options.extern_mapping {
+            command.arg(format!("-o:extern:{}", extern_name));
+            command.arg(format!("{}", mapped));
+        }
     }
 
     fn test_command() -> Command {
@@ -160,6 +172,10 @@ impl TestLanguage for lang::scala::ScalaLanguage {
         command.arg(&options.output_dir);
         for (pkg, scala_pkg) in &options.package_mapping {
             command.arg(format!("-o:pkg:{}", pkg));
+            command.arg(format!("{}", scala_pkg));
+        }
+        for (pkg, scala_pkg) in &options.library_mapping {
+            command.arg(format!("-o:lib:{}", pkg));
             command.arg(format!("{}", scala_pkg));
         }
     }

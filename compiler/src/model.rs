@@ -2,7 +2,6 @@ use num_bigint::{ BigUint, BigInt };
 use num_traits::{Zero, One};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::iter::FromIterator;
 use std::cmp::{Ord, Ordering, PartialEq, PartialOrd};
 use lazy_static::lazy_static;
 use std::marker::PhantomData;

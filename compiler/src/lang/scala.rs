@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
-use num_bigint::{BigUint, BigInt, Sign};
+use num_bigint::BigUint;
 use super::generator::*;
 use crate::util::{capitalize_identifier, uncapitalize_identifier};
 use num_traits::ToPrimitive;
@@ -51,7 +51,7 @@ fn scala_package_impl<'a>(options: &'a ScalaOptions, package: &model::PackageNam
 
 
 
-fn open_scala_file<'output, Output: OutputHandler>(options: &ScalaOptions, output: &'output mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle<'output>, GeneratorError> {
+fn open_scala_file<'output, Output: OutputHandler<'output>>(options: &ScalaOptions, output: &'output mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle, GeneratorError> {
 	let java_pkg = scala_package_impl(options, &name.package)?;
 	let mut path = PathBuf::from(&options.output_dir);
     for part in &java_pkg.package {
@@ -319,15 +319,15 @@ impl <'model, 'opt, TImpl> GeneratorNameMapping<ScalaLanguage> for TImpl where T
 	}
 }
 
-struct ScalaConstGenerator<'model, 'opt, 'output, Output: OutputHandler> {
-	file: Output::FileHandle<'output>,
+struct ScalaConstGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>> {
+	file: Output::FileHandle,
 	model: &'model model::Verilization,
 	options: &'opt ScalaOptions,
 	constant: Named<'model, model::Constant>,
 	scope: model::Scope<'model>,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> Generator<'model, ScalaLanguage> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model, ScalaLanguage> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -337,14 +337,14 @@ impl <'model, 'opt, 'output, Output: OutputHandler> Generator<'model, ScalaLangu
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> GeneratorWithFile for ScalaConstGenerator<'model, 'opt, 'output, Output> {
-	type GeneratorFile = Output::FileHandle<'output>;
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> GeneratorWithFile for ScalaConstGenerator<'model, 'opt, 'output, Output> {
+	type GeneratorFile = Output::FileHandle;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> ScalaGenerator<'model, 'opt> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaGenerator<'model, 'opt> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
 	fn options(&self) -> &'opt ScalaOptions {
 		self.options
 	}
@@ -354,7 +354,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler> ScalaGenerator<'model, 'opt>
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler> ConstGenerator<'model, ScalaLanguage> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'model, ScalaLanguage> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
 	fn constant(&self) -> Named<'model, model::Constant> {
 		self.constant
 	}
@@ -384,7 +384,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler> ConstGenerator<'model, Scala
 }
 
 
-impl <'model, 'opt, 'output, Output: OutputHandler> ScalaConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaConstGenerator<'model, 'opt, 'output, Output> {
 
 	fn open(model: &'model model::Verilization, options: &'opt ScalaOptions, output: &'output mut Output, constant: Named<'model, model::Constant>) -> Result<Self, GeneratorError> {
 		let file = open_scala_file(options, output, constant.name())?;
@@ -399,10 +399,10 @@ impl <'model, 'opt, 'output, Output: OutputHandler> ScalaConstGenerator<'model, 
 
 }
 
-struct ScalaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler, Extra> {
+struct ScalaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> {
 	options: &'opt ScalaOptions,
 	model: &'model model::Verilization,
-	file: Output::FileHandle<'output>,
+	file: Output::FileHandle,
 	type_def: Named<'model, model::VersionedTypeDefinitionData>,
 	scope: model::Scope<'model>,
 	indentation_level: u32,
@@ -414,7 +414,7 @@ trait ScalaExtraGeneratorOps {
 	fn write_versioned_type_object_data(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError>;
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, Extra> Generator<'model, ScalaLanguage> for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'model, ScalaLanguage> for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -424,20 +424,20 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra> Generator<'model, Sca
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, Extra> GeneratorWithFile for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
-	type GeneratorFile = Output::FileHandle<'output>;
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> GeneratorWithFile for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+	type GeneratorFile = Output::FileHandle;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, Extra> Indentation for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Indentation for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
 	fn indentation_size(&mut self) -> &mut u32 {
 		&mut self.indentation_level
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, Extra> ScalaGenerator<'model, 'opt> for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> ScalaGenerator<'model, 'opt> for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
 	fn options(&self) -> &'opt ScalaOptions {
 		self.options
 	}
@@ -447,7 +447,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra> ScalaGenerator<'model
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> VersionedTypeGenerator<'model, ScalaLanguage, GenTypeKind> for ScalaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, ScalaLanguage, GenTypeKind> for ScalaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
 	where ScalaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : ScalaExtraGeneratorOps
 {
 	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
@@ -524,7 +524,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler, GenTypeKind> VersionedTypeGe
 
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler, Extra> ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> where ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> : ScalaExtraGeneratorOps {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> where ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> : ScalaExtraGeneratorOps {
 
 
 	fn open(model: &'model model::Verilization, options: &'opt ScalaOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> where Extra : Default {
@@ -841,7 +841,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler, Extra> ScalaTypeGenerator<'m
 	}
 }
 
-impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorOps for ScalaTypeGenerator<'model, 'opt, 'state, Output, GenStructType> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaExtraGeneratorOps for ScalaTypeGenerator<'model, 'opt, 'output, Output, GenStructType> {
 
 	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
 		self.write_indent()?;
@@ -869,7 +869,7 @@ impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorO
 	}
 }
 
-impl <'model, 'opt, 'output, 'state, Output: OutputHandler> ScalaExtraGeneratorOps for ScalaTypeGenerator<'model, 'opt, 'state, Output, GenEnumType> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaExtraGeneratorOps for ScalaTypeGenerator<'model, 'opt, 'output, Output, GenEnumType> {
 	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
 		self.write_indent()?;
 		write!(self.file, "sealed abstract class V{}", ver_type.version)?;
@@ -952,7 +952,7 @@ impl Language for ScalaLanguage {
 		})
 	}
 
-	fn generate<Output: OutputHandler>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
+	fn generate<Output: for<'output> OutputHandler<'output>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
 		for constant in model.constants() {
 			let mut const_gen = ScalaConstGenerator::open(model, &options, output, constant)?;
 			const_gen.generate()?;

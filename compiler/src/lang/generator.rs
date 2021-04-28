@@ -130,7 +130,7 @@ fn requires_conversion<'model, Lang, G: Generator<'model, Lang>>(gen: &G, t: &mo
 	match t {
 		model::Type::Defined(name, args) => match gen.scope().lookup(name.clone()) {
 			model::ScopeLookup::NamedType(name) => match gen.model().get_type(&name) {
-				Some(model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def)) => {
+				Some(model::NamedTypeDefinition::StructType(type_def)) | Some(model::NamedTypeDefinition::EnumType(type_def)) => {
 					!type_def.is_final() ||
 						(match type_def.last_explicit_version() {
 							Some(last_ver) => last_ver > prev_ver,
@@ -321,9 +321,10 @@ pub trait ConstGenerator<'model, Lang> : Generator<'model, Lang> {
 
 	fn constant_invoke_operation(&self, op: Operation, values: Vec<LangExpr<'model>>, version: &BigUint, t: &model::Type) -> Result<LangExpr<'model>, GeneratorError> {
 		match t {
-			model::Type::Defined(name, args) => match self.scope().lookup(name.clone()) {
+			model::Type::Defined(name, type_args) => match self.scope().lookup(name.clone()) {
 				model::ScopeLookup::NamedType(name) => {
 					let named_type_def = self.model().get_type(&name).ok_or("Could not find type")?;
+					let lang_type_args = type_args.iter().map(|arg| self.build_type(version, arg)).collect::<Result<Vec<_>, _>>()?;
 
 					let target = match named_type_def {
 						model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
@@ -335,7 +336,7 @@ pub trait ConstGenerator<'model, Lang> : Generator<'model, Lang> {
 							OperationTarget::ExternType(named_type_def.name()),
 					};
 
-					Ok(LangExpr::InvokeOperation(op, target, Vec::new(), values))
+					Ok(LangExpr::InvokeOperation(op, target, lang_type_args, values))
 				},
 
 				model::ScopeLookup::TypeParameter(_) => Err(GeneratorError::from("Cannot create constant for type parameter")),
@@ -411,7 +412,7 @@ pub trait ConstGenerator<'model, Lang> : Generator<'model, Lang> {
 								);
 			
 								match named_type_def {
-									model::NamedTypeDefinition::StructType(type_def) => return Err(GeneratorError::from("Cannot use case syntax for struct literal")),
+									model::NamedTypeDefinition::StructType(_) => return Err(GeneratorError::from("Cannot use case syntax for struct literal")),
 									model::NamedTypeDefinition::EnumType(type_def) => {
 										match &args[..] {
 											[arg] => {
@@ -488,7 +489,7 @@ pub trait ConstGenerator<'model, Lang> : Generator<'model, Lang> {
 
 										LangExpr::CreateStruct(named_type_def.name(), ver_type.version.clone(), lang_type_args, args)
 									},
-									model::NamedTypeDefinition::EnumType(type_def) => return Err(GeneratorError::from("Cannot use record syntax for enum literal")),
+									model::NamedTypeDefinition::EnumType(_) => return Err(GeneratorError::from("Cannot use record syntax for enum literal")),
 			
 									model::NamedTypeDefinition::ExternType(type_def) => {
 										let record_fields = type_def.literals()
