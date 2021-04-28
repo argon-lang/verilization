@@ -273,15 +273,9 @@ fn type_expr(input: &str) -> PResult<&str, model::Type> {
 
 fn case_literal(input: &str) -> PResult<&str, model::ConstantValue> {
 	let (input, name) = identifier(input)?;
-	let (input, args) = opt(
-		preceded(
-			sym_open_paren,
-			terminated(
-				separated_list1(sym_comma, constant_value),
-				sym_close_paren,
-			),
-		)
-	)(input)?;
+	let (input, _) = sym_open_paren(input)?;
+	let (input, args) = opt(separated_list1(sym_comma, constant_value))(input)?;
+	let (input, _) = sym_close_paren(input)?;
 
 	let args = args.unwrap_or_else(|| Vec::new());
 
@@ -315,12 +309,37 @@ fn record_literal(input: &str) -> PResult<&str, model::ConstantValue> {
 	Ok((input, model::ConstantValue::Record(field_map)))
 }
 
+fn other_constant(input: &str) -> PResult<&str, model::ConstantValue> {
+	let (input, parts) = separated_list1(sym_dot, identifier)(input)?;
+
+	let mut iter = parts.into_iter();
+
+	let mut package = Vec::new();
+	let mut name = iter.next().unwrap();
+
+	while let Some(part) = iter.next() {
+		package.push(name);
+		name = part;
+	}
+
+	Ok((input, model::ConstantValue::Constant(
+		model::QualifiedName {
+			package: model::PackageName {
+				package: package,
+			},
+			name: name
+		}
+	)))
+}
+
+
 fn constant_value(input: &str) -> PResult<&str, model::ConstantValue> {
 	alt((
 		map(bigint, model::ConstantValue::Integer),
 		map(string_literal, model::ConstantValue::String),
 		case_literal,
 		record_literal,
+		other_constant,
 	))(input)
 }
 
