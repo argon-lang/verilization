@@ -11,7 +11,7 @@ use nom::{
 	character::complete::{multispace0, multispace1, alphanumeric1, one_of, none_of, char},
 	combinator::{map, opt, eof, value},
 	bytes::complete::tag,
-	sequence::preceded,
+	sequence::{preceded, terminated},
 	error::{ParseError, ErrorKind},
 };
 
@@ -20,6 +20,7 @@ pub enum PErrorType<I> {
 	ParseError(I, ErrorKind),
 	DuplicateVersion(I, String, BigUint),
 	DuplicateField(I, BigUint, String),
+	DuplicateFieldValue,
 	DuplicateConstant(model::QualifiedName),
 	DuplicateType(model::QualifiedName),
 }
@@ -108,13 +109,6 @@ fn sym_colon(input: &str) -> PResult<&str, ()> {
 
 fn sym_dot(input: &str) -> PResult<&str, ()> {
 	let (input, _) = multispace0(input)?;
-	let (input, _) = char('.')(input)?;
-	Ok((input, ()))
-}
-
-fn sym_dotdot(input: &str) -> PResult<&str, ()> {
-	let (input, _) = multispace0(input)?;
-	let (input, _) = char('.')(input)?;
 	let (input, _) = char('.')(input)?;
 	Ok((input, ()))
 }
@@ -277,10 +271,56 @@ fn type_expr(input: &str) -> PResult<&str, model::Type> {
 	Ok((input, model::Type::Defined(qual_name, args)))
 }
 
+fn case_literal(input: &str) -> PResult<&str, model::ConstantValue> {
+	let (input, name) = identifier(input)?;
+	let (input, args) = opt(
+		preceded(
+			sym_open_paren,
+			terminated(
+				separated_list1(sym_comma, constant_value),
+				sym_close_paren,
+			),
+		)
+	)(input)?;
+
+	let args = args.unwrap_or_else(|| Vec::new());
+
+	Ok((input, model::ConstantValue::Case(name, args)))
+}
+
+fn record_field_literal(input: &str) -> PResult<&str, (String, model::ConstantValue)> {
+	let (input, name) = identifier(input)?;
+	let (input, _) = sym_eq(input)?;
+	let (input, value) = constant_value(input)?;
+	Ok((input, (name, value)))
+}
+
+fn record_literal(input: &str) -> PResult<&str, model::ConstantValue> {
+	let (input, _) = sym_open_curly(input)?;
+
+	let (input, fields) = many0(record_field_literal)(input)?;
+
+	let (input, _) = sym_close_curly(input)?;
+
+
+	let mut field_map = HashMap::new();
+	for (name, value) in fields {
+		if field_map.contains_key(&name) {
+			return Err(nom::Err::Failure(PErrorType::DuplicateFieldValue));
+		}
+
+		field_map.insert(name, value);
+	}
+
+	Ok((input, model::ConstantValue::Record(field_map)))
+}
+
 fn constant_value(input: &str) -> PResult<&str, model::ConstantValue> {
 	alt((
 		map(bigint, model::ConstantValue::Integer),
 		map(string_literal, model::ConstantValue::String),
+		case_literal,
+		record_literal,
 	))(input)
 }
 
@@ -443,7 +483,7 @@ fn extern_literal_integer(input: &str) -> PResult<&str, model::ExternLiteralSpec
 	let (input, open) = one_of("[(")(input)?;
 	let (input, _) = multispace0(input)?;
 	let (input, lower) = bigint(input)?;
-	let (input, _) = sym_dotdot(input)?;
+	let (input, _) = sym_comma(input)?;
 	let (input, upper) = bigint(input)?;
 	let (input, _) = multispace0(input)?;
 	let (input, close) = one_of("])")(input)?;
@@ -464,11 +504,12 @@ fn extern_literal_string(input: &str) -> PResult<&str, model::ExternLiteralSpeci
 fn extern_literal_case(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
 	let (input, _) = multispace0(input)?;
 	let (input, _) = tag("case")(input)?;
+	let (input, name) = identifier(input)?;
 	let (input, _) = sym_open_paren(input)?;
 	let (input, params) = separated_list0(sym_comma, type_expr)(input)?;
 	let (input, _) = sym_close_paren(input)?;
 
-	Ok((input, model::ExternLiteralSpecifier::Case(params)))
+	Ok((input, model::ExternLiteralSpecifier::Case(name, params)))
 }
 
 
@@ -523,6 +564,7 @@ fn extern_type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinit
 	let (input, _) = sym_close_curly(input)?;
 
 	Ok((input, (name, TopLevelDefinition::Type(model::TypeDefinition::ExternType(model::ExternTypeDefinitionData {
+		imports: HashMap::new(),
 		type_params: type_params,
 		literals: literals,
 	})))))

@@ -186,6 +186,8 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 			Operation::TypeCodec => write!(self.file(), "codec")?,
 			Operation::FromInteger => write!(self.file(), "fromInteger")?,
 			Operation::FromString => write!(self.file(), "fromString")?,
+			Operation::FromRecord(_) => write!(self.file(), "fromRecord")?,
+			Operation::FromCase(name) => write!(self.file(), "fromCase{}", make_type_name(name))?,
 		}
 
 		Ok(())
@@ -253,9 +255,20 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 					},
 				}
 				self.write_operation_name(op)?;
-
 				self.write_type_args(type_args)?;
-				self.write_args(args)?;
+
+				match op {
+					Operation::FromRecord(field_names) => {
+						write!(self.file(), "({{ ")?;
+						for (field_name, arg) in field_names.iter().zip(args.iter()) {
+							write!(self.file(), "{}: ", make_field_name(field_name))?;
+							self.write_expr(arg)?;
+							write!(self.file(), ", ")?;
+						}
+						write!(self.file(), "}})")?;
+					},
+					_ => self.write_args(args)?,
+				}
 			},
 			LangExpr::InvokeUserConverter { name: _, prev_ver, version, type_args, args } => {
 				write!(self.file(), "v{}_to_v{}", prev_ver, version)?;

@@ -194,8 +194,8 @@ impl <'a, A> Named<'a, A> {
 pub enum ConstantValue {
 	Integer(BigInt),
 	String(String),
-	//Case(Vec<ConstantValue>),
-	//Record(HashMap<String, ConstantValue>),
+	Case(String, Vec<ConstantValue>),
+	Record(HashMap<String, ConstantValue>),
 	Constant(QualifiedName),
 }
 
@@ -357,6 +357,7 @@ impl <'a> Named<'a, VersionedTypeDefinitionData> {
 
 #[derive(Debug)]
 pub struct ExternTypeDefinitionData {
+	pub(crate) imports: HashMap<String, ScopeLookup>,
 	pub(crate) type_params: Vec<String>,
 	pub(crate) literals: Vec<ExternLiteralSpecifier>,
 }
@@ -371,8 +372,27 @@ pub enum ExternLiteralIntBound {
 pub enum ExternLiteralSpecifier {
 	Integer(ExternLiteralIntBound, BigInt, ExternLiteralIntBound, BigInt),
 	String,
-	Case(Vec<Type>),
+	Case(String, Vec<Type>),
 	Record(Vec<(String, FieldInfo)>),
+}
+
+impl <'a> Named<'a, ExternTypeDefinitionData> {
+	pub fn literals(self) -> &'a Vec<ExternLiteralSpecifier> {
+		&self.value.literals
+	}
+
+	pub fn scope(self) -> Scope<'a> {
+		Scope {
+			model: self.model,
+			current_pkg: Some(&self.name.package),
+			imports: Some(&self.value.imports),
+			type_params: Some(&self.value.type_params),
+		}
+	}
+
+	pub fn type_params(self) -> &'a Vec<String> {
+		&self.value.type_params
+	}
 }
 
 

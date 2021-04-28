@@ -24,6 +24,7 @@ impl From<PErrorType<&str>> for GeneratorError {
 			PErrorType::ParseError(str, error) => PErrorType::ParseError(str.to_string(), error),
 			PErrorType::DuplicateVersion(str, type_name, version) => PErrorType::DuplicateVersion(str.to_string(), type_name, version),
 			PErrorType::DuplicateField(str, version, field_name) => PErrorType::DuplicateField(str.to_string(), version, field_name),
+			PErrorType::DuplicateFieldValue => PErrorType::DuplicateFieldValue,
 			PErrorType::DuplicateConstant(name) => PErrorType::DuplicateConstant(name),
 			PErrorType::DuplicateType(name) => PErrorType::DuplicateType(name),
 		})

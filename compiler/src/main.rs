@@ -90,17 +90,7 @@ fn main() {
 	match parse_args(args) {
 		Ok(_) => std::process::exit(0),
 		Err(err) => {
-			match err {
-				GeneratorError::ParseError(ParserError::ParseError(input, _)) => println!("Parse error: {}", input),
-				GeneratorError::ParseError(ParserError::DuplicateVersion(_, name, ver)) => println!("Duplicate version {} for type {}", ver, name),
-				GeneratorError::ParseError(ParserError::DuplicateField(_, _, name)) => println!("Duplicate field {}", name),
-				GeneratorError::ParseError(ParserError::DuplicateConstant(name)) => println!("Duplicate definition of constant {}", name),
-				GeneratorError::ParseError(ParserError::DuplicateType(name)) => println!("Duplicate definition of type {}", name),
-				GeneratorError::TypeCheckError(TypeCheckError::TypeNotDefined(name)) => println!("Type not defined: {}", name),
-				GeneratorError::TypeCheckError(TypeCheckError::TypeAddedInNewerVersion(name, version)) => println!("Type was not defined in version {}: {}", version, name),
-				GeneratorError::IOError(err) => println!("{}", err),
-				GeneratorError::CustomError(err) => println!("{}", err),
-			};
+			println!("{:?}", err);
 			std::process::exit(1)
 		},
 	}

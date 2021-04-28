@@ -23,6 +23,8 @@ pub enum Operation {
 	TypeCodec,
 	FromInteger,
 	FromString,
+	FromCase(String),
+	FromRecord(Vec<String>),
 }
 
 #[derive(Debug)]
@@ -334,10 +336,120 @@ pub trait ConstGenerator<'model, Lang> : Generator<'model, Lang> {
 		}
 	} 
 
-	fn build_value(&self, version: &BigUint, t: &model::Type, value: &'model model::ConstantValue) -> Result<LangExpr<'model>, GeneratorError> {
+	fn build_value(&self, version: &BigUint, t: &'model model::Type, value: &'model model::ConstantValue) -> Result<LangExpr<'model>, GeneratorError> {
 		Ok(match value {
 			model::ConstantValue::Integer(n) => self.constant_invoke_operation(Operation::FromInteger, vec!(LangExpr::IntegerLiteral(n.clone())), version, t)?,
 			model::ConstantValue::String(s) => self.constant_invoke_operation(Operation::FromString, vec!(LangExpr::StringLiteral(s.clone())), version, t)?,
+			model::ConstantValue::Case(case_name, args) => {
+				match t {
+					model::Type::Defined(type_name, type_args) => {
+						let type_args = type_args.iter().map(|arg| self.build_type(version, arg)).collect::<Result<Vec<_>, _>>()?;
+						match self.scope().lookup(type_name.clone()) {
+							model::ScopeLookup::NamedType(name) => {
+								let named_type_def = self.model().get_type(&name).ok_or("Could not find type")?;
+			
+								match named_type_def {
+									model::NamedTypeDefinition::StructType(type_def) => return Err(GeneratorError::from("Cannot use case syntax for struct literal")),
+									model::NamedTypeDefinition::EnumType(type_def) => {
+										let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
+
+										let (_, field) = ver_type.ver_type.fields.iter().find(|(field_name, _)| field_name == case_name).ok_or("Could not find field")?;
+
+										match &args[..] {
+											[arg] => {
+												let arg = self.build_value(version, &field.field_type, &arg)?;
+												LangExpr::CreateEnum(named_type_def.name(), ver_type.version.clone(), type_args, case_name.clone(), Box::new(arg))
+											},
+											_ => return Err(GeneratorError::from("Incorrect number of arguments")),
+										}
+									},
+			
+									model::NamedTypeDefinition::ExternType(type_def) => {
+										let case_params = type_def.literals()
+											.iter()
+											.find_map(|literal| match literal {
+												model::ExternLiteralSpecifier::Case(name, case_params) if name == case_name => Some(case_params),
+												_ => None,
+											})
+											.ok_or("Type does not have a matching case")?;
+
+										let args = args.iter().zip(case_params.into_iter())
+											.map(|(arg, param)| self.build_value(version, param, arg))
+											.collect::<Result<Vec<_>, _>>()?;
+
+										LangExpr::InvokeOperation(
+											Operation::FromCase(case_name.clone()),
+											OperationTarget::ExternType(named_type_def.name()),
+											type_args,
+											args,
+										)
+									},
+								}
+							},
+			
+							model::ScopeLookup::TypeParameter(_) => return Err(GeneratorError::from("Cannot create constant for type parameter")),
+						}
+					},
+				}
+			},
+			model::ConstantValue::Record(field_values) => {
+				match t {
+					model::Type::Defined(type_name, type_args) => {
+						let type_args = type_args.iter().map(|arg| self.build_type(version, arg)).collect::<Result<Vec<_>, _>>()?;
+						match self.scope().lookup(type_name.clone()) {
+							model::ScopeLookup::NamedType(name) => {
+								let named_type_def = self.model().get_type(&name).ok_or("Could not find type")?;
+			
+								match named_type_def {
+									model::NamedTypeDefinition::StructType(type_def) => {
+										let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
+										
+										let mut args = Vec::new();
+
+										for (field_name, field) in &ver_type.ver_type.fields {
+											let value = field_values.get(field_name).ok_or("Could not find record field in literal")?;
+											let value = self.build_value(version, &field.field_type, value)?;
+											args.push((field_name.clone(), value));
+										}
+
+										LangExpr::CreateStruct(named_type_def.name(), ver_type.version.clone(), type_args, args)
+									},
+									model::NamedTypeDefinition::EnumType(type_def) => return Err(GeneratorError::from("Cannot use record syntax for enum literal")),
+			
+									model::NamedTypeDefinition::ExternType(type_def) => {
+										let record_fields = type_def.literals()
+											.iter()
+											.find_map(|literal| match literal {
+												model::ExternLiteralSpecifier::Record(fields) => Some(fields),
+												_ => None,
+											})
+											.ok_or("Type does not have a record literal")?;
+
+										let mut field_names = Vec::new();
+										let mut args = Vec::new();
+
+										for (field_name, field) in record_fields {
+											let value = field_values.get(field_name).ok_or("Could not find record field in literal")?;
+											let value = self.build_value(version, &field.field_type, value)?;
+											field_names.push(field_name.clone());
+											args.push(value);
+										}
+
+										LangExpr::InvokeOperation(
+											Operation::FromRecord(field_names),
+											OperationTarget::ExternType(named_type_def.name()),
+											type_args,
+											args,
+										)
+									},
+								}
+							},
+			
+							model::ScopeLookup::TypeParameter(_) => return Err(GeneratorError::from("Cannot create constant for type parameter")),
+						}
+					},
+				}
+			},
 			model::ConstantValue::Constant(name) => LangExpr::ConstantValue(name, version.clone())
 		})
 	}

@@ -165,6 +165,8 @@ pub trait ScalaGenerator<'model, 'opt> : Generator<'model, ScalaLanguage> + Gene
 			Operation::TypeCodec => write!(self.file(), "codec")?,
 			Operation::FromInteger => write!(self.file(), "fromInteger")?,
 			Operation::FromString => write!(self.file(), "fromString")?,
+			Operation::FromRecord(_) => write!(self.file(), "fromRecord")?,
+			Operation::FromCase(name) => write!(self.file(), "fromCase{}", make_type_name(name))?,
 		}
 
 		Ok(())
@@ -233,7 +235,17 @@ pub trait ScalaGenerator<'model, 'opt> : Generator<'model, ScalaLanguage> + Gene
 				}
 				self.write_operation_name(op)?;
 				self.write_type_args(type_args)?;
-				self.write_args(args)?;
+				match op {
+					Operation::FromRecord(field_names) => {
+						write!(self.file(), "(")?;
+						for_sep!((field_name, arg), field_names.iter().zip(args.iter()), { write!(self.file(), ", ")?; }, {
+							write!(self.file(), "{} = ", make_field_name(field_name))?;
+							self.write_expr(arg)?;
+						});
+						write!(self.file(), ")")?;
+					},
+					_ => self.write_args(args)?,
+				}
 			},
 			LangExpr::InvokeUserConverter { name, prev_ver, version, type_args, args } => {
 				self.write_qual_name(name)?;
