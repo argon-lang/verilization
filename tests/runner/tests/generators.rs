@@ -1,6 +1,6 @@
 use verilization_test_runner::*;
 
-use verilization_compiler::{lang, file_output_handler, type_check};
+use verilization_compiler::{lang, file_output_handler};
 use lang::GeneratorError;
 
 use test_lang::{TestLanguage, TestGenerator};
@@ -9,6 +9,7 @@ use test_lang::{TestLanguage, TestGenerator};
 use std::ffi::OsString;
 use rand::SeedableRng;
 use hex_literal::hex;
+use std::process::Stdio;
 
 
 const NUM_SAMPLES: i32 = 20;
@@ -43,10 +44,17 @@ fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), GeneratorError> {
 
 
     println!("Executing tests for {}", Lang::name());
-    let output = Lang::test_command().status().map_err(|_| GeneratorError::from("Could not run test command."))?;
+    let output = Lang::test_command()
+        .stdout(Stdio::piped())
+        .output()
+        .map_err(|_| GeneratorError::from("Could not run test command."))?;
 
-    if !output.success() {
-        if let Some(code) = output.code() {
+    let output_text = String::from_utf8_lossy(&output.stdout);
+    print!("{}", output_text);
+
+
+    if !output.status.success() {
+        if let Some(code) = output.status.code() {
             Err(GeneratorError::from(format!("Command failed with exit code: {}", code)))?
         }
         else {
@@ -57,20 +65,19 @@ fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), GeneratorError> {
     Ok(())
 }
 
-fn run_tests() -> Result<(), GeneratorError> {
-    run_tests_for_lang::<lang::typescript::TypeScriptLanguage>()?;
-    run_tests_for_lang::<lang::java::JavaLanguage>()?;
-    run_tests_for_lang::<lang::scala::ScalaLanguage>()?;
-
-    Ok(())
+#[test]
+fn run_typescript_tests() -> Result<(), GeneratorError> {
+    run_tests_for_lang::<lang::typescript::TypeScriptLanguage>()
 }
 
+#[test]
+fn run_java_tests() -> Result<(), GeneratorError> {
+    run_tests_for_lang::<lang::java::JavaLanguage>()
+}
 
-fn main() {
-    match run_tests() {
-        Ok(()) => println!("Tests passed"),
-        Err(err) => println!("Tests failed: {:?}", err),
-    }
+#[test]
+fn run_scala_tests() -> Result<(), GeneratorError> {
+    run_tests_for_lang::<lang::scala::ScalaLanguage>()
 }
 
 
