@@ -287,7 +287,7 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 					write!(self.file(), ".")?;
 				}
 	
-				write!(self.file(), "{}", Self::constant_version_name(version))?;
+				write!(self.file(), "{}", TypeScriptLanguage::constant_version_name(version))?;
 			},
 			LangExpr::CreateStruct(_, _, _, fields) => {
 				write!(self.file(), "{{ ")?;
@@ -313,7 +313,7 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 	}
 }
 
-impl <'model, TImpl> GeneratorNameMapping<TypeScriptLanguage> for TImpl where TImpl : TSGenerator<'model> {
+impl GeneratorNameMapping for TypeScriptLanguage {
 	fn convert_prev_type_param(param: &str) -> String {
 		format!("{}_1", param)
 	}
@@ -686,7 +686,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> TSType
 				writeln!(self.file, "}},")?;
 		
 				self.write_indent()?;
-				write!(self.file, "async write(writer: FormatWriter, {}: ", Self::codec_write_value_name())?;
+				write!(self.file, "async write(writer: FormatWriter, {}: ", TypeScriptLanguage::codec_write_value_name())?;
 				self.write_type(t)?;
 				writeln!(self.file, "): Promise<void> {{")?;
 				self.indent_increase();
@@ -707,7 +707,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> TSType
 
 		
 				self.write_indent()?;
-				write!(self.file, "convert({}: ", Self::convert_prev_param_name())?;
+				write!(self.file, "convert({}: ", TypeScriptLanguage::convert_prev_param_name())?;
 				self.write_type(from_type)?;
 				write!(self.file, "): ")?;
 				self.write_type(to_type)?;

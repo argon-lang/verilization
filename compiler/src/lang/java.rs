@@ -279,7 +279,7 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + Genera
 			},
 			LangExpr::ConstantValue(name, version) => {
 				self.write_qual_name(name)?;
-				write!(self.file(), ".{}", Self::constant_version_name(version))?;
+				write!(self.file(), ".{}", JavaLanguage::constant_version_name(version))?;
 			},
 			LangExpr::CreateStruct(name, version, type_args, fields) => {
 				write!(self.file(), "new ")?;
@@ -311,7 +311,7 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + Genera
 	}
 }
 
-impl <'model, 'opt, TImpl> GeneratorNameMapping<JavaLanguage> for TImpl where TImpl : JavaGenerator<'model, 'opt> {
+impl GeneratorNameMapping for JavaLanguage {
 	fn convert_prev_type_param(param: &str) -> String {
 		format!("{}_1", param)
 	}
@@ -799,7 +799,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> JavaTypeGene
 				self.write_type(to_type, true)?;
 				write!(self.file, " convert(")?;
 				self.write_type(from_type, true)?;
-				writeln!(self.file, " {}) {{", Self::convert_prev_param_name())?;
+				writeln!(self.file, " {}) {{", JavaLanguage::convert_prev_param_name())?;
 				self.indent_increase();
 
 				self.write_statement(body)?;

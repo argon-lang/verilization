@@ -255,7 +255,7 @@ pub enum ConvertParam<'model> {
 	Expression(LangExpr<'model>),
 }
 
-fn requires_conversion<'model, Lang, G: Generator<'model, Lang>>(gen: &G, t: &model::Type, prev_ver: &BigUint) -> bool {
+fn requires_conversion<'model, Lang: GeneratorNameMapping, G: Generator<'model, Lang>>(gen: &G, t: &model::Type, prev_ver: &BigUint) -> bool {
 	match t {
 		model::Type::Defined(name, args) => match gen.scope().lookup(name.clone()) {
 			model::ScopeLookup::NamedType(name) => match gen.model().get_type(&name) {
@@ -277,7 +277,7 @@ fn requires_conversion<'model, Lang, G: Generator<'model, Lang>>(gen: &G, t: &mo
 	}
 }
 
-pub trait GeneratorNameMapping<Lang> {
+pub trait GeneratorNameMapping {
 	fn convert_prev_type_param(param: &str) -> String;
 	fn convert_current_type_param(param: &str) -> String;
 	fn convert_conv_param_name(param: &str) -> String;
@@ -343,7 +343,7 @@ fn build_type_impl<'model>(model: &'model model::Verilization, version: &BigUint
 	})
 }
 
-pub trait Generator<'model, Lang> : GeneratorNameMapping<Lang> + Sized {
+pub trait Generator<'model, Lang: GeneratorNameMapping> : Sized {
 	fn model(&self) -> &'model model::Verilization;
 	fn scope(&self) -> &model::Scope<'model>;
 
@@ -378,7 +378,7 @@ pub trait Generator<'model, Lang> : GeneratorNameMapping<Lang> + Sized {
 				)
 			},
 
-			LangType::TypeParameter(name) => LangExpr::Identifier(Self::codec_codec_param_name(&name)),
+			LangType::TypeParameter(name) => LangExpr::Identifier(Lang::codec_codec_param_name(&name)),
 
 			LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::from("Cannot create codec for non-verilization type")),
 		})
@@ -438,7 +438,7 @@ pub trait Generator<'model, Lang> : GeneratorNameMapping<Lang> + Sized {
 							op_args
 						)
 					},
-					model::ScopeLookup::TypeParameter(name) => LangExpr::Identifier(Self::convert_conv_param_name(&name)),
+					model::ScopeLookup::TypeParameter(name) => LangExpr::Identifier(Lang::convert_conv_param_name(&name)),
 				}
 			},
 		};
@@ -473,7 +473,7 @@ pub trait GeneratorImpl<'model, Lang, GenType> {
 	fn generate(&mut self) -> Result<(), GeneratorError>;
 }
 
-pub trait ConstGenerator<'model, Lang> : Generator<'model, Lang> {
+pub trait ConstGenerator<'model, Lang: GeneratorNameMapping> : Generator<'model, Lang> {
 	fn constant(&self) -> Named<'model, model::Constant>;
 
 	fn write_header(&mut self) -> Result<(), GeneratorError>;
@@ -616,12 +616,12 @@ pub trait ConstGenerator<'model, Lang> : Generator<'model, Lang> {
 
 }
 
-impl <'model, TImpl, Lang> GeneratorImpl<'model, Lang, GenConstant> for TImpl where TImpl : ConstGenerator<'model, Lang> {
+impl <'model, TImpl, Lang: GeneratorNameMapping> GeneratorImpl<'model, Lang, GenConstant> for TImpl where TImpl : ConstGenerator<'model, Lang> {
 	fn generate(&mut self) -> Result<(), GeneratorError> {
 		self.write_header()?;
 
 		for ver in self.constant().versions() {
-			let version_name = Self::constant_version_name(&ver.version);
+			let version_name = Lang::constant_version_name(&ver.version);
 			let t = self.build_type(&ver.version, self.constant().value_type())?;
 			let value =
 				if let Some(value) = &ver.value {
@@ -640,7 +640,7 @@ impl <'model, TImpl, Lang> GeneratorImpl<'model, Lang, GenConstant> for TImpl wh
 	}
 }
 
-pub trait VersionedTypeGenerator<'model, Lang, GenTypeKind> : Generator<'model, Lang> {
+pub trait VersionedTypeGenerator<'model, Lang: GeneratorNameMapping, GenTypeKind> : Generator<'model, Lang> {
 	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData>;
 
 	fn write_header(&mut self) -> Result<(), GeneratorError>;
@@ -650,7 +650,7 @@ pub trait VersionedTypeGenerator<'model, Lang, GenTypeKind> : Generator<'model, 
 	fn write_footer(&mut self) -> Result<(), GeneratorError>;
 }
 
-fn build_converter_operation_common<'model, Lang, GenTypeKind, Gen>(gen: &Gen, op: Operation, type_kind: VersionedTypeKind, ver_type: &model::TypeVersionInfo<'model>, prev_ver: &BigUint) -> Result<OperationInfo<'model>, GeneratorError> where
+fn build_converter_operation_common<'model, Lang: GeneratorNameMapping, GenTypeKind, Gen>(gen: &Gen, op: Operation, type_kind: VersionedTypeKind, ver_type: &model::TypeVersionInfo<'model>, prev_ver: &BigUint) -> Result<OperationInfo<'model>, GeneratorError> where
 	Gen : VersionedTypeGenerator<'model, Lang, GenTypeKind>
 {
 	let version = &ver_type.version;
@@ -666,8 +666,8 @@ fn build_converter_operation_common<'model, Lang, GenTypeKind, Gen>(gen: &Gen, o
 
 	for param in gen.type_def().type_params() {
 		type_params_as_args.push(model::Type::Defined(model::QualifiedName::from_parts(&[], &param), vec!()));
-		let t1 = Gen::convert_prev_type_param(&param);
-		let t2 = Gen::convert_current_type_param(&param);
+		let t1 = Lang::convert_prev_type_param(&param);
+		let t2 = Lang::convert_current_type_param(&param);
 		type_params.push(t1.clone());
 		type_params.push(t2.clone());
 		let t1_arg = LangType::TypeParameter(t1.clone());
@@ -683,7 +683,7 @@ fn build_converter_operation_common<'model, Lang, GenTypeKind, Gen>(gen: &Gen, o
 			Box::new(LangType::TypeParameter(t2)),
 		);
 
-		let conv_param =  Gen::convert_conv_param_name(param);
+		let conv_param =  Lang::convert_conv_param_name(param);
 		params.push((conv_param.clone(), conv_type));
 		impl_call_args.push(LangExpr::Identifier(conv_param));
 	}
@@ -708,7 +708,7 @@ fn build_converter_operation_common<'model, Lang, GenTypeKind, Gen>(gen: &Gen, o
 				let mut fields = Vec::new();
 		
 				for (field_name, field) in &ver_type.ver_type.fields {
-					let obj_value = LangExpr::Identifier(Gen::convert_prev_param_name().to_string());
+					let obj_value = LangExpr::Identifier(Lang::convert_prev_param_name().to_string());
 		
 					let value_expr = LangExpr::StructField(gen.type_def().name(), ver_type.version.clone(), field_name.clone(), Box::new(obj_value));
 					let conv_value = gen.build_conversion(prev_ver, &ver_type.version, &field.field_type, ConvertParam::Expression(value_expr))?;
@@ -738,7 +738,7 @@ fn build_converter_operation_common<'model, Lang, GenTypeKind, Gen>(gen: &Gen, o
 				}
 		
 				LangStmt::MatchEnum {
-					value: LangExpr::Identifier(Gen::convert_prev_param_name().to_string()),
+					value: LangExpr::Identifier(Lang::convert_prev_param_name().to_string()),
 					value_type: build_type_impl(gen.model(), prev_ver, &model::Type::Defined(gen.type_def().name().clone(), type_params_as_args.clone()), gen.scope(), &prev_type_args)?,
 					cases: cases,
 				}
@@ -763,7 +763,7 @@ fn build_converter_operation_common<'model, Lang, GenTypeKind, Gen>(gen: &Gen, o
 }
 
 
-fn codec_read_implementation<'model, Lang, GenTypeKind, Gen>(gen: &Gen, t: LangType<'model>) -> Result<LangStmt<'model>, GeneratorError> where
+fn codec_read_implementation<'model, Lang: GeneratorNameMapping, GenTypeKind, Gen>(gen: &Gen, t: LangType<'model>) -> Result<LangStmt<'model>, GeneratorError> where
 	Gen : VersionedTypeGenerator<'model, Lang, GenTypeKind>
 {
 	Ok(match t {
@@ -811,7 +811,7 @@ fn codec_read_implementation<'model, Lang, GenTypeKind, Gen>(gen: &Gen, t: LangT
 	})
 }
 
-fn codec_write_implementation<'model, Lang, GenTypeKind, Gen>(gen: &Gen, t: LangType<'model>) -> Result<LangStmt<'model>, GeneratorError> where
+fn codec_write_implementation<'model, Lang: GeneratorNameMapping, GenTypeKind, Gen>(gen: &Gen, t: LangType<'model>) -> Result<LangStmt<'model>, GeneratorError> where
 	Gen : VersionedTypeGenerator<'model, Lang, GenTypeKind>
 {
 	Ok(match t.clone() {
@@ -819,7 +819,7 @@ fn codec_write_implementation<'model, Lang, GenTypeKind, Gen>(gen: &Gen, t: Lang
 			let mut field_values = Vec::new();
 	
 			for field in fields.build()? {
-				let obj_value = LangExpr::Identifier(Gen::codec_write_value_name().to_string());
+				let obj_value = LangExpr::Identifier(Lang::codec_write_value_name().to_string());
 				let field_codec = gen.build_codec(field.field_type)?;
 				let value_expr = LangExpr::StructField(gen.type_def().name(), version.clone(), field.name.clone(), Box::new(obj_value));
 	
@@ -854,7 +854,7 @@ fn codec_write_implementation<'model, Lang, GenTypeKind, Gen>(gen: &Gen, t: Lang
 			}
 	
 			LangStmt::MatchEnum {
-				value: LangExpr::Identifier(Gen::codec_write_value_name().to_string()),
+				value: LangExpr::Identifier(Lang::codec_write_value_name().to_string()),
 				value_type: t,
 				cases: cases,
 			}
@@ -865,7 +865,7 @@ fn codec_write_implementation<'model, Lang, GenTypeKind, Gen>(gen: &Gen, t: Lang
 }
 
 
-impl <'model, TImpl, Lang, GenTypeKind> GeneratorImpl<'model, Lang, GenType<GenTypeKind>> for TImpl where
+impl <'model, TImpl, Lang: GeneratorNameMapping, GenTypeKind> GeneratorImpl<'model, Lang, GenType<GenTypeKind>> for TImpl where
 	TImpl : VersionedTypeGenerator<'model, Lang, GenTypeKind>
 {
 	fn generate(&mut self) -> Result<(), GeneratorError> {
@@ -907,7 +907,7 @@ impl <'model, TImpl, Lang, GenTypeKind> GeneratorImpl<'model, Lang, GenType<GenT
 				for param in self.type_def().type_params() {
 					let param_type = LangType::TypeParameter(param.clone());
 
-					codec_params.push((Self::codec_codec_param_name(param), LangType::Codec(Box::new(param_type.clone()))));
+					codec_params.push((Lang::codec_codec_param_name(param), LangType::Codec(Box::new(param_type.clone()))));
 				}
 
 				let obj_type = self.build_type(version, &model::Type::Defined(self.type_def().name().clone(), type_params_as_args))?;

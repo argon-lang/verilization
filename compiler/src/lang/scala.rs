@@ -256,7 +256,7 @@ pub trait ScalaGenerator<'model, 'opt> : Generator<'model, ScalaLanguage> + Gene
 			},
 			LangExpr::ConstantValue(name, version) => {
 				self.write_qual_name(name)?;
-				write!(self.file(), ".{}", Self::constant_version_name(version))?;
+				write!(self.file(), ".{}", ScalaLanguage::constant_version_name(version))?;
 			},
 			LangExpr::CreateStruct(name, version, type_args, fields) => {
 				write!(self.file(), "new ")?;
@@ -289,7 +289,7 @@ pub trait ScalaGenerator<'model, 'opt> : Generator<'model, ScalaLanguage> + Gene
 	
 }
 
-impl <'model, 'opt, TImpl> GeneratorNameMapping<ScalaLanguage> for TImpl where TImpl : ScalaGenerator<'model, 'opt> {
+impl GeneratorNameMapping for ScalaLanguage {
 	fn convert_prev_type_param(param: &str) -> String {
 		format!("{}_1", param)
 	}
@@ -620,7 +620,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> ScalaTypeGen
 
 
 				self.write_indent()?;
-				write!(self.file, "override def convert({}: ", Self::convert_prev_param_name())?;
+				write!(self.file, "override def convert({}: ", ScalaLanguage::convert_prev_param_name())?;
 				self.write_type(&from_type)?;
 				write!(self.file, "): ")?;
 				self.write_type(&to_type)?;
