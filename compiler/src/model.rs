@@ -190,6 +190,7 @@ impl <'a, A> Named<'a, A> {
 }
 
 /// The value of a constant.
+#[derive(Clone, Debug)]
 pub enum ConstantValue {
 	Integer(BigInt),
 	String(String),
@@ -362,7 +363,7 @@ pub struct ExternTypeDefinitionData {
 	pub(crate) literals: Vec<ExternLiteralSpecifier>,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ExternLiteralIntBound {
 	Inclusive,
 	Exclusive,
@@ -574,6 +575,12 @@ impl Verilization {
 		else {
 			Err(name)
 		}
+	}
+
+	pub fn get_constant<'a>(&'a self, name: &QualifiedName) -> Option<Named<'a, Constant>> {
+		let (name, constant) = self.constants.get_key_value(name)?;
+
+		Some(Named::new(self, name, constant))
 	}
 
 	pub fn get_type<'a>(&'a self, name: &QualifiedName) -> Option<NamedTypeDefinition<'a>> {

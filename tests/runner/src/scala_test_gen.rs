@@ -1,6 +1,6 @@
-use verilization_compiler::{lang, model, for_sep};
+use verilization_compiler::{lang, model};
 use lang::GeneratorError;
-use lang::scala::{ScalaGenerator, ScalaOptions, make_type_name};
+use lang::scala::{ScalaGenerator, ScalaOptions};
 use model::{Verilization, Named};
 use lang::generator::*;
 
@@ -8,14 +8,12 @@ use crate::memory_format::MemoryFormatWriter;
 use crate::test_lang::{TestLanguage, TestGenerator};
 
 use std::collections::HashMap;
-use num_bigint::{ BigUint, BigInt };
+use num_bigint::BigUint;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
 use rand::Rng;
-use verilization_runtime::VerilizationCodec;
-use num_traits::{Zero, One};
-use num_bigint::RandBigInt;
+use crate::value_generator::{generate_random_value, write_constant_value};
 
 struct ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
     file: &'output mut F,
@@ -36,7 +34,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> GeneratorWithFile for ScalaTes
 
 impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model> for ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
     type Lang = lang::scala::ScalaLanguage;
-    
+
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -80,8 +78,12 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
         self.write_expr(&self.build_codec(current_lang_type.clone())?)?;
         write!(self.file, ", ")?;
         
+        let value = generate_random_value(self.random, current_lang_type.clone())?;
+
+        self.write_expr(&self.build_value(version, current_lang_type.clone(), value.clone())?)?;
+        
         let mut writer = MemoryFormatWriter::new();
-        self.write_random_value(&mut writer, version, &current_type, &type_arg_map)?;
+        write_constant_value(&mut writer, value, current_lang_type)?;
         
         write!(self.file, ", zio.Chunk[Byte](")?;
         {
@@ -98,155 +100,6 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
 
 
         Ok(())
-    }
-
-    fn with_scope<'a, 'model2, 'opt2, 'output2>(&'a mut self, scope: model::Scope<'model>) -> ScalaTestCaseGen<'model2, 'opt2, 'output2, F, R>
-        where
-            'a : 'model2 + 'opt2 + 'output2,
-            'model : 'model2,
-            'opt : 'opt2,
-            'output : 'output2
-    {
-        ScalaTestCaseGen {
-            file: self.file,
-            options: self.options,
-            random: self.random,
-            model: self.model,
-            type_def: self.type_def,
-            scope: scope,
-        }
-    }
-
-    fn write_random_value<W: verilization_runtime::FormatWriter<Error = GeneratorError>>(&mut self, writer: &mut W, version: &BigUint, t: &model::Type, type_args: &HashMap<String, model::Type>) -> Result<(), GeneratorError> {
-        match t {
-            model::Type::Defined(name, args) => match self.scope.lookup(name.clone()) {
-                model::ScopeLookup::NamedType(name) => {
-                    match (name.name.as_ref(), &args[..]) {
-                        ("nat", []) => {
-                            let n: BigUint = self.random.gen_biguint(256);
-                            write!(self.file, "new java.math.BigInteger(\"{}\")", n)?;
-                            n.write_verilization(writer)
-                        },
-                        ("int", []) => {
-                            let n: BigInt = self.random.gen_bigint(256);
-                            write!(self.file, "new java.math.BigInteger(\"{}\")", n)?;
-                            n.write_verilization(writer)
-                        },
-                        ("u8", []) | ("i8", []) => {
-                            let n: i8 = self.random.gen();
-                            write!(self.file, "{}", n)?;
-                            n.write_verilization(writer)
-                        },
-                        ("u16", []) | ("i16", []) => {
-                            let n: i16 = self.random.gen();
-                            write!(self.file, "{}", n)?;
-                            n.write_verilization(writer)
-                        },
-                        ("u32", []) | ("i32", []) => {
-                            let n: i32 = self.random.gen();
-                            write!(self.file, "{}", n)?;
-                            n.write_verilization(writer)
-                        },
-                        ("u64", []) | ("i64", []) => {
-                            let n: i64 = self.random.gen();
-                            write!(self.file, "{}L", n)?;
-                            n.write_verilization(writer)
-                        },
-                        ("string", []) => {
-                            let charset = random_string::Charset::new("abcdefABCDEF0123456789").unwrap();
-                            let len = self.random.gen_range(0..2000);
-                            let s = random_string::generate(len, &charset).to_string();
-                            write!(self.file, "\"{}\"", s)?;
-                            s.write_verilization(writer)?;
-                
-                            Ok(())
-                        },
-                        ("list", [inner]) => {
-                            write!(self.file, "java.util.List.of(")?;
-                
-                            let len: u32 = self.random.gen_range(0..200);
-                            BigUint::from(len).write_verilization(writer)?;
-                            for _ in 0..len {
-                                self.write_random_value(writer, version, &inner, type_args)?;
-                                write!(self.file, ", ")?;
-                            }
-                
-                            write!(self.file, ")")?;
-                
-                            Ok(())
-                        },
-                        ("option", [inner]) => {
-                            let b: bool = self.random.gen();
-                            if b {
-                                BigUint::one().write_verilization(writer)?;
-                                write!(self.file, "java.util.Optional.of(")?;
-                                self.write_random_value(writer, version, &inner, type_args)?;
-                                write!(self.file, ")")?;
-                            }
-                            else {
-                                BigUint::zero().write_verilization(writer)?;
-                                write!(self.file, "java.util.Optional.empty()")?;
-                            }
-                
-                            Ok(())
-                        },
-                        _ => {
-                            let t = self.model.get_type(&name).ok_or("Could not find type")?;
-                            
-                            let resolved_args = t.type_params().iter().zip(args.iter())
-                                .map(|(param, arg)| Some((param.clone(), self.scope.resolve(arg.clone(), type_args)?)))
-                                .collect::<Option<HashMap<_, _>>>()
-                                .ok_or("Could not resolve args")?;
-                
-                            match t {
-                                model::NamedTypeDefinition::StructType(t) => {
-                                    let ver_type = t.versioned(version).ok_or("Could not find version of type")?;
-                                    write!(self.file, "new ")?;
-                                    self.write_qual_name(&name)?;
-                                    write!(self.file, ".V{}", ver_type.version)?;
-                                    self.write_type_args(&args.iter().map(|arg| self.build_type(version, arg)).collect::<Result<Vec<_>, _>>()?)?;
-                                    write!(self.file, "(")?;
-                
-                                    for_sep!((_, field), &ver_type.ver_type.fields, { write!(self.file, ", ")?; }, {
-                                        self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type, &resolved_args)?;
-                                    });
-
-                                    write!(self.file, ")")?;
-                
-                                    Ok(())
-                                },
-                
-                                model::NamedTypeDefinition::EnumType(t) => {
-                                    let ver_type = t.versioned(version).ok_or("Could not find version of type")?;
-                                    let index = self.random.gen_range(0..ver_type.ver_type.fields.len());
-                                    let (field_name, field) = &ver_type.ver_type.fields[index];
-                
-                                    BigUint::from(index).write_verilization(writer)?;
-                                    write!(self.file, "new ")?;
-                                    self.write_qual_name(&name)?;
-                                    write!(self.file, ".V{}.{}", ver_type.version, make_type_name(field_name))?;
-                                    self.write_type_args(&args.iter().map(|arg| self.build_type(version, arg)).collect::<Result<Vec<_>, _>>()?)?;
-                                    write!(self.file, "(")?;
-                                    self.with_scope(t.scope()).write_random_value(writer, version, &field.field_type, &resolved_args)?;
-                                    write!(self.file, ")")?;
-                
-                                    Ok(())
-                                },
-
-                                model::NamedTypeDefinition::ExternType(_) => {
-                                    Err(GeneratorError::from("Extern types not implemented"))
-                                },
-                            }
-                        },
-                    }
-                },
-    
-                model::ScopeLookup::TypeParameter(name) => {
-                    let t = type_args.get(&name).ok_or("Unknown type parameter")?;
-                    self.with_scope(model::Scope::empty(self.model)).write_random_value(writer, version, t, &HashMap::new())
-                },
-            },
-        }
     }
 }
 

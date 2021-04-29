@@ -36,7 +36,7 @@ fn make_type_name(name: &str) -> String {
 	name
 }
 
-pub fn make_field_name(field_name: &str) -> String {
+fn make_field_name(field_name: &str) -> String {
 	let mut name = String::from(field_name);
 	uncapitalize_identifier(&mut name);
 	name

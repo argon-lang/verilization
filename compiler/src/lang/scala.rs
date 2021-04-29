@@ -26,7 +26,7 @@ pub struct ScalaOptions {
 	pub library_mapping: PackageMap,
 }
 
-pub fn make_type_name(name: &str) -> String {
+fn make_type_name(name: &str) -> String {
 	let mut name = String::from(name);
 	capitalize_identifier(&mut name);
 	name

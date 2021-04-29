@@ -29,7 +29,7 @@ pub struct JavaOptions {
 	pub extern_mapping: ExternMap,
 }
 
-pub fn make_type_name(name: &str) -> String {
+fn make_type_name(name: &str) -> String {
 	let mut name = String::from(name);
 	capitalize_identifier(&mut name);
 	name
