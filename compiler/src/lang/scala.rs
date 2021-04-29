@@ -401,22 +401,16 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaConstGenerator
 
 }
 
-struct ScalaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> {
+struct ScalaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>> {
 	options: &'opt ScalaOptions,
 	model: &'model model::Verilization,
 	file: Output::FileHandle,
 	type_def: Named<'model, model::VersionedTypeDefinitionData>,
 	scope: model::Scope<'model>,
 	indentation_level: u32,
-	_extra: Extra,
 }
 
-trait ScalaExtraGeneratorOps {
-	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError>;
-	fn write_versioned_type_object_data(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError>;
-}
-
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'model> for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model> for ScalaTypeGenerator<'model, 'opt, 'output, Output> {
 	type Lang = ScalaLanguage;
 
 	fn model(&self) -> &'model model::Verilization {
@@ -428,20 +422,20 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'m
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> GeneratorWithFile for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> GeneratorWithFile for ScalaTypeGenerator<'model, 'opt, 'output, Output> {
 	type GeneratorFile = Output::FileHandle;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Indentation for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Indentation for ScalaTypeGenerator<'model, 'opt, 'output, Output> {
 	fn indentation_size(&mut self) -> &mut u32 {
 		&mut self.indentation_level
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> ScalaGenerator<'model, 'opt> for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaGenerator<'model, 'opt> for ScalaTypeGenerator<'model, 'opt, 'output, Output> {
 	fn options(&self) -> &'opt ScalaOptions {
 		self.options
 	}
@@ -451,9 +445,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> ScalaGenerat
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, GenTypeKind> for ScalaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
-	where ScalaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : ScalaExtraGeneratorOps
-{
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenerator<'model> for ScalaTypeGenerator<'model, 'opt, 'output, Output> {
 	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
 		self.type_def
 	}
@@ -565,10 +557,10 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> Versio
 
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> where ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> : ScalaExtraGeneratorOps {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaTypeGenerator<'model, 'opt, 'output, Output> {
 
 
-	fn open(model: &'model model::Verilization, options: &'opt ScalaOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> where Extra : Default {
+	fn open(model: &'model model::Verilization, options: &'opt ScalaOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> {
 		let file = open_scala_file(options, output, type_def.name())?;
 		Ok(ScalaTypeGenerator {
 			file: file,
@@ -577,7 +569,6 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> ScalaTypeGen
 			type_def: type_def,
 			scope: type_def.scope(),
 			indentation_level: 0,
-			_extra: Extra::default(),
 		})
 	}
 
@@ -882,59 +873,6 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> ScalaTypeGen
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaExtraGeneratorOps for ScalaTypeGenerator<'model, 'opt, 'output, Output, GenStructType> {
-
-	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		self.write_indent()?;
-		write!(self.file, "final case class V{}", ver_type.version)?;
-		self.write_type_params(&self.type_def().type_params())?;
-		writeln!(self.file, "(")?;
-		self.indent_increase();
-
-		for (field_name, field) in &ver_type.ver_type.fields {
-			self.write_indent()?;
-			write!(self.file, "{}: ", make_field_name(field_name))?;
-			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?)?;
-			writeln!(self.file, ",")?;
-		}
-
-		self.indent_decrease();
-		self.write_indent()?;
-		writeln!(self.file, ") extends {}", self.type_def.name().name)?;
-
-		Ok(())
-	}
-
-	fn write_versioned_type_object_data(&mut self, _ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		Ok(())
-	}
-}
-
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaExtraGeneratorOps for ScalaTypeGenerator<'model, 'opt, 'output, Output, GenEnumType> {
-	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		self.write_indent()?;
-		write!(self.file, "sealed abstract class V{}", ver_type.version)?;
-		self.write_type_params(&self.type_def().type_params())?;
-		writeln!(self.file, " extends {}", self.type_def.name().name)?;
-		Ok(())
-	}
-
-	fn write_versioned_type_object_data(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		for (field_name, field) in &ver_type.ver_type.fields {
-			self.write_indent()?;
-			write!(self.file, "final case class {}", make_type_name(field_name))?;
-			self.write_type_params(&self.type_def().type_params())?;
-			write!(self.file, "({}: ", make_field_name(field_name))?;
-			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?)?;
-			write!(self.file, ") extends V{}", ver_type.version)?;
-			self.write_type_params(&self.type_def().type_params())?;
-			writeln!(self.file)?;
-		}
-
-		Ok(())
-	}
-}
-
 
 pub struct ScalaLanguage {}
 
@@ -1001,12 +939,8 @@ impl Language for ScalaLanguage {
 
 		for t in model.types() {
 			match t {
-				model::NamedTypeDefinition::StructType(t) => {
-					let mut type_gen: ScalaTypeGenerator<_, GenStructType> = ScalaTypeGenerator::open(model, &options, output, t)?;
-					type_gen.generate()?;		
-				},
-				model::NamedTypeDefinition::EnumType(t) => {
-					let mut type_gen: ScalaTypeGenerator<_, GenEnumType> = ScalaTypeGenerator::open(model, &options, output, t)?;
+				model::NamedTypeDefinition::StructType(t) | model::NamedTypeDefinition::EnumType(t) => {
+					let mut type_gen = ScalaTypeGenerator::open(model, &options, output, t)?;
 					type_gen.generate()?;		
 				},
 				model::NamedTypeDefinition::ExternType(_) => (),

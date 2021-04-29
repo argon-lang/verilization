@@ -423,17 +423,16 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaConstGenerator<
 	}
 }
 
-struct JavaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> {
+struct JavaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>> {
 	file: Output::FileHandle,
 	model: &'model model::Verilization,
 	options: &'opt JavaOptions,
 	type_def: Named<'model, model::VersionedTypeDefinitionData>,
 	scope: model::Scope<'model>,
 	indentation_level: u32,
-	_extra: Extra,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'model> for JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model> for JavaTypeGenerator<'model, 'opt, 'output, Output> {
 	type Lang = JavaLanguage;
 
 	fn model(&self) -> &'model model::Verilization {
@@ -445,20 +444,20 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'m
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> GeneratorWithFile for JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> GeneratorWithFile for JavaTypeGenerator<'model, 'opt, 'output, Output> {
 	type GeneratorFile = Output::FileHandle;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Indentation for JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Indentation for JavaTypeGenerator<'model, 'opt, 'output, Output> {
 	fn indentation_size(&mut self) -> &mut u32 {
 		&mut self.indentation_level
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> JavaGenerator<'model, 'opt> for JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaGenerator<'model, 'opt> for JavaTypeGenerator<'model, 'opt, 'output, Output> {
 	fn options(&self) -> &'opt JavaOptions {
 		self.options
 	}
@@ -468,7 +467,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> JavaGenerato
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, GenTypeKind> for JavaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenerator<'model> for JavaTypeGenerator<'model, 'opt, 'output, Output> {
 	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
 		self.type_def
 	}
@@ -716,10 +715,10 @@ fn write_enum_case_type<'model, 'opt, Gen>(gen: &mut Gen, value_type: &LangType<
 	Ok(())
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaTypeGenerator<'model, 'opt, 'output, Output> {
 
 
-	fn open(model: &'model model::Verilization, options: &'opt JavaOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> where Extra : Default {
+	fn open(model: &'model model::Verilization, options: &'opt JavaOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> {
 		let file = open_java_file(options, output, type_def.name())?;
 		Ok(JavaTypeGenerator {
 			file: file,
@@ -728,7 +727,6 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> JavaTypeGene
 			type_def: type_def,
 			scope: type_def.scope(),
 			indentation_level: 0,
-			_extra: Extra::default(),
 		})
 	}
 
@@ -1014,12 +1012,8 @@ impl Language for JavaLanguage {
 
 		for t in model.types() {
 			match t {
-				model::NamedTypeDefinition::StructType(t) => {
-					let mut type_gen: JavaTypeGenerator<_, GenStructType> = JavaTypeGenerator::open(model, &options, output, t)?;
-					type_gen.generate()?;		
-				},
-				model::NamedTypeDefinition::EnumType(t) => {
-					let mut type_gen: JavaTypeGenerator<_, GenEnumType> = JavaTypeGenerator::open(model, &options, output, t)?;
+				model::NamedTypeDefinition::StructType(t) | model::NamedTypeDefinition::EnumType(t) => {
+					let mut type_gen = JavaTypeGenerator::open(model, &options, output, t)?;
 					type_gen.generate()?;		
 				},
 				model::NamedTypeDefinition::ExternType(_) => (),

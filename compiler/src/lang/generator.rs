@@ -465,22 +465,35 @@ pub struct GenType<GenTypeKind> {
 	type_gen: PhantomData<GenTypeKind>,
 }
 
-#[derive(Default)]
-pub struct GenStructType {}
-
-#[derive(Default)]
-pub struct GenEnumType {}
-
-pub trait GeneratorImpl<'model, GenType> {
-	fn generate(&mut self) -> Result<(), GeneratorError>;
-}
-
 pub trait ConstGenerator<'model> : Generator<'model> {
 	fn constant(&self) -> Named<'model, model::Constant>;
 
 	fn write_header(&mut self) -> Result<(), GeneratorError>;
 	fn write_constant(&mut self, version_name: String, t: LangType<'model>, value: LangExpr<'model>) -> Result<(), GeneratorError>;
 	fn write_footer(&mut self) -> Result<(), GeneratorError>;
+
+
+	fn generate(&mut self) -> Result<(), GeneratorError> {
+		self.write_header()?;
+
+		for ver in self.constant().versions() {
+			let version_name = Self::Lang::constant_version_name(&ver.version);
+			let t = self.build_type(&ver.version, self.constant().value_type())?;
+			let value =
+				if let Some(value) = &ver.value {
+					self.build_value(&ver.version, t.clone(), value)?
+				}
+				else {
+					let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, ver.version.clone()) - 1;
+					let prev_ver = prev_ver.to_biguint().unwrap();
+					self.build_value_from_prev(&prev_ver, &ver.version, self.constant().value_type())?
+				};
+
+			self.write_constant(version_name, t, value)?;
+		}
+
+		self.write_footer()
+	}
 
 	fn constant_invoke_operation(&self, op: Operation, values: Vec<LangExpr<'model>>, t: LangType<'model>) -> Result<LangExpr<'model>, GeneratorError> {
 		let (target, type_args) = match t {
@@ -618,31 +631,7 @@ pub trait ConstGenerator<'model> : Generator<'model> {
 
 }
 
-impl <'model, TImpl> GeneratorImpl<'model, GenConstant> for TImpl where TImpl : ConstGenerator<'model> {
-	fn generate(&mut self) -> Result<(), GeneratorError> {
-		self.write_header()?;
-
-		for ver in self.constant().versions() {
-			let version_name = TImpl::Lang::constant_version_name(&ver.version);
-			let t = self.build_type(&ver.version, self.constant().value_type())?;
-			let value =
-				if let Some(value) = &ver.value {
-					self.build_value(&ver.version, t.clone(), value)?
-				}
-				else {
-					let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, ver.version.clone()) - 1;
-					let prev_ver = prev_ver.to_biguint().unwrap();
-					self.build_value_from_prev(&prev_ver, &ver.version, self.constant().value_type())?
-				};
-
-			self.write_constant(version_name, t, value)?;
-		}
-
-		self.write_footer()
-	}
-}
-
-pub trait VersionedTypeGenerator<'model, GenTypeKind> : Generator<'model> {
+pub trait VersionedTypeGenerator<'model> : Generator<'model> {
 	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData>;
 
 	fn write_header(&mut self) -> Result<(), GeneratorError>;
@@ -650,10 +639,81 @@ pub trait VersionedTypeGenerator<'model, GenTypeKind> : Generator<'model> {
 	fn write_operation(&mut self, operation: OperationInfo<'model>) -> Result<(), GeneratorError>;
 	fn write_version_footer(&mut self) -> Result<(), GeneratorError>;
 	fn write_footer(&mut self) -> Result<(), GeneratorError>;
+
+
+	fn generate(&mut self) -> Result<(), GeneratorError> {
+		self.write_header()?;
+
+		let mut first_version = true;
+		
+		for ver_type in self.type_def().versions() {
+			let version = &ver_type.version;
+	
+			let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, version.clone()) - 1;
+			let prev_ver = prev_ver.to_biguint().unwrap();
+
+			let type_params_as_args = self.type_def().type_params().iter()
+				.map(|param| model::Type::Defined(model::QualifiedName::from_parts(&[], &param), vec!()))
+				.collect::<Vec<_>>();
+
+			let t = self.build_type(version, &model::Type::Defined(self.type_def().name().clone(), type_params_as_args.clone()))?;
+			let type_kind = match &t {
+				LangType::Versioned(kind, ..) => *kind,
+				_ => return Err(GeneratorError::from("Could not generate type")),
+			};
+			self.write_version_header(t)?;
+
+			// Converter for latest version of final type with type parameters
+			if self.type_def().is_final() && !self.type_def().type_params().is_empty() && self.type_def().last_explicit_version() == Some(&ver_type.version) {
+				self.write_operation(build_converter_operation_common(self, Operation::FinalTypeConverter, type_kind, &ver_type, version)?)?;
+			}
+			
+			// Conversion from previous version
+			if !first_version { // Skip when there is no prevous version.
+				self.write_operation(build_converter_operation_common(self, Operation::FromPreviousVersion(prev_ver.clone()), type_kind, &ver_type, &prev_ver)?)?;
+			}
+
+			// Codec
+			{
+				let mut codec_params = Vec::new();
+
+				for param in self.type_def().type_params() {
+					let param_type = LangType::TypeParameter(param.clone());
+
+					codec_params.push((Self::Lang::codec_codec_param_name(param), LangType::Codec(Box::new(param_type.clone()))));
+				}
+
+				let obj_type = self.build_type(version, &model::Type::Defined(self.type_def().name().clone(), type_params_as_args))?;
+
+				let codec_type = LangType::Codec(Box::new(obj_type.clone()));
+
+				let op = OperationInfo {
+					operation: Operation::TypeCodec,
+					version: version.clone(),
+					type_params: self.type_def().type_params().clone(),
+					params: codec_params,
+					result: codec_type,
+					implementation: LangExprStmt::CreateCodec {
+						t: obj_type.clone(),
+						read: Box::new(codec_read_implementation(self, obj_type.clone())?),
+						write: Box::new(codec_write_implementation(self, obj_type)?),
+					},
+				};
+
+				self.write_operation(op)?;
+			}
+
+
+			self.write_version_footer()?;
+			first_version = false;
+		}
+
+		self.write_footer()
+	}
 }
 
-fn build_converter_operation_common<'model, GenTypeKind, Gen>(gen: &Gen, op: Operation, type_kind: VersionedTypeKind, ver_type: &model::TypeVersionInfo<'model>, prev_ver: &BigUint) -> Result<OperationInfo<'model>, GeneratorError> where
-	Gen : VersionedTypeGenerator<'model, GenTypeKind>
+fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_kind: VersionedTypeKind, ver_type: &model::TypeVersionInfo<'model>, prev_ver: &BigUint) -> Result<OperationInfo<'model>, GeneratorError> where
+	Gen : VersionedTypeGenerator<'model>
 {
 	let version = &ver_type.version;
 
@@ -765,8 +825,8 @@ fn build_converter_operation_common<'model, GenTypeKind, Gen>(gen: &Gen, op: Ope
 }
 
 
-fn codec_read_implementation<'model, GenTypeKind, Gen>(gen: &Gen, t: LangType<'model>) -> Result<LangStmt<'model>, GeneratorError> where
-	Gen : VersionedTypeGenerator<'model, GenTypeKind>
+fn codec_read_implementation<'model, Gen>(gen: &Gen, t: LangType<'model>) -> Result<LangStmt<'model>, GeneratorError> where
+	Gen : VersionedTypeGenerator<'model>
 {
 	Ok(match t {
 		LangType::Versioned(VersionedTypeKind::Struct, _, version, type_args, fields) => {
@@ -813,8 +873,8 @@ fn codec_read_implementation<'model, GenTypeKind, Gen>(gen: &Gen, t: LangType<'m
 	})
 }
 
-fn codec_write_implementation<'model, GenTypeKind, Gen>(gen: &Gen, t: LangType<'model>) -> Result<LangStmt<'model>, GeneratorError> where
-	Gen : VersionedTypeGenerator<'model, GenTypeKind>
+fn codec_write_implementation<'model, Gen>(gen: &Gen, t: LangType<'model>) -> Result<LangStmt<'model>, GeneratorError> where
+	Gen : VersionedTypeGenerator<'model>
 {
 	Ok(match t.clone() {
 		LangType::Versioned(VersionedTypeKind::Struct, _, version, _, fields) => {
@@ -864,79 +924,6 @@ fn codec_write_implementation<'model, GenTypeKind, Gen>(gen: &Gen, t: LangType<'
 
 		_ => return Err(GeneratorError::from("Could not create codec read implementation")),
 	})
-}
-
-
-impl <'model, TImpl, GenTypeKind> GeneratorImpl<'model, GenType<GenTypeKind>> for TImpl where TImpl : VersionedTypeGenerator<'model, GenTypeKind> {
-	fn generate(&mut self) -> Result<(), GeneratorError> {
-		self.write_header()?;
-
-		let mut first_version = true;
-		
-		for ver_type in self.type_def().versions() {
-			let version = &ver_type.version;
-	
-			let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, version.clone()) - 1;
-			let prev_ver = prev_ver.to_biguint().unwrap();
-
-			let type_params_as_args = self.type_def().type_params().iter()
-				.map(|param| model::Type::Defined(model::QualifiedName::from_parts(&[], &param), vec!()))
-				.collect::<Vec<_>>();
-
-			let t = self.build_type(version, &model::Type::Defined(self.type_def().name().clone(), type_params_as_args.clone()))?;
-			let type_kind = match &t {
-				LangType::Versioned(kind, ..) => *kind,
-				_ => return Err(GeneratorError::from("Could not generate type")),
-			};
-			self.write_version_header(t)?;
-
-			// Converter for latest version of final type with type parameters
-			if self.type_def().is_final() && !self.type_def().type_params().is_empty() && self.type_def().last_explicit_version() == Some(&ver_type.version) {
-				self.write_operation(build_converter_operation_common(self, Operation::FinalTypeConverter, type_kind, &ver_type, version)?)?;
-			}
-			
-			// Conversion from previous version
-			if !first_version { // Skip when there is no prevous version.
-				self.write_operation(build_converter_operation_common(self, Operation::FromPreviousVersion(prev_ver.clone()), type_kind, &ver_type, &prev_ver)?)?;
-			}
-
-			// Codec
-			{
-				let mut codec_params = Vec::new();
-
-				for param in self.type_def().type_params() {
-					let param_type = LangType::TypeParameter(param.clone());
-
-					codec_params.push((TImpl::Lang::codec_codec_param_name(param), LangType::Codec(Box::new(param_type.clone()))));
-				}
-
-				let obj_type = self.build_type(version, &model::Type::Defined(self.type_def().name().clone(), type_params_as_args))?;
-
-				let codec_type = LangType::Codec(Box::new(obj_type.clone()));
-
-				let op = OperationInfo {
-					operation: Operation::TypeCodec,
-					version: version.clone(),
-					type_params: self.type_def().type_params().clone(),
-					params: codec_params,
-					result: codec_type,
-					implementation: LangExprStmt::CreateCodec {
-						t: obj_type.clone(),
-						read: Box::new(codec_read_implementation(self, obj_type.clone())?),
-						write: Box::new(codec_write_implementation(self, obj_type)?),
-					},
-				};
-
-				self.write_operation(op)?;
-			}
-
-
-			self.write_version_footer()?;
-			first_version = false;
-		}
-
-		self.write_footer()
-	}
 }
 
 

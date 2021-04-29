@@ -442,7 +442,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSConstGenerator<'m
 
 }
 
-struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> {
+struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>> {
 	file: Output::FileHandle,
 	model: &'model model::Verilization,
 	options: &'opt TSOptions,
@@ -452,10 +452,9 @@ struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, Ex
 	imported_user_converters: HashSet<String>,
 	unimported_user_converters: Vec<String>,
 	indentation_level: u32,
-	_extra: Extra,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output> {
 	type Lang = TypeScriptLanguage;
 
 	fn model(&self) -> &'model model::Verilization {
@@ -467,20 +466,20 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'m
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> GeneratorWithFile for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> GeneratorWithFile for TSTypeGenerator<'model, 'opt, 'output, Output> {
 	type GeneratorFile = Output::FileHandle;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Indentation for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Indentation for TSTypeGenerator<'model, 'opt, 'output, Output> {
 	fn indentation_size(&mut self) -> &mut u32 {
 		&mut self.indentation_level
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> TSGenerator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSGenerator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output> {
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName> {
 		Some(self.type_def.name())
 	}
@@ -502,7 +501,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> TSGenerator<
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, GenTypeKind> for TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenerator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output> {
 	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
 		self.type_def
 	}
@@ -644,9 +643,9 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> Versio
 
 
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSTypeGenerator<'model, 'opt, 'output, Output> {
 
-	fn open(model: &'model model::Verilization, options: &'opt TSOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> where GenTypeKind : Default {
+	fn open(model: &'model model::Verilization, options: &'opt TSOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> {
 		let file = open_ts_file(options, output, type_def.name())?;
 		Ok(TSTypeGenerator {
 			file: file,
@@ -658,7 +657,6 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> TSType
 			imported_user_converters: HashSet::new(),
 			unimported_user_converters: Vec::new(),
 			indentation_level: 0,
-			_extra: GenTypeKind::default(),
 		})
 	}
 
@@ -915,12 +913,8 @@ impl Language for TypeScriptLanguage {
 			}
 
 			match t {
-				model::NamedTypeDefinition::StructType(t) => {
-					let mut type_gen: TSTypeGenerator<_, GenStructType> = TSTypeGenerator::open(model, &options, output, t)?;
-					type_gen.generate()?;		
-				},
-				model::NamedTypeDefinition::EnumType(t) => {
-					let mut type_gen: TSTypeGenerator<_, GenEnumType> = TSTypeGenerator::open(model, &options, output, t)?;
+				model::NamedTypeDefinition::StructType(t) | model::NamedTypeDefinition::EnumType(t) => {
+					let mut type_gen = TSTypeGenerator::open(model, &options, output, t)?;
 					type_gen.generate()?;		
 				},
 				model::NamedTypeDefinition::ExternType(_) => (),
