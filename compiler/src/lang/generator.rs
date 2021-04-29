@@ -192,9 +192,9 @@ pub enum LangExpr<'model> {
 		args: Vec<LangExpr<'model>>,
 	},
 	ConstantValue(&'model model::QualifiedName, BigUint),
-	CreateStruct(&'model model::QualifiedName, BigUint, Vec<LangType<'model>>, Vec<(String, LangExpr<'model>)>),
-	CreateEnum(&'model model::QualifiedName, BigUint, Vec<LangType<'model>>, String, Box<LangExpr<'model>>),
-	StructField(&'model model::QualifiedName, BigUint, String, Box<LangExpr<'model>>),
+	CreateStruct(&'model model::QualifiedName, BigUint, Vec<LangType<'model>>, Vec<(&'model String, LangExpr<'model>)>),
+	CreateEnum(&'model model::QualifiedName, BigUint, Vec<LangType<'model>>, &'model String, Box<LangExpr<'model>>),
+	StructField(&'model model::QualifiedName, BigUint, &'model String, Box<LangExpr<'model>>),
 }
 
 pub struct OperationInfo<'model> {
@@ -544,7 +544,7 @@ pub trait ConstGenerator<'model> : Generator<'model> {
 						let field = fields.build()?.into_iter().find(|field| field.name == case_name).ok_or("Could not find field")?;
 
 						let arg = self.build_value(version, field.field_type, &arg)?;
-						LangExpr::CreateEnum(type_name, type_version, type_args, case_name.clone(), Box::new(arg))
+						LangExpr::CreateEnum(type_name, type_version, type_args, case_name, Box::new(arg))
 					},
 					_ => return Err(GeneratorError::from("Incorrect number of arguments")),
 				},
@@ -582,7 +582,7 @@ pub trait ConstGenerator<'model> : Generator<'model> {
 					for field in fields.build()? {
 						let value = field_values.get(field.name).ok_or("Could not find record field in literal")?;
 						let value = self.build_value(version, field.field_type, value)?;
-						lang_args.push((field.name.clone(), value));
+						lang_args.push((field.name, value));
 					}
 
 					LangExpr::CreateStruct(type_name, type_version, type_args, lang_args)
@@ -772,10 +772,10 @@ fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_
 				for (field_name, field) in &ver_type.ver_type.fields {
 					let obj_value = LangExpr::Identifier(Gen::Lang::convert_prev_param_name().to_string());
 		
-					let value_expr = LangExpr::StructField(gen.type_def().name(), ver_type.version.clone(), field_name.clone(), Box::new(obj_value));
+					let value_expr = LangExpr::StructField(gen.type_def().name(), ver_type.version.clone(), field_name, Box::new(obj_value));
 					let conv_value = gen.build_conversion(prev_ver, &ver_type.version, &field.field_type, ConvertParam::Expression(value_expr))?;
 		
-					fields.push((field_name.clone(), conv_value));
+					fields.push((field_name, conv_value));
 				}
 		
 				LangStmt::Expr(vec!(),
@@ -790,7 +790,7 @@ fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_
 		
 					let value_expr = LangExpr::Identifier(field_name.clone());
 					let conv_value = gen.build_conversion(prev_ver, &ver_type.version, &field.field_type, ConvertParam::Expression(value_expr))?;
-					let enum_value = LangExpr::CreateEnum(gen.type_def().name(), ver_type.version.clone(), result_type_args.clone(), field_name.clone(), Box::new(conv_value));
+					let enum_value = LangExpr::CreateEnum(gen.type_def().name(), ver_type.version.clone(), result_type_args.clone(), field_name, Box::new(conv_value));
 		
 					cases.push(MatchCase {
 						binding_name: field_name.clone(),
@@ -834,7 +834,7 @@ fn codec_read_implementation<'model, Gen>(gen: &Gen, t: LangType<'model>) -> Res
 		
 			for field in fields.build()? {
 				let field_codec = gen.build_codec(field.field_type)?;
-				field_values.push((field.name.clone(), LangExpr::CodecRead { codec: Box::new(field_codec) }));
+				field_values.push((field.name, LangExpr::CodecRead { codec: Box::new(field_codec) }));
 			}
 		
 			LangStmt::Expr(vec!(),
@@ -853,7 +853,7 @@ fn codec_read_implementation<'model, Gen>(gen: &Gen, t: LangType<'model>) -> Res
 						gen.type_def().name(),
 						version.clone(),
 						type_args.clone(),
-						field.name.clone(),
+						field.name,
 						Box::new(LangExpr::CodecRead {
 							codec: Box::new(codec),
 						})
@@ -883,7 +883,7 @@ fn codec_write_implementation<'model, Gen>(gen: &Gen, t: LangType<'model>) -> Re
 			for field in fields.build()? {
 				let obj_value = LangExpr::Identifier(Gen::Lang::codec_write_value_name().to_string());
 				let field_codec = gen.build_codec(field.field_type)?;
-				let value_expr = LangExpr::StructField(gen.type_def().name(), version.clone(), field.name.clone(), Box::new(obj_value));
+				let value_expr = LangExpr::StructField(gen.type_def().name(), version.clone(), field.name, Box::new(obj_value));
 	
 				field_values.push(LangExpr::CodecWrite {
 					codec: Box::new(field_codec),
