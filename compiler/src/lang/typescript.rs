@@ -42,7 +42,7 @@ pub fn make_field_name(field_name: &str) -> String {
 	name
 }
 
-pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + GeneratorWithFile {
+pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName>;
 	fn options(&self) -> &TSOptions;
 	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model>;
@@ -362,7 +362,9 @@ struct TSConstGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>> {
 	scope: model::Scope<'model>,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model, TypeScriptLanguage> for TSConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model> for TSConstGenerator<'model, 'opt, 'output, Output> {
+	type Lang = TypeScriptLanguage;
+
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -399,7 +401,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSGenerator<'model>
 	fn add_user_converter(&mut self, _name: String) {}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'model, TypeScriptLanguage> for TSConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'model> for TSConstGenerator<'model, 'opt, 'output, Output> {
 	fn constant(&self) -> Named<'model, model::Constant> {
 		self.constant
 	}
@@ -453,7 +455,9 @@ struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, Ex
 	_extra: Extra,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'model, TypeScriptLanguage> for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+	type Lang = TypeScriptLanguage;
+
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -498,7 +502,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> TSGenerator<
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, TypeScriptLanguage, GenTypeKind> for TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, GenTypeKind> for TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> {
 	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
 		self.type_def
 	}

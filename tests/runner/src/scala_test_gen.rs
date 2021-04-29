@@ -34,7 +34,9 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> GeneratorWithFile for ScalaTes
 	}
 }
 
-impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model, lang::scala::ScalaLanguage> for ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
+impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model> for ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
+    type Lang = lang::scala::ScalaLanguage;
+    
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}

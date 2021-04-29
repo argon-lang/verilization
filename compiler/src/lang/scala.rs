@@ -63,7 +63,7 @@ fn open_scala_file<'output, Output: OutputHandler<'output>>(options: &ScalaOptio
 }
 
 
-pub trait ScalaGenerator<'model, 'opt> : Generator<'model, ScalaLanguage> + GeneratorWithFile {
+pub trait ScalaGenerator<'model, 'opt> : Generator<'model> + GeneratorWithFile {
 	fn options(&self) -> &'opt ScalaOptions;
 	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model>;
 
@@ -327,7 +327,9 @@ struct ScalaConstGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>
 	scope: model::Scope<'model>,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model, ScalaLanguage> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
+	type Lang = ScalaLanguage;
+	
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -354,7 +356,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaGenerator<'mod
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'model, ScalaLanguage> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'model> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
 	fn constant(&self) -> Named<'model, model::Constant> {
 		self.constant
 	}
@@ -414,7 +416,9 @@ trait ScalaExtraGeneratorOps {
 	fn write_versioned_type_object_data(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError>;
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'model, ScalaLanguage> for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'model> for ScalaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+	type Lang = ScalaLanguage;
+
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -447,7 +451,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> ScalaGenerat
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, ScalaLanguage, GenTypeKind> for ScalaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, GenTypeKind> for ScalaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
 	where ScalaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : ScalaExtraGeneratorOps
 {
 	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {

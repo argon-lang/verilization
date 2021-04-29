@@ -61,7 +61,7 @@ fn open_java_file<'output, Output: OutputHandler<'output>>(options: &JavaOptions
 	Ok(output.create_file(path)?)
 }
 
-pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + GeneratorWithFile {
+pub trait JavaGenerator<'model, 'opt> : Generator<'model> + GeneratorWithFile {
 	fn options(&self) -> &'opt JavaOptions;
 	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model>;
 
@@ -350,7 +350,9 @@ struct JavaConstGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>>
 	scope: model::Scope<'model>,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model, JavaLanguage> for JavaConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model> for JavaConstGenerator<'model, 'opt, 'output, Output> {
+	type Lang = JavaLanguage;
+
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -377,7 +379,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaGenerator<'mode
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'model, JavaLanguage> for JavaConstGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'model> for JavaConstGenerator<'model, 'opt, 'output, Output> {
 	fn constant(&self) -> Named<'model, model::Constant> {
 		self.constant
 	}
@@ -431,7 +433,9 @@ struct JavaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, 
 	_extra: Extra,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'model, JavaLanguage> for JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'model> for JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
+	type Lang = JavaLanguage;
+
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -464,7 +468,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> JavaGenerato
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, JavaLanguage, GenTypeKind> for JavaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, GenTypeKind> for JavaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> {
 	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
 		self.type_def
 	}

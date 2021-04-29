@@ -35,7 +35,9 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> GeneratorWithFile for TSTestCa
 	}
 }
 
-impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model, lang::typescript::TypeScriptLanguage> for TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
+impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model> for TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
+    type Lang = lang::typescript::TypeScriptLanguage;
+    
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}

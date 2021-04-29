@@ -34,7 +34,8 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> GeneratorWithFile for JavaTest
 	}
 }
 
-impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model, lang::java::JavaLanguage> for JavaTestCaseGen<'model, 'opt, 'output, F, R> {
+impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model> for JavaTestCaseGen<'model, 'opt, 'output, F, R> {
+    type Lang = lang::java::JavaLanguage;
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
