@@ -362,7 +362,7 @@ pub struct ExternTypeDefinitionData {
 	pub(crate) literals: Vec<ExternLiteralSpecifier>,
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum ExternLiteralIntBound {
 	Inclusive,
 	Exclusive,
@@ -520,6 +520,13 @@ impl <'a> Scope<'a> {
 				}
 			},
 		})
+	}
+
+	pub fn type_params(&self) -> Vec<String> {
+		match self.type_params {
+			Some(params) => params.clone(),
+			None => Vec::new(),
+		}
 	}
 }
 

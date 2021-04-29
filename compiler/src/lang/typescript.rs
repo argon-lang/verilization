@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use num_bigint::{BigUint, BigInt, Sign};
+use num_bigint::BigUint;
 use super::generator::*;
 use crate::util::{capitalize_identifier, uncapitalize_identifier};
 
@@ -47,6 +47,8 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 	fn options(&self) -> &TSOptions;
 	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model>;
 	fn current_dir(&self) -> Result<PathBuf, GeneratorError>;
+
+	fn add_user_converter(&mut self, name: String);
 
 	fn write_import_name(&mut self, name: &model::QualifiedName) -> Result<(), GeneratorError> {
 		write!(self.file(), "sym_")?;
@@ -141,7 +143,7 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 
 	fn write_type(&mut self, t: &LangType<'model>) -> Result<(), GeneratorError> {
 		Ok(match t {	
-			LangType::Versioned(name, version, args) => {
+			LangType::Versioned(_, name, version, args, _) => {
 				// Only use a qualifier if not a value of the current type.
 				if self.generator_element_name() != Some(name) {
 					self.write_import_name(name)?;
@@ -152,7 +154,7 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 				self.write_type_args(&args)?;
 			},
 
-			LangType::Extern(name, args) => {
+			LangType::Extern(name, args, _) => {
 				self.write_import_name(name)?;
 
 				write!(self.file(), ".{}", make_type_name(&name.name))?;
@@ -272,7 +274,9 @@ pub trait TSGenerator<'model> : Generator<'model, TypeScriptLanguage> + Generato
 				}
 			},
 			LangExpr::InvokeUserConverter { name: _, prev_ver, version, type_args, args } => {
-				write!(self.file(), "v{}_to_v{}", prev_ver, version)?;
+				let name = format!("v{}_to_v{}", prev_ver, version);
+				write!(self.file(), "{}", name)?;
+				self.add_user_converter(name);
 				self.write_type_args(type_args)?;
 				self.write_args(args)?;
 			},
@@ -391,6 +395,8 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSGenerator<'model>
 	fn current_dir(&self) -> Result<PathBuf, GeneratorError> {
 		current_dir_of_name(self, self.constant.name())
 	}
+
+	fn add_user_converter(&mut self, _name: String) {}
 }
 
 impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'model, TypeScriptLanguage> for TSConstGenerator<'model, 'opt, 'output, Output> {
@@ -441,6 +447,8 @@ struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, Ex
 	type_def: Named<'model, model::VersionedTypeDefinitionData>,
 	scope: model::Scope<'model>,
 	versions: HashSet<BigUint>,
+	imported_user_converters: HashSet<String>,
+	unimported_user_converters: Vec<String>,
 	indentation_level: u32,
 	_extra: Extra,
 }
@@ -484,15 +492,13 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> TSGenerator<
 	fn current_dir(&self) -> Result<PathBuf, GeneratorError> {
 		current_dir_of_name(self, self.type_def.name())
 	}
+
+	fn add_user_converter(&mut self, name: String) {
+		self.unimported_user_converters.push(name);
+	}
 }
 
-trait TSExtraGeneratorOps {
-	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError>;
-}
-
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, TypeScriptLanguage, GenTypeKind> for TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
-	where TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : TSExtraGeneratorOps
-{
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, TypeScriptLanguage, GenTypeKind> for TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> {
 	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
 		self.type_def
 	}
@@ -504,18 +510,57 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> Versio
 		Ok(())
 	}
 
-	fn write_version_header(&mut self, ver_type: &model::TypeVersionInfo<'model>) -> Result<(), GeneratorError> {
-		self.write_versioned_type(ver_type)?;
+	fn write_version_header(&mut self, t: LangType<'model>) -> Result<(), GeneratorError> {
+		let version;
 
-		let version = &ver_type.version;
+		match t.clone() {
+			LangType::Versioned(VersionedTypeKind::Struct, _, ver, _, fields) => {
+				version = ver;
+				write!(self.file, "export interface V{}", version)?;
+				self.write_type_params(self.type_def().type_params())?;
+				writeln!(self.file, " {{")?;
+				self.indent_increase();
+				for field in fields.build()? {
+					self.write_indent()?;
+					write!(self.file, "readonly {}: ", make_field_name(field.name))?;
+					self.write_type(&field.field_type)?;
+					writeln!(self.file, ";")?;
+				}
+				self.indent_decrease();
+				writeln!(self.file, "}}")?;
+			},
+			LangType::Versioned(VersionedTypeKind::Enum, _, ver, _, fields) => {
+				version = ver;
+				write!(self.file, "export type V{}", version)?;
+				self.write_type_params(self.type_def().type_params())?;
+				write!(self.file, " = ")?;
+				self.indent_increase();
+				let mut is_first = true;
+				for field in fields.build()? {
+					if !is_first {
+						writeln!(self.file)?;
+						self.write_indent()?;
+						write!(self.file, "| ")?;
+					}
+					else {
+						is_first = false;
+					}
+					write!(self.file, "{{ readonly tag: \"{}\", readonly {}: ", field.name, make_field_name(field.name))?;
+					self.write_type(&field.field_type)?;
+					write!(self.file, ", }}")?;
+				}
+				if is_first {
+					write!(self.file, "never")?;
+				}
+				self.indent_decrease();
+		
+				writeln!(self.file, ";")?;
+			},
 
-		let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, version.clone()) - 1;
-		let prev_ver = prev_ver.to_biguint().unwrap();
-
-		if ver_type.explicit_version && !self.versions.is_empty() {
-			writeln!(self.file, "import {{v{}_to_v{}}} from \"./{}.conv.js\";", prev_ver, version, self.type_def.name().name)?;
+			_ => return Err(GeneratorError::from("Could not generate type"))
 		}
-		self.versions.insert(ver_type.version.clone());
+
+		self.versions.insert(version.clone());
 
 		writeln!(self.file, "export namespace V{} {{", version)?;
 		self.indent_increase();
@@ -570,10 +615,18 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> Versio
 		Ok(())
 	}
 
-	fn write_version_footer(&mut self, _ver_type: &model::TypeVersionInfo<'model>) -> Result<(), GeneratorError> {
+	fn write_version_footer(&mut self) -> Result<(), GeneratorError> {
 		self.indent_decrease();
 
+
 		writeln!(self.file, "}}")?;
+
+
+		for user_conv in self.unimported_user_converters.drain(..) {
+			if self.imported_user_converters.insert(user_conv.clone()) {
+				writeln!(self.file, "import {{{}}} from \"./{}.conv.js\";", user_conv, self.type_def.name().name)?;
+			}
+		}
 
 		Ok(())
 	}
@@ -587,7 +640,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> Versio
 
 
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> where TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : TSExtraGeneratorOps {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> TSTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> {
 
 	fn open(model: &'model model::Verilization, options: &'opt TSOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> where GenTypeKind : Default {
 		let file = open_ts_file(options, output, type_def.name())?;
@@ -598,6 +651,8 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> TSType
 			type_def: type_def,
 			scope: type_def.scope(),
 			versions: HashSet::new(),
+			imported_user_converters: HashSet::new(),
+			unimported_user_converters: Vec::new(),
 			indentation_level: 0,
 			_extra: GenTypeKind::default(),
 		})
@@ -783,56 +838,6 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> TSType
 			write!(self.file, ">")?;
 		}
 	
-		Ok(())
-	}
-}
-
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSExtraGeneratorOps for TSTypeGenerator<'model, 'opt, 'output, Output, GenStructType> {
-	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		write!(self.file, "export interface V{}", ver_type.version)?;
-		self.write_type_params(self.type_def().type_params())?;
-		writeln!(self.file, " {{")?;
-		self.indent_increase();
-		for (field_name, field) in &ver_type.ver_type.fields {
-			self.write_indent()?;
-			write!(self.file, "readonly {}: ", make_field_name(field_name))?;
-			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?)?;
-			writeln!(self.file, ";")?;
-		}
-		self.indent_decrease();
-		writeln!(self.file, "}}")?;
-		Ok(())
-	}
-}
-
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSExtraGeneratorOps for TSTypeGenerator<'model, 'opt, 'output, Output, GenEnumType> {
-	fn write_versioned_type(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		write!(self.file, "export type V{}", ver_type.version)?;
-		self.write_type_params(self.type_def().type_params())?;
-		write!(self.file, " = ")?;
-		self.indent_increase();
-		let mut is_first = true;
-		for (field_name, field) in &ver_type.ver_type.fields {
-			if !is_first {
-				writeln!(self.file)?;
-				self.write_indent()?;
-				write!(self.file, "| ")?;
-			}
-			else {
-				is_first = false;
-			}
-			write!(self.file, "{{ readonly tag: \"{}\", readonly {}: ", field_name, make_field_name(field_name))?;
-			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?)?;
-			write!(self.file, ", }}")?;
-		}
-		if is_first {
-			write!(self.file, "never")?;
-		}
-		self.indent_decrease();
-
-		writeln!(self.file, ";")?;
-		
-
 		Ok(())
 	}
 }

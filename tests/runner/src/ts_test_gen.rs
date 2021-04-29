@@ -62,6 +62,8 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> TSGenerator<'model> for TSTest
 	fn current_dir(&self) -> Result<PathBuf, GeneratorError> {
 		Ok(PathBuf::from(&self.options.output_dir))
 	}
+
+	fn add_user_converter(&mut self, _name: String) {}
 }
 
 impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
@@ -101,8 +103,9 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
         let type_arg_map: HashMap<_, _> = self.type_def.type_params().iter().map(|param| (param.clone(), model::Type::Defined(model::QualifiedName { package: model::PackageName::new(), name: String::from("u32") }, Vec::new()))).collect();
         let type_args: Vec<_> = type_arg_map.values().map(|arg| arg.clone()).collect();
         let current_type = model::Type::Defined(self.type_def.name().clone(), type_args);
+        let current_lang_type = self.build_type(version, &current_type)?;
 
-        self.write_expr(&self.build_codec(version, &current_type)?)?;
+        self.write_expr(&self.build_codec(current_lang_type.clone())?)?;
         write!(self.file, ", ")?;
         
         let mut writer = MemoryFormatWriter::new();

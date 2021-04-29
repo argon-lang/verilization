@@ -115,13 +115,13 @@ pub trait ScalaGenerator<'model, 'opt> : Generator<'model, ScalaLanguage> + Gene
 	
 	fn write_type(&mut self, t: &LangType<'model>) -> Result<(), GeneratorError> {
 		Ok(match t {
-			LangType::Versioned(name, version, args) => {
+			LangType::Versioned(_, name, version, args, _) => {
 				self.write_qual_name(&name)?;
 				write!(self.file(), ".V{}", version)?;
 				self.write_type_args(args)?;
 			},
 
-			LangType::Extern(name, args) => {
+			LangType::Extern(name, args, _) => {
 				self.write_qual_name(name)?;
 				self.write_type_args(args)?;
 			},
@@ -463,16 +463,53 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> Versio
 		Ok(())
 	}
 
-	fn write_version_header(&mut self, ver_type: &model::TypeVersionInfo<'model>) -> Result<(), GeneratorError> {
+	fn write_version_header(&mut self, t: LangType<'model>) -> Result<(), GeneratorError> {
+		match t {
+			LangType::Versioned(VersionedTypeKind::Struct, _, version, _, fields) => {
+				self.write_indent()?;
+				write!(self.file, "final case class V{}", version)?;
+				self.write_type_params(&self.type_def().type_params())?;
+				writeln!(self.file, "(")?;
+				self.indent_increase();
 
-		let version = &ver_type.version;
+				for field in fields.build()? {
+					self.write_indent()?;
+					write!(self.file, "{}: ", make_field_name(field.name))?;
+					self.write_type(&field.field_type)?;
+					writeln!(self.file, ",")?;
+				}
 
-		self.write_versioned_type(ver_type)?;
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, ") extends {}", self.type_def.name().name)?;
 
-		self.write_indent()?;
-		writeln!(self.file, "object V{} {{", version)?;
-		self.indent_increase();
-		self.write_versioned_type_object_data(ver_type)?;
+				self.write_indent()?;
+				writeln!(self.file, "object V{} {{", version)?;
+				self.indent_increase();
+			},
+			LangType::Versioned(VersionedTypeKind::Enum, _, version, _, fields) => {
+				self.write_indent()?;
+				write!(self.file, "sealed abstract class V{}", version)?;
+				self.write_type_params(&self.type_def().type_params())?;
+				writeln!(self.file, " extends {}", self.type_def.name().name)?;
+
+				self.write_indent()?;
+				writeln!(self.file, "object V{} {{", version)?;
+				self.indent_increase();
+
+				for field in fields.build()? {
+					self.write_indent()?;
+					write!(self.file, "final case class {}", make_type_name(field.name))?;
+					self.write_type_params(&self.type_def().type_params())?;
+					write!(self.file, "({}: ", make_field_name(field.name))?;
+					self.write_type(&field.field_type)?;
+					write!(self.file, ") extends V{}", version)?;
+					self.write_type_params(&self.type_def().type_params())?;
+					writeln!(self.file)?;
+				}
+			},
+			_ => return Err(GeneratorError::from("Could not generate type"))
+		}
 
 		Ok(())
 	}
@@ -508,7 +545,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> Versio
 		Ok(())
 	}
 
-	fn write_version_footer(&mut self, _ver_type: &model::TypeVersionInfo<'model>) -> Result<(), GeneratorError> {
+	fn write_version_footer(&mut self) -> Result<(), GeneratorError> {
 		self.indent_decrease();
 		writeln!(self.file, "}}")?;
 
@@ -762,7 +799,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> ScalaTypeGen
 					self.write_indent()?;
 					write!(self.file, "case ")?;
 					match &value_type {
-						LangType::Versioned(name, version, _) => {
+						LangType::Versioned(_, name, version, _, _) => {
 							self.write_qual_name(name)?;
 							write!(self.file, ".V{}.{}({})", version, make_type_name(&case_name), binding_name)?;
 						},

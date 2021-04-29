@@ -139,13 +139,13 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model, JavaLanguage> + Genera
 	
 	fn write_type(&mut self, t: &LangType<'model>, erased: bool) -> Result<(), GeneratorError> {
 		Ok(match t {
-			LangType::Versioned(name, version, args) => {
+			LangType::Versioned(_, name, version, args, _) => {
 				self.write_qual_name(name)?;
 				write!(self.file(), ".V{}", version)?;
 				self.write_type_args(args)?;
 			},
 
-			LangType::Extern(name, args) => {
+			LangType::Extern(name, args, _) => {
 				let mapped_name = self.extern_type_name(name, erased)?;
 
 				for part in &mapped_name.package.package {
@@ -431,11 +431,6 @@ struct JavaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, 
 	_extra: Extra,
 }
 
-trait JavaExtraGeneratorOps {
-	fn version_class_modifier() -> &'static str;
-	fn write_versioned_type_data(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError>;
-}
-
 impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> Generator<'model, JavaLanguage> for JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
 	fn model(&self) -> &'model model::Verilization {
 		self.model
@@ -469,9 +464,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> JavaGenerato
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, JavaLanguage, GenTypeKind> for JavaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind>
-	where JavaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> : JavaExtraGeneratorOps
-{
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> VersionedTypeGenerator<'model, JavaLanguage, GenTypeKind> for JavaTypeGenerator<'model, 'opt, 'output, Output, GenTypeKind> {
 	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
 		self.type_def
 	}
@@ -486,16 +479,150 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> Versio
 		Ok(())
 	}
 
-	fn write_version_header(&mut self, ver_type: &model::TypeVersionInfo<'model>) -> Result<(), GeneratorError> {
-		let version = &ver_type.version;
-
+	fn write_version_header(&mut self, t: LangType<'model>) -> Result<(), GeneratorError> {
 		self.write_indent()?;
-		write!(self.file, "public static {} class V{}", Self::version_class_modifier(), version)?;
+
+
+		match &t {
+			LangType::Versioned(VersionedTypeKind::Struct, _, version, _, _) => write!(self.file, "public static final class V{}", version)?,
+			LangType::Versioned(VersionedTypeKind::Enum, _, version, _, _) => write!(self.file, "public static abstract class V{}", version)?,
+			_ => return Err(GeneratorError::from("Could not generate type"))
+		}
+		
 		self.write_type_params(self.type_def().type_params())?;
 		writeln!(self.file, " extends {} {{", self.type_def.name().name)?;
 		self.indent_increase();
+
+		match t {
+			LangType::Versioned(VersionedTypeKind::Struct, _, version, _, fields) => {
+				self.write_indent()?;
+				write!(self.file, "public V{}(", version)?;
+
+				let fields = fields.build()?;
+
+				for_sep!(field, &fields, { write!(self.file, ",")?; }, {
+					self.write_type(&field.field_type, false)?;
+					write!(self.file, " {}", make_field_name(field.name))?;
+				});
+
+				writeln!(self.file, ") {{")?;
+				self.indent_increase();
+				
+				for field in &fields {
+					self.write_indent()?;
+					writeln!(self.file, "this.{} = {};", make_field_name(field.name), make_field_name(field.name))?;
+				}
+
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
+
+				for field in &fields {
+					self.write_indent()?;
+					write!(self.file, "public final ")?;
+					self.write_type(&field.field_type, false)?;
+					writeln!(self.file, " {};", make_field_name(field.name))?;
+				}
+
+				self.write_indent()?;
+				writeln!(self.file, "@Override")?;
+
+				self.write_indent()?;
+				writeln!(self.file, "public int hashCode() {{")?;
+				self.indent_increase();
+
+				self.write_indent()?;
+				write!(self.file, "return java.util.Objects.hash(")?;
+				for_sep!(field, &fields, { write!(self.file, ", ")?; }, {
+					write!(self.file, "{}", make_field_name(field.name))?;
+				});
+				writeln!(self.file, ");")?;
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
+
+				self.write_indent()?;
+				writeln!(self.file, "@Override")?;
+				self.write_indent()?;
+				writeln!(self.file, "public boolean equals(Object obj) {{")?;
+				self.indent_increase();
+				self.write_indent()?;
+				writeln!(self.file, "if(!(obj instanceof V{})) return false;", version)?;
+				self.write_indent()?;
+				writeln!(self.file, "V{} other = (V{})obj;", version, version)?;
+				for field in &fields {
+					self.write_indent()?;
+					writeln!(self.file, "if(!java.util.Objects.deepEquals(this.{}, other.{})) return false;", make_field_name(field.name), make_field_name(field.name))?;
+				}
+				self.write_indent()?;
+				writeln!(self.file, "return true;")?;
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
+			},
+			LangType::Versioned(VersionedTypeKind::Enum, _, version, _, fields) => {
+				self.write_indent()?;
+				writeln!(self.file, "private V{}() {{}}", version)?;
+
+				let fields = fields.build()?;
 		
-		self.write_versioned_type_data(ver_type)?;
+				for (index, field) in fields.iter().enumerate() {
+					self.write_indent()?;
+					write!(self.file, "public static final class {}", make_type_name(field.name))?;
+					self.write_type_params(self.type_def().type_params())?;
+					write!(self.file, " extends V{}", version)?;
+					self.write_type_params(self.type_def().type_params())?;
+					writeln!(self.file, " {{")?;
+		
+					self.indent_increase();
+					self.write_indent()?;
+					write!(self.file, "public {}(", make_type_name(field.name))?;
+					self.write_type(&field.field_type, false)?;
+					writeln!(self.file, " {}) {{", make_field_name(field.name))?;
+					self.indent_increase();
+					self.write_indent()?;
+					writeln!(self.file, "this.{} = {};", make_field_name(field.name), make_field_name(field.name))?;
+					self.indent_decrease();
+					self.write_indent()?;
+					writeln!(self.file, "}}")?;
+					self.write_indent()?;
+					write!(self.file, "public final ")?;
+					self.write_type(&field.field_type, false)?;
+					writeln!(self.file, " {};", make_field_name(field.name))?;
+					
+					self.write_indent()?;
+					writeln!(self.file, "@Override")?;
+					self.write_indent()?;
+					writeln!(self.file, "public int hashCode() {{")?;
+					self.indent_increase();
+					self.write_indent()?;
+					writeln!(self.file, "return java.util.Objects.hash({}, this.{});", index, make_field_name(field.name))?;
+					self.indent_decrease();
+					self.write_indent()?;
+					writeln!(self.file, "}}")?;
+					
+					self.write_indent()?;
+					writeln!(self.file, "@Override")?;
+					self.write_indent()?;
+					writeln!(self.file, "public boolean equals(Object obj) {{")?;
+					self.indent_increase();
+					self.write_indent()?;
+					writeln!(self.file, "if(!(obj instanceof {})) return false;", make_type_name(field.name))?;
+					self.write_indent()?;
+					writeln!(self.file, "{} other = ({})obj;", make_type_name(field.name), make_type_name(field.name))?;
+					self.write_indent()?;
+					writeln!(self.file, "return java.util.Objects.deepEquals(this.{}, other.{});", make_field_name(field.name), make_field_name(field.name))?;
+					self.indent_decrease();
+					self.write_indent()?;
+					writeln!(self.file, "}}")?;
+			
+					self.indent_decrease();
+					self.write_indent()?;
+					writeln!(self.file, "}}")?;
+				}
+			},
+			_ => return Err(GeneratorError::from("Could not generate type"))
+		}
 
 		Ok(())
 	}
@@ -542,7 +669,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, GenTypeKind> Versio
 		Ok(())
 	}
 
-	fn write_version_footer(&mut self, _ver_type: &model::TypeVersionInfo<'model>) -> Result<(), GeneratorError> {
+	fn write_version_footer(&mut self) -> Result<(), GeneratorError> {
 		self.indent_decrease();
 		writeln!(self.file, "}}")?;
 
@@ -563,7 +690,7 @@ fn write_enum_case_type<'model, 'opt, Gen>(gen: &mut Gen, value_type: &LangType<
 	Gen : JavaGenerator<'model, 'opt> + GeneratorWithFile
 {
 	match value_type {
-		LangType::Versioned(name, version, args) => {
+		LangType::Versioned(VersionedTypeKind::Enum, name, version, args, _) => {
 			gen.write_qual_name(name)?;
 			write!(gen.file(), ".V{}.{}", version, make_type_name(case_name))?;
 			if !args.is_empty() {
@@ -585,7 +712,7 @@ fn write_enum_case_type<'model, 'opt, Gen>(gen: &mut Gen, value_type: &LangType<
 	Ok(())
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> where JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> : JavaExtraGeneratorOps {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> JavaTypeGenerator<'model, 'opt, 'output, Output, Extra> {
 
 
 	fn open(model: &'model model::Verilization, options: &'opt JavaOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> where Extra : Default {
@@ -803,147 +930,6 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, Extra> JavaTypeGene
 		Ok(())
 	}
 	
-}
-
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaExtraGeneratorOps for JavaTypeGenerator<'model, 'opt, 'output, Output, GenStructType> {
-	fn version_class_modifier() -> &'static str {
-		"final"
-	}
-
-	fn write_versioned_type_data(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		self.write_indent()?;
-		write!(self.file, "public V{}(", ver_type.version)?;
-
-		for_sep!((field_name, field), &ver_type.ver_type.fields, { write!(self.file, ",")?; }, {
-			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?, false)?;
-			write!(self.file, " {}", make_field_name(field_name))?;
-		});
-
-		writeln!(self.file, ") {{")?;
-		self.indent_increase();
-		
-		for (field_name, _) in &ver_type.ver_type.fields {
-			self.write_indent()?;
-			writeln!(self.file, "this.{} = {};", make_field_name(field_name), make_field_name(field_name))?;
-		}
-
-		self.indent_decrease();
-		self.write_indent()?;
-		writeln!(self.file, "}}")?;
-
-		for (field_name, field) in &ver_type.ver_type.fields {
-			self.write_indent()?;
-			write!(self.file, "public final ")?;
-			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?, false)?;
-			writeln!(self.file, " {};", make_field_name(field_name))?;
-		}
-
-		self.write_indent()?;
-		writeln!(self.file, "@Override")?;
-
-		self.write_indent()?;
-		writeln!(self.file, "public int hashCode() {{")?;
-		self.indent_increase();
-
-		self.write_indent()?;
-		write!(self.file, "return java.util.Objects.hash(")?;
-		for_sep!((field_name, _), &ver_type.ver_type.fields, { write!(self.file, ", ")?; }, {
-			write!(self.file, "{}", make_field_name(field_name))?;
-		});
-		writeln!(self.file, ");")?;
-		self.indent_decrease();
-		self.write_indent()?;
-		writeln!(self.file, "}}")?;
-
-		self.write_indent()?;
-		writeln!(self.file, "@Override")?;
-		self.write_indent()?;
-		writeln!(self.file, "public boolean equals(Object obj) {{")?;
-		self.indent_increase();
-		self.write_indent()?;
-		writeln!(self.file, "if(!(obj instanceof V{})) return false;", ver_type.version)?;
-		self.write_indent()?;
-		writeln!(self.file, "V{} other = (V{})obj;", ver_type.version, ver_type.version)?;
-		for (field_name, _) in &ver_type.ver_type.fields {
-			self.write_indent()?;
-			writeln!(self.file, "if(!java.util.Objects.deepEquals(this.{}, other.{})) return false;", make_field_name(field_name), make_field_name(field_name))?;
-		}
-		self.write_indent()?;
-		writeln!(self.file, "return true;")?;
-		self.indent_decrease();
-		self.write_indent()?;
-		writeln!(self.file, "}}")?;
-
-		Ok(())
-	}
-}
-
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaExtraGeneratorOps for JavaTypeGenerator<'model, 'opt, 'output, Output, GenEnumType> {
-	fn version_class_modifier() -> &'static str {
-		"abstract"
-	}
-
-	fn write_versioned_type_data(&mut self, ver_type: &model::TypeVersionInfo) -> Result<(), GeneratorError> {
-		self.write_indent()?;
-		writeln!(self.file, "private V{}() {{}}", ver_type.version)?;
-
-		for (index, (field_name, field)) in ver_type.ver_type.fields.iter().enumerate() {
-			self.write_indent()?;
-			write!(self.file, "public static final class {}", make_type_name(field_name))?;
-			self.write_type_params(self.type_def().type_params())?;
-			write!(self.file, " extends V{}", ver_type.version)?;
-			self.write_type_params(self.type_def().type_params())?;
-			writeln!(self.file, " {{")?;
-
-			self.indent_increase();
-			self.write_indent()?;
-			write!(self.file, "public {}(", make_type_name(field_name))?;
-			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?, false)?;
-			writeln!(self.file, " {}) {{", make_field_name(field_name))?;
-			self.indent_increase();
-			self.write_indent()?;
-			writeln!(self.file, "this.{} = {};", make_field_name(field_name), make_field_name(field_name))?;
-			self.indent_decrease();
-			self.write_indent()?;
-			writeln!(self.file, "}}")?;
-			self.write_indent()?;
-			write!(self.file, "public final ")?;
-			self.write_type(&self.build_type(&ver_type.version, &field.field_type)?, false)?;
-			writeln!(self.file, " {};", make_field_name(field_name))?;
-			
-			self.write_indent()?;
-			writeln!(self.file, "@Override")?;
-			self.write_indent()?;
-			writeln!(self.file, "public int hashCode() {{")?;
-			self.indent_increase();
-			self.write_indent()?;
-			writeln!(self.file, "return java.util.Objects.hash({}, this.{});", index, make_field_name(field_name))?;
-			self.indent_decrease();
-			self.write_indent()?;
-			writeln!(self.file, "}}")?;
-			
-			self.write_indent()?;
-			writeln!(self.file, "@Override")?;
-			self.write_indent()?;
-			writeln!(self.file, "public boolean equals(Object obj) {{")?;
-			self.indent_increase();
-			self.write_indent()?;
-			writeln!(self.file, "if(!(obj instanceof {})) return false;", make_type_name(field_name))?;
-			self.write_indent()?;
-			writeln!(self.file, "{} other = ({})obj;", make_type_name(field_name), make_type_name(field_name))?;
-			self.write_indent()?;
-			writeln!(self.file, "return java.util.Objects.deepEquals(this.{}, other.{});", make_field_name(field_name), make_field_name(field_name))?;
-			self.indent_decrease();
-			self.write_indent()?;
-			writeln!(self.file, "}}")?;
-	
-			self.indent_decrease();
-			self.write_indent()?;
-			writeln!(self.file, "}}")?;
-		}
-
-		Ok(())
-	}
 }
 
 
