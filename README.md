@@ -165,36 +165,9 @@ Verilization has a command line interface. The following options are supported.
 
 The following languages are supported.
 
-### TypeScript
-
- * small integer types ({i,u}{8,16,32}) are mapped to number
- * other integer types ({i,u}64, int, and nat) are mapped to bigint
-
-#### TypeScript-specific Options
-
- * `out_dir` - the base output directory
- * `pkg:package.name` - the subdirectory for the package
- * `lib:package.name` - the module import for the library, types in this package will not be generated
-
-### Java
-
- * Unsinged integer types are mapped to their signed equivalent
-
-#### Java-specific Options
-
- * `out_dir` - the base output directory
- * `pkg:package.name` - the java package for the original verilization package
- * `lib:package.name` - the java package, types in this package will not be generated
-
-### Scala
-
- * Unsinged integer types are mapped to their signed equivalent
-
-#### Scala-specific Options
-
- * `out_dir` - the base output directory
- * `pkg:package.name` - the scala package for the original verilization package
- * `lib:package.name` - the scala package, types in this package will not be generated
+ * [TypeScript](docs/lang/TypeScript.md)
+ * [Java](docs/lang/Java.md)
+ * [Scala](docs/lang/Scala.md)
 
 ## Compiler Bindings
 
@@ -205,4 +178,5 @@ These bindings expose both an interface that can be used directly from the runti
 
 Currently, there are bindings for the following runtimes.
 
+ * Node
 

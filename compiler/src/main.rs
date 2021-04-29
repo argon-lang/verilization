@@ -6,12 +6,13 @@ use lang::{GeneratorError, Language};
 
 
 fn command_version() -> Result<(), GeneratorError> {
-	println!("TODO: Version");
+	let version = env!("CARGO_PKG_VERSION");
+	println!("verilization compiler version {} (native)", version);
 	Ok(())
 }
 
 fn command_help() -> Result<(), GeneratorError> {
-	println!("TODO: Help");
+	println!("{}", cli_data::HELP_MESSAGE);
 	Ok(())
 }
 

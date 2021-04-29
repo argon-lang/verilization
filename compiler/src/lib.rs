@@ -3,6 +3,7 @@ pub mod model;
 mod parser;
 pub mod lang;
 mod type_check;
+pub mod cli_data;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_output_handler;
