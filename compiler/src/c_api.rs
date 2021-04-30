@@ -166,6 +166,7 @@ pub unsafe extern "C" fn verilization_generate(verilization: *const model::Veril
     }
 }
 
+
 unsafe fn verilization_generate_impl(verilization: *const model::Verilization, language: *const APIString, noptions: usize, options: *const LanguageOption) -> Result<*mut OutputFileMap, GeneratorError> {
     let verilization = verilization.as_ref().ok_or("Verilization pointer is null")?;
     let language = language.as_ref().ok_or("Language string is null")?.to_str().ok_or("Language is invalid text")?;

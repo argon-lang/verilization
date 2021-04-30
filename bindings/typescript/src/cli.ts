@@ -1,13 +1,20 @@
 import {Verilization, OutputFileMap, LangOptions, LangOption} from "./index.js";
 import * as fs from "fs/promises";
 import * as path from "path";
+import * as url from "url";
 
-function command_version(): void {
-    console.log("TODO: Version");
+async function command_version(): Promise<void> {
+    const cliFile = url.fileURLToPath(import.meta.url);
+    const packageJsonFile = path.join(path.dirname(cliFile), "..", "package.json");
+    const packageJson = JSON.parse(await fs.readFile(packageJsonFile, { encoding: "utf-8" }));
+    console.log(`verilization compiler version ${packageJson.version} (JS)`);
 }
 
-function command_help(): void {
-    console.log("TODO: Help");
+async function command_help(): Promise<void> {
+    const cliFile = url.fileURLToPath(import.meta.url);
+    const helpFile = path.join(path.dirname(cliFile), "help.txt");
+    const helpMessage = await fs.readFile(helpFile, { encoding: "utf-8" });
+    console.log(helpMessage);
 }
 
 async function command_generate(lang: string, inputFiles: readonly string[], options: LangOptions): Promise<void> {
@@ -80,12 +87,12 @@ async function parse_args(args: Iterator<string>): Promise<void> {
             case "version":
             case "--version":
             case "-v":
-                return command_version();
+                return await command_version();
 
             case "help":
             case "--help":
             case "-h":
-                return command_help();
+                return await command_help();
 
             case "generate":
             {
@@ -101,13 +108,12 @@ async function parse_args(args: Iterator<string>): Promise<void> {
                 throw new Error(`Unexpected argument: ${arg}`);
         }
     }
-
-    throw new Error("No command specified");
 }
 
 try {
     await parse_args(process.argv.slice(2)[Symbol.iterator]());
 }
 catch(e) {
+    console.log(e);
     process.exitCode = 1;
 }

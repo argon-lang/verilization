@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build-wasm": "cd ../../compiler && cargo build --lib --release --target wasm32-unknown-unknown",
-    "build": "npm run build-wasm && mkdirp bin && cpy ../../compiler/target/wasm32-unknown-unknown/release/verilization_compiler.wasm bin/ && tsc --project tsconfig.json"
+    "build": "npm run build-wasm && mkdirp bin && cpy ../../compiler/target/wasm32-unknown-unknown/release/verilization_compiler.wasm bin/ && cpy ../../compiler/src/help.txt bin/ && tsc --project tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^14.14.37",
