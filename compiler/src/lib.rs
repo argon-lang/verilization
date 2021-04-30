@@ -10,7 +10,8 @@ mod file_output_handler;
 #[cfg(not(target_arch = "wasm32"))]
 pub use file_output_handler::FileOutputHandler;
 
-pub mod memory_output_handler;
+mod memory_output_handler;
+pub use memory_output_handler::MemoryOutputHandler;
 
 mod model_loader;
 
