@@ -1,6 +1,6 @@
 use verilization_test_runner::*;
 
-use verilization_compiler::{lang, file_output_handler};
+use verilization_compiler::{lang, FileOutputHandler};
 use lang::GeneratorError;
 
 use test_lang::{TestLanguage, TestGenerator};
@@ -30,7 +30,7 @@ fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), GeneratorError> {
         let model = verilization_compiler::load_files(input_files)?;
 
         let options = Lang::test_options();
-        Lang::generate(&model, options, &mut file_output_handler::FileOutputHandler {})?;
+        Lang::generate(&model, options, &mut FileOutputHandler {})?;
 
 
         let mut rand = rand_chacha::ChaCha20Rng::from_seed(hex!("

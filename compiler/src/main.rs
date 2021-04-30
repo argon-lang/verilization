@@ -12,14 +12,15 @@ fn command_version() -> Result<(), GeneratorError> {
 }
 
 fn command_help() -> Result<(), GeneratorError> {
-	println!("{}", cli_data::HELP_MESSAGE);
+	let help_message = include_str!("help.txt");
+	println!("{}", help_message);
 	Ok(())
 }
 
 fn command_generate<Lang: Language>(input_files: Vec<OsString>, options: Lang::Options) -> Result<(), GeneratorError> {
 	let model = load_files(input_files)?;
 
-	Lang::generate(&model, options, &mut file_output_handler::FileOutputHandler {})
+	Lang::generate(&model, options, &mut FileOutputHandler {})
 }
 
 

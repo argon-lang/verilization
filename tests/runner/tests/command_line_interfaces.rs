@@ -1,4 +1,4 @@
-use verilization_compiler::{lang, file_output_handler};
+use verilization_compiler::{lang, FileOutputHandler};
 
 use verilization_test_runner::*;
 
@@ -48,7 +48,7 @@ fn run_test_case<Lang: TestLanguage>(model_file: &str) -> Result<(), GeneratorEr
 
         let model = verilization_compiler::load_files(input_files)?;
         let options = Lang::test_options_dir(OsString::from(path));
-        Lang::generate(&model, options, &mut file_output_handler::FileOutputHandler {})
+        Lang::generate(&model, options, &mut FileOutputHandler {})
     })?;
 
     let mut commands = Vec::new();
