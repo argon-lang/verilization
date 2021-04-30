@@ -141,7 +141,7 @@ impl PartialOrd for QualifiedName {
 	}
 }
 
-/// A data type. This can be a built-in or user-defined type.
+/// A data type. This includes the name of the type and the type arguments.
 #[derive(Clone, Debug)]
 pub struct Type {
 	pub name: QualifiedName,
@@ -185,6 +185,7 @@ impl <'a, A> Named<'a, A> {
 		}
 	}
 
+	/// Gets the name of this named value.
 	pub fn name(&self) -> &'a QualifiedName {
 		self.name
 	}
@@ -201,6 +202,8 @@ pub enum ConstantValue {
 	Constant(QualifiedName),
 }
 
+/// The result of looking up a constant for a specific format version.
+/// If value is None, then the value was defined in a previous version.
 pub struct ConstantVersionInfo<'a> {
 	pub version: BigUint,
 	pub value: Option<&'a ConstantValue>,
@@ -209,6 +212,8 @@ pub struct ConstantVersionInfo<'a> {
 }
 
 /// A constant definition.
+/// 
+/// See accessor methods for [`Named`] constants.
 pub struct Constant {
 	pub(crate) imports: HashMap<String, ScopeLookup>,
 	pub(crate) value_type: Type,
@@ -217,14 +222,17 @@ pub struct Constant {
 
 impl <'a> Named<'a, Constant> {
 
+	/// The type of the constant.
 	pub fn value_type(self) -> &'a Type {
 		&self.value.value_type
 	}
 
+	/// Iterates over types referenced in the type of the constant.
 	pub fn referenced_types(self) -> ReferencedTypeIterator<'a> {
 		ReferencedTypeIterator::from_type(&self.value.value_type)
 	}
 
+	/// Iterates over the versions of the constant from the first version to the latest version of the model.
 	pub fn versions(self) -> ConstantVersionIterator<'a> {
 		ConstantVersionIterator {
 			constant: self,
@@ -234,6 +242,7 @@ impl <'a> Named<'a, Constant> {
 		}
 	}
 
+	/// Gets a scope for this constant element.
 	pub fn scope(self) -> Scope<'a> {
 		Scope {
 			model: self.model,
@@ -261,6 +270,7 @@ pub struct TypeVersionDefinition {
 	pub(crate) dummy: PhantomData<()>,
 }
 
+/// The result of looking up a version of a type.
 #[derive(Debug)]
 pub struct TypeVersionInfo<'a> {
 	pub version: BigUint,
@@ -282,7 +292,7 @@ impl <'a> Clone for TypeVersionInfo<'a> {
 	}
 }
 
-/// A struct defines a product type. A struct can be defined differently in different format versions.
+/// Defines a versioned type. Could be a struct or enum.
 #[derive(Debug)]
 pub struct VersionedTypeDefinitionData {
 	pub(crate) imports: HashMap<String, ScopeLookup>,
@@ -292,10 +302,13 @@ pub struct VersionedTypeDefinitionData {
 }
 
 impl <'a> Named<'a, VersionedTypeDefinitionData> {
+
+	// Gets whether this type is final.
 	pub fn is_final(&self) -> bool {
 		self.value.is_final
 	}
 
+	/// Gets a version of this type.
 	pub fn versioned(self, version: &BigUint) -> Option<TypeVersionInfo<'a>> {
 		self.value.versions.iter()
 			.filter(|(ver, _)| ver <= &version)
@@ -319,14 +332,21 @@ impl <'a> Named<'a, VersionedTypeDefinitionData> {
 			})
 	}
 
+	/// Finds the last explicitly defined version of this type.
 	pub fn last_explicit_version(self) -> Option<&'a BigUint> {
 		self.value.versions.keys().max()
 	}
 
+	/// Iterates over types referenced in the field types of this type.
 	pub fn referenced_types(self) -> ReferencedTypeIterator<'a> {
 		ReferencedTypeIterator::from_versions(&self.value.versions)
 	}
 
+	/// Iterates over the versions of this type.
+	/// 
+	/// Starts at the first version of the type.
+	/// If the type is final, ends at the last explicitly defined version.
+	/// If the type is not final, ends at the latest version of the model.
 	pub fn versions(self) -> TypeVersionIterator<'a> {
 		TypeVersionIterator {
 			type_def: self,
@@ -343,6 +363,7 @@ impl <'a> Named<'a, VersionedTypeDefinitionData> {
 		}
 	}
 
+	/// Gets a scope for the type.
 	pub fn scope(self) -> Scope<'a> {
 		Scope {
 			model: self.model,
@@ -352,11 +373,13 @@ impl <'a> Named<'a, VersionedTypeDefinitionData> {
 		}
 	}
 
+	/// Gets the parameters of the type.
 	pub fn type_params(self) -> &'a Vec<String> {
 		&self.value.type_params
 	}
 }
 
+/// Defines an extern type.
 #[derive(Debug)]
 pub struct ExternTypeDefinitionData {
 	pub(crate) imports: HashMap<String, ScopeLookup>,
@@ -364,12 +387,14 @@ pub struct ExternTypeDefinitionData {
 	pub(crate) literals: Vec<ExternLiteralSpecifier>,
 }
 
+/// Defines a bound for an integer literal definition.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ExternLiteralIntBound {
 	Inclusive,
 	Exclusive,
 }
 
+/// Defines a literal for an extern type.
 #[derive(Debug)]
 pub enum ExternLiteralSpecifier {
 	Integer(ExternLiteralIntBound, Option<BigInt>, ExternLiteralIntBound, Option<BigInt>),
@@ -380,10 +405,12 @@ pub enum ExternLiteralSpecifier {
 }
 
 impl <'a> Named<'a, ExternTypeDefinitionData> {
+	/// Get the literals defined by the type.
 	pub fn literals(self) -> &'a Vec<ExternLiteralSpecifier> {
 		&self.value.literals
 	}
 
+	/// Gets a scope for the type.
 	pub fn scope(self) -> Scope<'a> {
 		Scope {
 			model: self.model,
@@ -393,6 +420,7 @@ impl <'a> Named<'a, ExternTypeDefinitionData> {
 		}
 	}
 
+	/// Gets the parameters for the type.
 	pub fn type_params(self) -> &'a Vec<String> {
 		&self.value.type_params
 	}
@@ -400,13 +428,14 @@ impl <'a> Named<'a, ExternTypeDefinitionData> {
 
 
 
-/// A definition of a type. Either a struct or enum.
+/// A definition of a type.
 pub enum TypeDefinition {
 	StructType(VersionedTypeDefinitionData),
 	EnumType(VersionedTypeDefinitionData),
 	ExternType(ExternTypeDefinitionData),
 }
 
+/// A named definition of a type.
 #[derive(Copy, Clone)]
 pub enum NamedTypeDefinition<'a> {
 	StructType(Named<'a, VersionedTypeDefinitionData>),
@@ -415,6 +444,7 @@ pub enum NamedTypeDefinition<'a> {
 }
 
 impl <'a> NamedTypeDefinition<'a> {
+	/// Get the name of the type.
 	pub fn name(&self) -> &'a QualifiedName {
 		match self {
 			NamedTypeDefinition::StructType(t) => t.name,
@@ -423,6 +453,7 @@ impl <'a> NamedTypeDefinition<'a> {
 		}
 	}
 
+	/// Gets the parameters of the type.
 	pub fn type_params(&self) -> &'a Vec<String> {
 		match self {
 			NamedTypeDefinition::StructType(t) => &t.value.type_params,
@@ -431,10 +462,12 @@ impl <'a> NamedTypeDefinition<'a> {
 		}
 	}
 
+	/// Gets the number of parameters of the type.
 	pub fn arity(&self) -> usize {
 		self.type_params().len()
 	}
 
+	/// Returns true if the type exists in the specified version.
 	pub fn has_version(self, version: &BigUint) -> bool {
 		match self {
 			NamedTypeDefinition::StructType(t) => t.versioned(version).is_some(),
@@ -457,12 +490,16 @@ pub struct Verilization {
 	names: HashSet<QualifiedName>,
 }
 
+/// The result of looking up a name.
 #[derive(Clone, Debug)]
 pub enum ScopeLookup {
 	NamedType(QualifiedName),
 	TypeParameter(String),
 }
 
+/// A Scope allows looking up names.
+/// 
+/// It can identify names that are type parameters, names in the current package, etc.
 pub struct Scope<'a> {
 	model: &'a Verilization,
 	current_pkg: Option<&'a PackageName>,
@@ -507,17 +544,6 @@ impl <'a> Scope<'a> {
 		}
 
 		ScopeLookup::NamedType(name)
-	}
-
-	pub fn resolve(&self, t: Type, type_args: &HashMap<String, Type>) -> Option<Type> {
-		Some(match self.lookup(t.name) {
-			ScopeLookup::NamedType(name) => {
-				Type { name: name, args: t.args.into_iter().map(|arg| self.resolve(arg, type_args)).collect::<Option<Vec<_>>>()? }
-			},
-			ScopeLookup::TypeParameter(name) => {
-				type_args.get(&name)?.clone()
-			},
-		})
 	}
 
 	pub fn type_params(&self) -> Vec<String> {
@@ -574,12 +600,14 @@ impl Verilization {
 		}
 	}
 
+	/// Finds a constant in the model.
 	pub fn get_constant<'a>(&'a self, name: &QualifiedName) -> Option<Named<'a, Constant>> {
 		let (name, constant) = self.constants.get_key_value(name)?;
 
 		Some(Named::new(self, name, constant))
 	}
 
+	/// Finds a type in the model.
 	pub fn get_type<'a>(&'a self, name: &QualifiedName) -> Option<NamedTypeDefinition<'a>> {
 		let (name, t) = self.type_definitions.get_key_value(name)?;
 
@@ -590,6 +618,7 @@ impl Verilization {
 		})
 	}
 
+	/// Determines whether a type with this name exists.
 	pub fn has_type<'a>(&'a self, name: &QualifiedName) -> bool {
 		self.type_definitions.contains_key(name)
 	}
@@ -607,7 +636,7 @@ impl Verilization {
 	}
 
 
-	// Iterate constants.
+	/// Iterate over constants defined in the model.
 	pub fn constants<'a>(&'a self) -> ConstantIterator<'a> {
 		ConstantIterator {
 			model: self,
@@ -615,6 +644,7 @@ impl Verilization {
 		}
 	}
 
+	/// Iterate over types defined in the model.
 	pub fn types<'a>(&'a self) -> TypeIterator<'a> {
 		TypeIterator {
 			model: self,
