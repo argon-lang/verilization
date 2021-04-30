@@ -3,7 +3,7 @@ use std::fs::File;
 use std::path::Path;
 use crate::lang::{OutputHandler, GeneratorError};
 
-
+/// An output handler that operates directly on the file system.
 pub struct FileOutputHandler {}
 
 impl <'output> OutputHandler<'output> for FileOutputHandler {

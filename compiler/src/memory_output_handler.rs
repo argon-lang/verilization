@@ -3,6 +3,7 @@ use std::path::Path;
 use crate::lang::{OutputHandler, GeneratorError};
 
 
+/// An output handler that operates on an in-memory file system.
 pub struct MemoryOutputHandler {
     pub files: HashMap<String, Vec<u8>>,
 }

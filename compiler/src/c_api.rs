@@ -1,3 +1,5 @@
+//! Defines the C API for use in bindings.
+//! Most notably for WebAssembly.
 
 use crate::{lang, model, parser, model_loader};
 use lang::GeneratorError;
@@ -6,7 +8,9 @@ use crate::memory_output_handler::MemoryOutputHandler;
 use std::ffi::{c_void, OsString};
 use std::collections::HashMap;
 
-// C API
+
+
+/// Represents a string with a length followed by the UTF-8 data.
 #[repr(C)]
 pub struct APIString {
     length: usize,
@@ -28,24 +32,30 @@ impl APIString {
     }
 }
 
+/// Represents a Result<T, String>.
+/// If is_error is true, then the error field of data is inhabited.
+/// Otherwise, the value field is inhabited.
 #[repr(C)]
 pub struct APIResult<T> {
     is_error: usize,
     data: APIResultPtr<T>,
 }
 
+/// Represents either a value or an error message.
 #[repr(C)]
 pub union APIResultPtr<T> {
     error: *mut APIString,
     value: *mut T,
 }
 
+/// An option defined by the name of the option and the value.
 #[repr(C)]
 pub struct LanguageOption {
     name: *mut APIString,
     value: *mut APIString,
 }
 
+/// An output file. Contains the file name and the content.
 #[repr(C)]
 pub struct OutputFileEntry {
     name: *mut APIString,
@@ -53,6 +63,7 @@ pub struct OutputFileEntry {
     content: *mut u8,
 }
 
+/// A map of output files.
 #[repr(C)]
 pub struct OutputFileMap {
     length: usize,
@@ -96,7 +107,7 @@ pub unsafe extern "C" fn verilization_mem_alloc(size: usize) -> *mut u8 {
 /// The size must be the same size used to allocate the memory.
 #[no_mangle]
 pub unsafe extern "C" fn verilization_mem_free(size: usize, ptr: *mut u8) {
-    std::alloc::dealloc(ptr, std::alloc::Layout::from_size_align(size, std::mem::size_of::<*mut model::Verilization>()).unwrap())
+    std::alloc::dealloc(ptr, std::alloc::Layout::from_size_align(size, std::mem::size_of::<*mut c_void>()).unwrap())
 }
 
 /// Parses verilization source files.
