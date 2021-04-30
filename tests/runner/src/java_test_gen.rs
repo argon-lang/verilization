@@ -7,7 +7,6 @@ use lang::generator::*;
 use crate::memory_format::MemoryFormatWriter;
 use crate::test_lang::{TestLanguage, TestGenerator};
 
-use std::collections::HashMap;
 use num_bigint::BigUint;
 use std::fs;
 use std::fs::File;
@@ -65,9 +64,8 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> JavaTestCaseGen<'model, 'opt, 'ou
     fn versioned_type(&mut self, version: &BigUint) -> Result<(), GeneratorError> {
         write!(self.file, "\t\tcheck(")?;
 
-        let type_arg_map: HashMap<_, _> = self.type_def.type_params().iter().map(|param| (param.clone(), model::Type::Defined(model::QualifiedName { package: model::PackageName::new(), name: String::from("u32") }, Vec::new()))).collect();
-        let type_args: Vec<_> = type_arg_map.values().map(|arg| arg.clone()).collect();
-        let current_type = model::Type::Defined(self.type_def.name().clone(), type_args);
+        let type_args: Vec<_> = self.type_def.type_params().iter().map(|_| model::Type { name: model::QualifiedName { package: model::PackageName::new(), name: String::from("u32") }, args: Vec::new() }).collect();
+        let current_type = model::Type { name: self.type_def.name().clone(), args: type_args };
         let current_lang_type = self.build_type(version, &current_type)?;
 
         self.write_expr(&self.build_codec(current_lang_type.clone())?)?;

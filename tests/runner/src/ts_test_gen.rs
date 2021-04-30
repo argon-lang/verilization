@@ -100,8 +100,8 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
     fn versioned_type(&mut self, version: &BigUint) -> Result<(), GeneratorError> {
         write!(self.file, "await check(")?;
 
-        let type_args: Vec<_> = self.type_def.type_params().iter().map(|_| model::Type::Defined(model::QualifiedName { package: model::PackageName::new(), name: String::from("u32") }, Vec::new())).collect();
-        let current_type = model::Type::Defined(self.type_def.name().clone(), type_args);
+        let type_args: Vec<_> = self.type_def.type_params().iter().map(|_| model::Type { name: model::QualifiedName { package: model::PackageName::new(), name: String::from("u32") }, args: Vec::new() }).collect();
+        let current_type = model::Type { name: self.type_def.name().clone(), args: type_args };
         let current_lang_type = self.build_type(version, &current_type)?;
 
         self.write_expr(&self.build_codec(current_lang_type.clone())?)?;

@@ -143,8 +143,9 @@ impl PartialOrd for QualifiedName {
 
 /// A data type. This can be a built-in or user-defined type.
 #[derive(Clone, Debug)]
-pub enum Type {
-	Defined(QualifiedName, Vec<Type>),
+pub struct Type {
+	pub name: QualifiedName,
+	pub args: Vec<Type>,
 }
 
 // Attaches a name to something.
@@ -509,16 +510,12 @@ impl <'a> Scope<'a> {
 	}
 
 	pub fn resolve(&self, t: Type, type_args: &HashMap<String, Type>) -> Option<Type> {
-		Some(match t {
-			Type::Defined(name, args) => {
-				match self.lookup(name) {
-					ScopeLookup::NamedType(name) => {
-						Type::Defined(name, args.into_iter().map(|arg| self.resolve(arg, type_args)).collect::<Option<Vec<_>>>()?)
-					},
-					ScopeLookup::TypeParameter(name) => {
-						type_args.get(&name)?.clone()
-					},
-				}
+		Some(match self.lookup(t.name) {
+			ScopeLookup::NamedType(name) => {
+				Type { name: name, args: t.args.into_iter().map(|arg| self.resolve(arg, type_args)).collect::<Option<Vec<_>>>()? }
+			},
+			ScopeLookup::TypeParameter(name) => {
+				type_args.get(&name)?.clone()
 			},
 		})
 	}
@@ -755,10 +752,9 @@ impl <'a> Iterator for ReferencedTypeIterator<'a> {
 		loop {
 			while let Some(arg_iter) = self.arg_iters.last_mut() {
 				if let Some(arg) = arg_iter.next() {
-					let Type::Defined(name, args) = arg;
-					self.arg_iters.push(args.iter());
-					if self.seen_types.insert(name) {
-						return Some(name);
+					self.arg_iters.push(arg.args.iter());
+					if self.seen_types.insert(&arg.name) {
+						return Some(&arg.name);
 					}
 			}
 				else {

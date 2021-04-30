@@ -280,7 +280,7 @@ fn type_expr(input: &str) -> PResult<&str, model::Type> {
 		(input, qual_name, args.unwrap_or(Vec::new()))
 	};
 	
-	Ok((input, model::Type::Defined(qual_name, args)))
+	Ok((input, model::Type { name: qual_name, args: args }))
 }
 
 fn sequence_literal(input: &str) -> PResult<&str, model::ConstantValue> {

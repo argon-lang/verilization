@@ -21,70 +21,64 @@ struct TypeCheck<'model> {
 impl <'model> TypeCheck<'model> {
 
     fn check_type(&self, version: &BigUint, t: &Type) -> Result<(), TypeCheckError> {
-        match t {
-            Type::Defined(name, args) => match self.scope.lookup(name.clone()) {
-                ScopeLookup::NamedType(name) => {
-                    let t = match self.model.get_type(&name) {
-                        Some(t) => t,
-                        None => return Err(TypeCheckError::TypeNotDefined(name)),
-                    };
-    
-                    if !t.has_version(version) {
-                        return Err(TypeCheckError::TypeAddedInNewerVersion(name, version.clone()));
-                    }
-        
-                    let arity = t.arity();
-                    if arity != args.len() {
-                        return Err(TypeCheckError::ArityMismatch(arity, args.len()));
-                    }
-        
-                    for arg in args {
-                        self.check_type(version, arg)?;
-                    }
-    
-                    Ok(())
-                },
-                ScopeLookup::TypeParameter(_) => {
-                    if args.len() != 0 {
-                        return Err(TypeCheckError::ArityMismatch(0, args.len()));
-                    }
+        match self.scope.lookup(t.name.clone()) {
+            ScopeLookup::NamedType(name) => {
+                let named_type_def = match self.model.get_type(&name) {
+                    Some(t) => t,
+                    None => return Err(TypeCheckError::TypeNotDefined(name)),
+                };
 
-                    Ok(())
+                if !named_type_def.has_version(version) {
+                    return Err(TypeCheckError::TypeAddedInNewerVersion(name, version.clone()));
                 }
+    
+                let arity = named_type_def.arity();
+                if arity != t.args.len() {
+                    return Err(TypeCheckError::ArityMismatch(arity, t.args.len()));
+                }
+    
+                for arg in &t.args {
+                    self.check_type(version, &arg)?;
+                }
+
+                Ok(())
             },
+            ScopeLookup::TypeParameter(_) => {
+                if t.args.len() != 0 {
+                    return Err(TypeCheckError::ArityMismatch(0, t.args.len()));
+                }
+
+                Ok(())
+            }
         }
     }
 
     fn check_is_final(&self, t: &Type, version: &BigUint) -> Result<bool, TypeCheckError> {
-        Ok(match t {
-            Type::Defined(name, args) => {
-                match self.scope.lookup(name.clone()) {
-                    ScopeLookup::NamedType(name) => {
-                        match self.model.get_type(&name).ok_or_else(|| TypeCheckError::TypeNotDefined(name.clone()))? {
-                            NamedTypeDefinition::StructType(type_def) | NamedTypeDefinition::EnumType(type_def) => {
-                                if !type_def.is_final() {
-                                    return Ok(false);
-                                }
-                                
-                                if !(type_def.last_explicit_version().ok_or_else(|| TypeCheckError::CouldNotFindLastVersion(name.clone()))? <= version) {
-                                    return Ok(false);
-                                }
-                            },
-    
-                            NamedTypeDefinition::ExternType(_) => (),
+        Ok(match self.scope.lookup(t.name.clone()) {
+            ScopeLookup::NamedType(name) => {
+                match self.model.get_type(&name).ok_or_else(|| TypeCheckError::TypeNotDefined(name.clone()))? {
+                    NamedTypeDefinition::StructType(type_def) | NamedTypeDefinition::EnumType(type_def) => {
+                        if !type_def.is_final() {
+                            return Ok(false);
                         }
-    
-                        for arg in args {
-                            if !self.check_is_final(arg, version)? {
-                                return Ok(false);
-                            }
+                        
+                        if !(type_def.last_explicit_version().ok_or_else(|| TypeCheckError::CouldNotFindLastVersion(name.clone()))? <= version) {
+                            return Ok(false);
                         }
-    
-                        true
                     },
-                    ScopeLookup::TypeParameter(_) => true,
+
+                    NamedTypeDefinition::ExternType(_) => (),
                 }
+
+                for arg in &t.args {
+                    if !self.check_is_final(&arg, version)? {
+                        return Ok(false);
+                    }
+                }
+
+                true
             },
+            ScopeLookup::TypeParameter(_) => true,
         })
     }
     

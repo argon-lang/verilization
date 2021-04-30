@@ -256,24 +256,22 @@ pub enum ConvertParam<'model> {
 }
 
 fn requires_conversion<'model, G: Generator<'model>>(gen: &G, t: &model::Type, prev_ver: &BigUint) -> bool {
-	match t {
-		model::Type::Defined(name, args) => match gen.scope().lookup(name.clone()) {
-			model::ScopeLookup::NamedType(name) => match gen.model().get_type(&name) {
-				Some(model::NamedTypeDefinition::StructType(type_def)) | Some(model::NamedTypeDefinition::EnumType(type_def)) => {
-					!type_def.is_final() ||
-						(match type_def.last_explicit_version() {
-							Some(last_ver) => last_ver > prev_ver,
-							None => true
-						}) ||
-						args.iter().any(|arg| requires_conversion(gen, arg, prev_ver))
-				},
-
-				Some(model::NamedTypeDefinition::ExternType(_)) => false,
-
-				None => true, // Error condition, assume conversion required. Should fail when determining the conversion.
+	match gen.scope().lookup(t.name.clone()) {
+		model::ScopeLookup::NamedType(name) => match gen.model().get_type(&name) {
+			Some(model::NamedTypeDefinition::StructType(type_def)) | Some(model::NamedTypeDefinition::EnumType(type_def)) => {
+				!type_def.is_final() ||
+					(match type_def.last_explicit_version() {
+						Some(last_ver) => last_ver > prev_ver,
+						None => true
+					}) ||
+					t.args.iter().any(|arg| requires_conversion(gen, arg, prev_ver))
 			},
-			model::ScopeLookup::TypeParameter(_) => true,
+
+			Some(model::NamedTypeDefinition::ExternType(_)) => false,
+
+			None => true, // Error condition, assume conversion required. Should fail when determining the conversion.
 		},
+		model::ScopeLookup::TypeParameter(_) => true,
 	}
 }
 
@@ -291,67 +289,63 @@ pub trait GeneratorNameMapping {
 
 
 fn build_type_impl<'model>(model: &'model model::Verilization, version: &BigUint, t: &model::Type, scope: &model::Scope<'model>, type_args: &HashMap<String, LangType<'model>>) -> Result<LangType<'model>, GeneratorError> {
-	Ok(match t {
-		model::Type::Defined(name, args) => {
-			let lang_args = args.iter()
-				.map(|arg| build_type_impl(model, version, arg, scope, type_args))
-				.collect::<Result<Vec<_>, _>>()?;
+	let lang_args = t.args.iter()
+		.map(|arg| build_type_impl(model, version, arg, scope, type_args))
+		.collect::<Result<Vec<_>, _>>()?;
 
-			match scope.lookup(name.clone()) {
-				model::ScopeLookup::NamedType(name) => match model.get_type(&name).ok_or("Could not find type")? {
-					model::NamedTypeDefinition::StructType(type_def) => {
-						let lang_args_map = type_def.type_params().clone().into_iter()
-							.zip(lang_args.clone().into_iter())
-							.collect::<HashMap<_, _>>();
+	Ok(match scope.lookup(t.name.clone()) {
+		model::ScopeLookup::NamedType(name) => match model.get_type(&name).ok_or("Could not find type")? {
+			model::NamedTypeDefinition::StructType(type_def) => {
+				let lang_args_map = type_def.type_params().clone().into_iter()
+					.zip(lang_args.clone().into_iter())
+					.collect::<HashMap<_, _>>();
 
-						let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
-						let type_ver = ver_type.version.clone();
+				let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
+				let type_ver = ver_type.version.clone();
 
-						let fields = LangVerTypeFields {
-							model: model,
-							type_args: lang_args_map,
-							type_def: type_def,
-							ver_type: ver_type,
-						};
+				let fields = LangVerTypeFields {
+					model: model,
+					type_args: lang_args_map,
+					type_def: type_def,
+					ver_type: ver_type,
+				};
 
-						LangType::Versioned(VersionedTypeKind::Struct, type_def.name(), type_ver, lang_args, fields)
-					},
+				LangType::Versioned(VersionedTypeKind::Struct, type_def.name(), type_ver, lang_args, fields)
+			},
 
-					model::NamedTypeDefinition::EnumType(type_def) => {
-						let lang_args_map = type_def.type_params().clone().into_iter()
-							.zip(lang_args.clone().into_iter())
-							.collect::<HashMap<_, _>>();
+			model::NamedTypeDefinition::EnumType(type_def) => {
+				let lang_args_map = type_def.type_params().clone().into_iter()
+					.zip(lang_args.clone().into_iter())
+					.collect::<HashMap<_, _>>();
 
-						let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
-						let type_ver = ver_type.version.clone();
+				let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
+				let type_ver = ver_type.version.clone();
 
-						let fields = LangVerTypeFields {
-							model: model,
-							type_args: lang_args_map,
-							type_def: type_def,
-							ver_type: ver_type,
-						};
+				let fields = LangVerTypeFields {
+					model: model,
+					type_args: lang_args_map,
+					type_def: type_def,
+					ver_type: ver_type,
+				};
 
-						LangType::Versioned(VersionedTypeKind::Enum, type_def.name(), type_ver, lang_args, fields)
-					},
+				LangType::Versioned(VersionedTypeKind::Enum, type_def.name(), type_ver, lang_args, fields)
+			},
 
-					model::NamedTypeDefinition::ExternType(type_def) => {
-						let lang_args_map = type_def.type_params().clone().into_iter()
-							.zip(lang_args.clone().into_iter())
-							.collect::<HashMap<_, _>>();
+			model::NamedTypeDefinition::ExternType(type_def) => {
+				let lang_args_map = type_def.type_params().clone().into_iter()
+					.zip(lang_args.clone().into_iter())
+					.collect::<HashMap<_, _>>();
 
-						let literals = LangExternTypeLiterals {
-							model: model,
-							type_args: lang_args_map,
-							type_def: type_def,
-						};
+				let literals = LangExternTypeLiterals {
+					model: model,
+					type_args: lang_args_map,
+					type_def: type_def,
+				};
 
-						LangType::Extern(type_def.name(), lang_args, literals)
-					},
-				},
-				model::ScopeLookup::TypeParameter(name) => type_args.get(&name).ok_or_else(|| format!("Could not find type parameter: {}", name))?.clone(),
-			}
+				LangType::Extern(type_def.name(), lang_args, literals)
+			},
 		},
+		model::ScopeLookup::TypeParameter(name) => type_args.get(&name).ok_or_else(|| format!("Could not find type parameter: {}", name))?.clone(),
 	})
 }
 
@@ -417,55 +411,51 @@ pub trait Generator<'model> : Sized {
 			})
 		}
 
-		let converter = match t {
-			model::Type::Defined(name, args) => {
-				match self.scope().lookup(name.clone()) {
-					model::ScopeLookup::NamedType(name) => {
+		let converter = match self.scope().lookup(t.name.clone()) {
+			model::ScopeLookup::NamedType(name) => {
 
-						let mut op_type_args = Vec::new();
-						let mut op_args = Vec::new();
+				let mut op_type_args = Vec::new();
+				let mut op_args = Vec::new();
 
-						for arg in args {
-							op_type_args.push(self.build_type(prev_ver, arg)?);
-							op_type_args.push(self.build_type(version, arg)?);
-							op_args.push(self.build_conversion(prev_ver, version, arg, ConvertParam::ConverterObject)?);
-						}
-
-
-						let named_type_def = self.model().get_type(&name).ok_or("Could not find type")?;
-						let operation;
-						let target;
-						match named_type_def {
-							model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
-								let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
-
-								operation =
-									if ver_type.version < *version {
-										Operation::FinalTypeConverter
-									}
-									else {
-										Operation::FromPreviousVersion(prev_ver.clone())
-									};
-
-								target = OperationTarget::VersionedType(named_type_def.name(), ver_type.version.clone());
-							},
-
-							model::NamedTypeDefinition::ExternType(_) => {
-								operation = Operation::FinalTypeConverter;
-								target = OperationTarget::ExternType(named_type_def.name());
-							},
-						};
-
-						LangExpr::InvokeOperation(
-							operation,
-							target,
-							op_type_args,
-							op_args
-						)
-					},
-					model::ScopeLookup::TypeParameter(name) => LangExpr::Identifier(Self::Lang::convert_conv_param_name(&name)),
+				for arg in &t.args {
+					op_type_args.push(self.build_type(prev_ver, arg)?);
+					op_type_args.push(self.build_type(version, arg)?);
+					op_args.push(self.build_conversion(prev_ver, version, arg, ConvertParam::ConverterObject)?);
 				}
+
+
+				let named_type_def = self.model().get_type(&name).ok_or("Could not find type")?;
+				let operation;
+				let target;
+				match named_type_def {
+					model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
+						let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
+
+						operation =
+							if ver_type.version < *version {
+								Operation::FinalTypeConverter
+							}
+							else {
+								Operation::FromPreviousVersion(prev_ver.clone())
+							};
+
+						target = OperationTarget::VersionedType(named_type_def.name(), ver_type.version.clone());
+					},
+
+					model::NamedTypeDefinition::ExternType(_) => {
+						operation = Operation::FinalTypeConverter;
+						target = OperationTarget::ExternType(named_type_def.name());
+					},
+				};
+
+				LangExpr::InvokeOperation(
+					operation,
+					target,
+					op_type_args,
+					op_args
+				)
 			},
+			model::ScopeLookup::TypeParameter(name) => LangExpr::Identifier(Self::Lang::convert_conv_param_name(&name)),
 		};
 
 					
@@ -673,10 +663,10 @@ pub trait VersionedTypeGenerator<'model> : Generator<'model> {
 			let prev_ver = prev_ver.to_biguint().unwrap();
 
 			let type_params_as_args = self.type_def().type_params().iter()
-				.map(|param| model::Type::Defined(model::QualifiedName::from_parts(&[], &param), vec!()))
+				.map(|param| model::Type { name: model::QualifiedName::from_parts(&[], &param), args: vec!() })
 				.collect::<Vec<_>>();
 
-			let t = self.build_type(version, &model::Type::Defined(self.type_def().name().clone(), type_params_as_args.clone()))?;
+			let t = self.build_type(version, &model::Type { name: self.type_def().name().clone(), args: type_params_as_args.clone() })?;
 			let type_kind = match &t {
 				LangType::Versioned(kind, ..) => *kind,
 				_ => return Err(GeneratorError::from("Could not generate type")),
@@ -703,7 +693,7 @@ pub trait VersionedTypeGenerator<'model> : Generator<'model> {
 					codec_params.push((Self::Lang::codec_codec_param_name(param), LangType::Codec(Box::new(param_type.clone()))));
 				}
 
-				let obj_type = self.build_type(version, &model::Type::Defined(self.type_def().name().clone(), type_params_as_args))?;
+				let obj_type = self.build_type(version, &model::Type { name: self.type_def().name().clone(), args: type_params_as_args })?;
 
 				let codec_type = LangType::Codec(Box::new(obj_type.clone()));
 
@@ -747,7 +737,7 @@ fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_
 	let mut impl_call_args = Vec::new();
 
 	for param in gen.type_def().type_params() {
-		type_params_as_args.push(model::Type::Defined(model::QualifiedName::from_parts(&[], &param), vec!()));
+		type_params_as_args.push(model::Type { name: model::QualifiedName::from_parts(&[], &param), args: vec!() });
 		let t1 = Gen::Lang::convert_prev_type_param(&param);
 		let t2 = Gen::Lang::convert_current_type_param(&param);
 		type_params.push(t1.clone());
@@ -770,8 +760,8 @@ fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_
 		impl_call_args.push(LangExpr::Identifier(conv_param));
 	}
 
-	let prev_type = build_type_impl(gen.model(), prev_ver, &model::Type::Defined(gen.type_def().name().clone(), type_params_as_args.clone()), gen.scope(), &prev_type_args)?;
-	let result_type = build_type_impl(gen.model(), version, &model::Type::Defined(gen.type_def().name().clone(), type_params_as_args.clone()), gen.scope(), &result_type_args_map)?;
+	let prev_type = build_type_impl(gen.model(), prev_ver, &model::Type { name: gen.type_def().name().clone(), args: type_params_as_args.clone() }, gen.scope(), &prev_type_args)?;
+	let result_type = build_type_impl(gen.model(), version, &model::Type { name: gen.type_def().name().clone(), args: type_params_as_args.clone() }, gen.scope(), &result_type_args_map)?;
 
 	let converter_type = LangType::Converter(Box::new(prev_type.clone()), Box::new(result_type.clone()));
 
@@ -821,7 +811,7 @@ fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_
 		
 				LangStmt::MatchEnum {
 					value: LangExpr::Identifier(Gen::Lang::convert_prev_param_name().to_string()),
-					value_type: build_type_impl(gen.model(), prev_ver, &model::Type::Defined(gen.type_def().name().clone(), type_params_as_args.clone()), gen.scope(), &prev_type_args)?,
+					value_type: build_type_impl(gen.model(), prev_ver, &model::Type { name: gen.type_def().name().clone(), args: type_params_as_args.clone() }, gen.scope(), &prev_type_args)?,
 					cases: cases,
 				}
 			},
