@@ -6,7 +6,6 @@ pub mod java;
 pub mod scala;
 
 use crate::model;
-use crate::type_check::TypeCheckError;
 use std::ffi::OsString;
 use std::io;
 use std::path::Path;
@@ -14,31 +13,9 @@ use std::path::Path;
 /// Error that could occur during generation.
 #[derive(Debug)]
 pub enum GeneratorError {
-	ParseError(nom::error::Error<String>),
-	ParseIncompleteError,
-	TypeCheckError(TypeCheckError),
 	IOError(io::Error),
-	ModelError(model::ModelError),
 	CustomError(String),
-}
-
-impl From<nom::error::Error<&str>> for GeneratorError {
-	fn from(err: nom::error::Error<&str>) -> Self {
-		GeneratorError::ParseError(nom::error::Error {
-			input: String::from(err.input),
-			code: err.code,
-		})
-	}
-}
-
-impl From<nom::Err<nom::error::Error<&str>>> for GeneratorError {
-	fn from(err: nom::Err<nom::error::Error<&str>>) -> Self {
-		match err {
-			nom::Err::Incomplete(_) => GeneratorError::ParseIncompleteError,
-			nom::Err::Error(err) => GeneratorError::from(err),
-			nom::Err::Failure(err) => GeneratorError::from(err),
-		}
-	}
+	InvalidTypeForRandomValue,
 }
 
 impl From<io::Error> for GeneratorError {
@@ -56,18 +33,6 @@ impl From<String> for GeneratorError {
 impl From<&str> for GeneratorError {
 	fn from(str: &str) -> Self {
 		GeneratorError::CustomError(str.to_string())
-	}
-}
-
-impl From<TypeCheckError> for GeneratorError {
-	fn from(error: TypeCheckError) -> Self {
-		GeneratorError::TypeCheckError(error)
-	}
-}
-
-impl From<model::ModelError> for GeneratorError {
-	fn from(error: model::ModelError) -> Self {
-		GeneratorError::ModelError(error)
 	}
 }
 

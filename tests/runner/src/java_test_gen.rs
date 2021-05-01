@@ -1,5 +1,4 @@
-use verilization_compiler::{lang, model};
-use lang::GeneratorError;
+use verilization_compiler::{lang, model, VError};
 use lang::java::{JavaGenerator, JavaOptions};
 use model::{Verilization, Named};
 use lang::generator::*;
@@ -53,7 +52,7 @@ impl <'model, 'opt, 'output, F: Write, R> JavaGenerator<'model, 'opt> for JavaTe
 }
 
 impl <'model, 'opt, 'output, F: Write, R: Rng> JavaTestCaseGen<'model, 'opt, 'output, F, R> {
-    fn generate(&mut self) -> Result<(), GeneratorError> {
+    fn generate(&mut self) -> Result<(), VError> {
         for ver in self.type_def.versions() {
             self.versioned_type(&ver.version)?;
         }
@@ -61,7 +60,7 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> JavaTestCaseGen<'model, 'opt, 'ou
         Ok(())
     }
 
-    fn versioned_type(&mut self, version: &BigUint) -> Result<(), GeneratorError> {
+    fn versioned_type(&mut self, version: &BigUint) -> Result<(), VError> {
         write!(self.file, "\t\tcheck(")?;
 
         let type_args: Vec<_> = self.type_def.type_params().iter().map(|_| model::Type { name: model::QualifiedName { package: model::PackageName::new(), name: String::from("u32") }, args: Vec::new() }).collect();
@@ -95,7 +94,7 @@ pub struct JavaTestGenerator {
 }
 
 impl TestGenerator for JavaTestGenerator {
-    fn start() -> Result<JavaTestGenerator, GeneratorError> {
+    fn start() -> Result<JavaTestGenerator, VError> {
         fs::create_dir_all("../java/gen-test/")?;
         let mut file = File::create("../java/gen-test/Tests.java")?;
 
@@ -109,7 +108,7 @@ impl TestGenerator for JavaTestGenerator {
         })
     }
 
-    fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), GeneratorError> {
+    fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), VError> {
         let options = lang::java::JavaLanguage::test_options();
 
         for t in model.types() {
@@ -134,7 +133,7 @@ impl TestGenerator for JavaTestGenerator {
         Ok(())
     }
     
-    fn end(mut self) -> Result<(), GeneratorError> {
+    fn end(mut self) -> Result<(), VError> {
         writeln!(self.file, "\t}}")?;
         writeln!(self.file, "}}")?;
         Ok(())

@@ -1,5 +1,5 @@
-use verilization_compiler::{lang, model};
-use lang::{Language, GeneratorError};
+use verilization_compiler::{lang, model, VError};
+use lang::Language;
 use model::{PackageName, QualifiedName, Verilization};
 
 use std::collections::HashMap;
@@ -22,9 +22,9 @@ pub trait TestLanguage: Language {
 }
 
 pub trait TestGenerator : Sized {
-    fn start() -> Result<Self, GeneratorError>;
-    fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), GeneratorError>;
-    fn end(self) -> Result<(), GeneratorError>;
+    fn start() -> Result<Self, VError>;
+    fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), VError>;
+    fn end(self) -> Result<(), VError>;
 }
 
 impl TestLanguage for lang::typescript::TypeScriptLanguage {

@@ -1,6 +1,6 @@
 use verilization_test_runner::*;
 
-use verilization_compiler::{lang, FileOutputHandler};
+use verilization_compiler::{lang, FileOutputHandler, VError};
 use lang::GeneratorError;
 
 use test_lang::{TestLanguage, TestGenerator};
@@ -15,7 +15,7 @@ use std::process::Stdio;
 const NUM_SAMPLES: i32 = 20;
 
 
-fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), GeneratorError> {
+fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), VError> {
     println!("Tests for language {}", Lang::name());
     let mut test_gen = Lang::TestGen::start()?;
 
@@ -66,17 +66,17 @@ fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), GeneratorError> {
 }
 
 #[test]
-fn run_typescript_tests() -> Result<(), GeneratorError> {
+fn run_typescript_tests() -> Result<(), VError> {
     run_tests_for_lang::<lang::typescript::TypeScriptLanguage>()
 }
 
 #[test]
-fn run_java_tests() -> Result<(), GeneratorError> {
+fn run_java_tests() -> Result<(), VError> {
     run_tests_for_lang::<lang::java::JavaLanguage>()
 }
 
 #[test]
-fn run_scala_tests() -> Result<(), GeneratorError> {
+fn run_scala_tests() -> Result<(), VError> {
     run_tests_for_lang::<lang::scala::ScalaLanguage>()
 }
 

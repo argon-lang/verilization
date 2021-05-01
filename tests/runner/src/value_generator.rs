@@ -10,7 +10,7 @@ use std::str::FromStr;
 
 
 
-pub fn generate_random_value<R: Rng>(random: &mut R, t: LangType) -> Result<ConstantValue, GeneratorError> {
+pub fn generate_random_value<R: Rng>(random: &mut R, t: LangType) -> Result<ConstantValue, VError> {
     Ok(match t {
         LangType::Versioned(VersionedTypeKind::Struct, _, _, _, fields) => {
             let mut record = ConstantValueRecordBuilder::new();
@@ -84,7 +84,7 @@ pub fn generate_random_value<R: Rng>(random: &mut R, t: LangType) -> Result<Cons
             }
         },
         
-        LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::from("Cannot generate random value for type.")),
+        LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) => Err(GeneratorError::InvalidTypeForRandomValue)?,
     })
 }
 

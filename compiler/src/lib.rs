@@ -7,6 +7,9 @@ pub mod c_api;
 mod parser;
 mod type_check;
 mod model_loader;
+mod verror;
+
+pub use verror::VError;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod file_output_handler;

@@ -1,7 +1,7 @@
 //! Defines the C API for use in bindings.
 //! Most notably for WebAssembly.
 
-use crate::{lang, model, parser, model_loader};
+use crate::{lang, model, parser, model_loader, VError};
 use lang::GeneratorError;
 use crate::memory_output_handler::MemoryOutputHandler;
 
@@ -135,9 +135,9 @@ pub unsafe extern "C" fn verilization_parse(nfiles: usize, files: *const *const 
     }
 }
 
-unsafe fn verilization_parse_impl(files: &[*const APIString]) -> Result<model::Verilization, GeneratorError> {
+unsafe fn verilization_parse_impl(files: &[*const APIString]) -> Result<model::Verilization, VError> {
     let models = files.iter().map(|content| {
-        let content = content.as_ref().ok_or("Pointer was null")?.to_str().ok_or("Invalid String")?;
+        let content = content.as_ref().expect("Pointer was null").to_str().expect("Invalid String");
         let (_, model) = parser::parse_model(content)?;
         let model = model()?;
         Ok(model)

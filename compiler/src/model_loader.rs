@@ -1,4 +1,4 @@
-use crate::lang::GeneratorError;
+use crate::VError;
 use crate::model;
 use crate::type_check::type_check_verilization;
 
@@ -16,7 +16,7 @@ use std::path::Path;
 /// # }
 /// ```
 #[cfg(not(target_arch = "wasm32"))]
-pub fn load_files<P : AsRef<Path>>(files: Vec<P>) -> Result<model::Verilization, GeneratorError> {
+pub fn load_files<P : AsRef<Path>>(files: Vec<P>) -> Result<model::Verilization, VError> {
 	use crate::parser;
 	
 	let models = files
@@ -31,12 +31,12 @@ pub fn load_files<P : AsRef<Path>>(files: Vec<P>) -> Result<model::Verilization,
 	load_all_models(models)
 }
 
-pub fn load_all_models<M : Iterator<Item = Result<model::Verilization, GeneratorError>>>(mut models: M) -> Result<model::Verilization, GeneratorError> {
+pub fn load_all_models<M : Iterator<Item = Result<model::Verilization, VError>>>(mut models: M) -> Result<model::Verilization, VError> {
 
-	let mut model = models.next().ok_or("No input files were specified")??;
-	models.try_for_each(|other|
-		model.merge(other?).map_err(|err| GeneratorError::from(format!("Duplicate definition of {}", err)))
-	)?;
+	let mut model = models.next().ok_or(VError::NoInputFiles)??;
+	while let Some(other) = models.next() {
+		model.merge(other?)?;
+	}
 
 	type_check_verilization(&model)?;
 

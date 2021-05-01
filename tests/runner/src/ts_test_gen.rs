@@ -1,4 +1,4 @@
-use verilization_compiler::{lang, model};
+use verilization_compiler::{lang, model, VError};
 use lang::GeneratorError;
 use lang::typescript::{TSGenerator, TSOptions};
 use lang::generator::*;
@@ -68,7 +68,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> TSGenerator<'model> for TSTest
 
 impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
 
-    fn generate(&mut self) -> Result<(), GeneratorError> {
+    fn generate(&mut self) -> Result<(), VError> {
         self.add_imported_type(&model::QualifiedName::from_parts(&[], "u32"))?;
         self.add_imported_type(self.type_def.name())?;
 
@@ -97,7 +97,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R: Rng> TSTestCaseGen<'model, 'op
         Ok(())
     }
 
-    fn versioned_type(&mut self, version: &BigUint) -> Result<(), GeneratorError> {
+    fn versioned_type(&mut self, version: &BigUint) -> Result<(), VError> {
         write!(self.file, "await check(")?;
 
         let type_args: Vec<_> = self.type_def.type_params().iter().map(|_| model::Type { name: model::QualifiedName { package: model::PackageName::new(), name: String::from("u32") }, args: Vec::new() }).collect();
@@ -133,7 +133,7 @@ pub struct TSTestGenerator {
 }
 
 impl TestGenerator for TSTestGenerator {
-    fn start() -> Result<TSTestGenerator, GeneratorError> {
+    fn start() -> Result<TSTestGenerator, VError> {
         let mut file = File::create("../typescript/src/gen/tests.ts")?;
 
         writeln!(file, "import {{check}} from \"../check.js\";")?;
@@ -145,7 +145,7 @@ impl TestGenerator for TSTestGenerator {
         })
     }
 
-    fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), GeneratorError> {
+    fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), VError> {
         let options = lang::typescript::TypeScriptLanguage::test_options();
 
         for t in model.types() {
@@ -171,7 +171,7 @@ impl TestGenerator for TSTestGenerator {
         Ok(())
     }
     
-    fn end(self) -> Result<(), GeneratorError> {
+    fn end(self) -> Result<(), VError> {
         Ok(())
     }
 }

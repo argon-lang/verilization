@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io;
 use std::io::Read;
 use std::fs;
 use std::fs::File;
@@ -40,7 +41,7 @@ fn build_file_map(path: &Path, rel_path: &Path, map: &mut HashMap<OsString, [u8;
     Ok(())
 }
 
-pub fn run_generator(f: impl FnOnce(&Path) -> Result<(), GeneratorError>) -> Result<HashMap<OsString, [u8; 32]>, GeneratorError> {
+pub fn run_generator<E: From<io::Error> + From<GeneratorError>>(f: impl FnOnce(&Path) -> Result<(), E>) -> Result<HashMap<OsString, [u8; 32]>, E> {
     let temp = tempdir::TempDir::new("verilization")?;
     let path = temp.path().canonicalize()?;
     f(&path)?;

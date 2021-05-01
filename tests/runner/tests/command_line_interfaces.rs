@@ -1,4 +1,4 @@
-use verilization_compiler::{lang, FileOutputHandler};
+use verilization_compiler::{lang, FileOutputHandler, VError};
 
 use verilization_test_runner::*;
 
@@ -17,7 +17,7 @@ struct GeneratorCommand {
 }
 
 
-fn run_command_check_exit(mut command: Command) -> Result<(), GeneratorError> {
+fn run_command_check_exit(mut command: Command) -> Result<(), VError> {
     let output = command
         .stdout(Stdio::piped())
         .output()
@@ -39,8 +39,8 @@ fn run_command_check_exit(mut command: Command) -> Result<(), GeneratorError> {
 }
 
 
-fn run_test_case<Lang: TestLanguage>(model_file: &str) -> Result<(), GeneratorError> {
-    let expected_files = run_generator(|path| {
+fn run_test_case<Lang: TestLanguage>(model_file: &str) -> Result<(), VError> {
+    let expected_files = run_generator(|path| -> Result<(), VError> {
         let mut input_files = vec!(String::from(model_file));
         for rt_file in test_cases::RUNTIME_FILES {
             input_files.push(format!("{}/{}.verilization", test_cases::RUNTIME_DIR, rt_file));
@@ -48,7 +48,8 @@ fn run_test_case<Lang: TestLanguage>(model_file: &str) -> Result<(), GeneratorEr
 
         let model = verilization_compiler::load_files(input_files)?;
         let options = Lang::test_options_dir(OsString::from(path));
-        Lang::generate(&model, options, &mut FileOutputHandler {})
+        Lang::generate(&model, options, &mut FileOutputHandler {})?;
+        Ok(())
     })?;
 
     let mut commands = Vec::new();
@@ -106,13 +107,14 @@ fn run_test_case<Lang: TestLanguage>(model_file: &str) -> Result<(), GeneratorEr
             run_command_check_exit(run)
         })?;
 
+        
         if gen_files != expected_files {
             println!("Generated:");
             print_file_map(&gen_files);
             println!("Expected:");
             print_file_map(&expected_files);
 
-            Err("Generated files did not match the expected files.")?;
+            panic!("Generated files did not match the expected files.");
         }
     }
     

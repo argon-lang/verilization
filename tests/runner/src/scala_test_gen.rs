@@ -1,5 +1,4 @@
-use verilization_compiler::{lang, model};
-use lang::GeneratorError;
+use verilization_compiler::{lang, model, VError};
 use lang::scala::{ScalaGenerator, ScalaOptions};
 use model::{Verilization, Named};
 use lang::generator::*;
@@ -55,7 +54,7 @@ impl <'model, 'opt, 'output, F: Write, R> ScalaGenerator<'model, 'opt> for Scala
 
 impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
 
-    fn generate(&mut self) -> Result<(), GeneratorError> {
+    fn generate(&mut self) -> Result<(), VError> {
         for ver in self.type_def.versions() {
             self.versioned_type(&ver.version)?;
         }
@@ -63,7 +62,7 @@ impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'o
         Ok(())
     }
 
-    fn versioned_type(&mut self, version: &BigUint) -> Result<(), GeneratorError> {
+    fn versioned_type(&mut self, version: &BigUint) -> Result<(), VError> {
 
         let type_args: Vec<_> = self.type_def.type_params().iter().map(|_| model::Type { name: model::QualifiedName { package: model::PackageName::new(), name: String::from("u32") }, args: Vec::new() }).collect();
         let current_type = model::Type { name: self.type_def.name().clone(), args: type_args };
@@ -106,7 +105,7 @@ pub struct ScalaTestGenerator {
 }
 
 impl TestGenerator for ScalaTestGenerator {
-    fn start() -> Result<ScalaTestGenerator, GeneratorError> {
+    fn start() -> Result<ScalaTestGenerator, VError> {
         fs::create_dir_all("../scala/gen-test/")?;
         let mut file = File::create("../scala/gen-test/Tests.scala")?;
 
@@ -119,7 +118,7 @@ impl TestGenerator for ScalaTestGenerator {
         })
     }
 
-    fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), GeneratorError> {
+    fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), VError> {
         let options = lang::scala::ScalaLanguage::test_options();
 
         for t in model.types() {
@@ -144,7 +143,7 @@ impl TestGenerator for ScalaTestGenerator {
         Ok(())
     }
     
-    fn end(mut self) -> Result<(), GeneratorError> {
+    fn end(mut self) -> Result<(), VError> {
         writeln!(self.file, "\t)")?;
         writeln!(self.file, "}}")?;
         Ok(())
