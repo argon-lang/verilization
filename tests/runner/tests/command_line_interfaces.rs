@@ -2,7 +2,6 @@ use verilization_compiler::{lang, FileOutputHandler, VError};
 
 use verilization_test_runner::*;
 
-use lang::GeneratorError;
 use test_lang::TestLanguage;
 use output_comparison::{run_generator, print_file_map};
 use std::ffi::OsString;
@@ -21,17 +20,17 @@ fn run_command_check_exit(mut command: Command) -> Result<(), VError> {
     let output = command
         .stdout(Stdio::piped())
         .output()
-        .map_err(|_| GeneratorError::from("Could not run test command."))?;
+        .expect("Could not run test command.");
 
     let output_text = String::from_utf8_lossy(&output.stdout);
     print!("{}", output_text);
 
     if !output.status.success() {
         if let Some(code) = output.status.code() {
-            Err(GeneratorError::from(format!("Command failed with exit code: {}", code)))?
+            panic!("Command failed with exit code: {}", code);
         }
         else {
-            Err(GeneratorError::from(format!("Command failed")))?
+            panic!("Command failed");
         }
     }
 

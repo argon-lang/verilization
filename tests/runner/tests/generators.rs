@@ -1,7 +1,6 @@
 use verilization_test_runner::*;
 
 use verilization_compiler::{lang, FileOutputHandler, VError};
-use lang::GeneratorError;
 
 use test_lang::{TestLanguage, TestGenerator};
 
@@ -47,7 +46,7 @@ fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), VError> {
     let output = Lang::test_command()
         .stdout(Stdio::piped())
         .output()
-        .map_err(|_| GeneratorError::from("Could not run test command."))?;
+        .expect("Could not run test command.");
 
     let output_text = String::from_utf8_lossy(&output.stdout);
     print!("{}", output_text);
@@ -55,10 +54,10 @@ fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), VError> {
 
     if !output.status.success() {
         if let Some(code) = output.status.code() {
-            Err(GeneratorError::from(format!("Command failed with exit code: {}", code)))?
+            panic!("Command failed with exit code: {}", code);
         }
         else {
-            Err(GeneratorError::from(format!("Command failed")))?
+            panic!("Command failed");
         }
     }
 

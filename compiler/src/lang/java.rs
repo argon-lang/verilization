@@ -43,11 +43,9 @@ fn make_field_name(field_name: &str) -> String {
 
 
 fn java_package_impl<'opt>(options: &'opt JavaOptions, package: &model::PackageName) -> Result<&'opt model::PackageName, GeneratorError> {
-	Ok(
-		options.package_mapping.get(&package)
-			.or_else(|| options.library_mapping.get(&package))
-			.ok_or_else(|| format!("Unmapped package: {}", package))?
-	)
+	options.package_mapping.get(&package)
+		.or_else(|| options.library_mapping.get(&package))
+		.ok_or_else(|| GeneratorError::UnmappedPackage(package.clone()))
 }
 
 fn open_java_file<'output, Output: OutputHandler<'output>>(options: &JavaOptions, output: &'output mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle, GeneratorError> {
@@ -489,7 +487,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenera
 		match &t {
 			LangType::Versioned(VersionedTypeKind::Struct, _, version, _, _) => write!(self.file, "public static final class V{}", version)?,
 			LangType::Versioned(VersionedTypeKind::Enum, _, version, _, _) => write!(self.file, "public static abstract class V{}", version)?,
-			_ => return Err(GeneratorError::from("Could not generate type"))
+			_ => return Err(GeneratorError::CouldNotGenerateType)
 		}
 		
 		self.write_type_params(self.type_def().type_params())?;
@@ -624,7 +622,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenera
 					writeln!(self.file, "}}")?;
 				}
 			},
-			_ => return Err(GeneratorError::from("Could not generate type"))
+			_ => return Err(GeneratorError::CouldNotGenerateType)
 		}
 
 		Ok(())
@@ -709,7 +707,7 @@ fn write_enum_case_type<'model, 'opt, Gen>(gen: &mut Gen, value_type: &LangType<
 				write!(gen.file(), ">")?;
 			}
 		},
-		_ => Err("Invalid enum type.")?,
+		_ => panic!("Invalid enum type."),
 	}
 
 	Ok(())
@@ -953,7 +951,7 @@ impl Language for JavaLanguage {
 	fn add_option(builder: &mut JavaOptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError> {
 		if name == "out_dir" {
 			if builder.output_dir.is_some() {
-				return Err(GeneratorError::from("Output directory already specified"))
+				return Err(GeneratorError::InvalidOptions(String::from("Output directory already specified")))
 			}
 
 			builder.output_dir = Some(value);
@@ -965,7 +963,7 @@ impl Language for JavaLanguage {
             let java_package = model::PackageName::from_str(value.to_str().unwrap());
 
 			if builder.library_mapping.contains_key(&package) || builder.package_mapping.insert(package, java_package).is_some() {
-				return Err(GeneratorError::from(format!("Package already mapped: {}", pkg)))
+				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
 			}
 			Ok(())
 		}
@@ -975,29 +973,29 @@ impl Language for JavaLanguage {
             let java_package = model::PackageName::from_str(value.to_str().unwrap());
 
 			if builder.package_mapping.contains_key(&package) || builder.library_mapping.insert(package, java_package).is_some() {
-				return Err(GeneratorError::from(format!("Package already mapped: {}", pkg)))
+				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
 			}
 			Ok(())
 		}
 		else if let Some(extern_name) = name.strip_prefix("extern:") {
-			let qual_name = model::QualifiedName::from_str(extern_name).ok_or_else(|| format!("Invalid extern type name: {}", extern_name))?;
+			let qual_name = model::QualifiedName::from_str(extern_name).ok_or_else(|| GeneratorError::InvalidOptions(format!("Invalid extern type name: {}", extern_name)))?;
 
-			let java_name = model::QualifiedName::from_str(value.to_str().unwrap()).ok_or_else(|| format!("Invalid Java type name: {}", value.to_str().unwrap()))?;
+			let java_name = model::QualifiedName::from_str(value.to_str().unwrap()).ok_or_else(|| GeneratorError::InvalidOptions(format!("Invalid Java type name: {}", value.to_str().unwrap())))?;
 
 			if builder.extern_mapping.insert(qual_name, java_name).is_some() {
-				return Err(GeneratorError::from(format!("Extern type already mapped: {}", extern_name)))
+				return Err(GeneratorError::InvalidOptions(format!("Extern type already mapped: {}", extern_name)))
 			}
 
 			Ok(())
 		}
 		else {
-			Err(GeneratorError::from(format!("Unknown option: {}", name)))
+			Err(GeneratorError::InvalidOptions(format!("Unknown option: {}", name)))
 		}
 	}
 
 	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
 		Ok(JavaOptions {
-			output_dir: builder.output_dir.ok_or("Output directory not specified")?,
+			output_dir: builder.output_dir.ok_or_else(|| GeneratorError::InvalidOptions(String::from("Output directory not specified")))?,
 			package_mapping: builder.package_mapping,
 			library_mapping: builder.library_mapping,
 			extern_mapping: builder.extern_mapping,

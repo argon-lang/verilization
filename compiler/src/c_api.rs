@@ -179,8 +179,8 @@ pub unsafe extern "C" fn verilization_generate(verilization: *const model::Veril
 
 
 unsafe fn verilization_generate_impl(verilization: *const model::Verilization, language: *const APIString, noptions: usize, options: *const LanguageOption) -> Result<*mut OutputFileMap, GeneratorError> {
-    let verilization = verilization.as_ref().ok_or("Verilization pointer is null")?;
-    let language = language.as_ref().ok_or("Language string is null")?.to_str().ok_or("Language is invalid text")?;
+    let verilization = verilization.as_ref().expect("Verilization pointer is null");
+    let language = language.as_ref().expect("Language string is null").to_str().expect("Language is invalid text");
     let options = std::slice::from_raw_parts(options, noptions);
 
     let mut output = MemoryOutputHandler {
@@ -191,7 +191,7 @@ unsafe fn verilization_generate_impl(verilization: *const model::Verilization, l
         "typescript" => verilization_generate_lang::<lang::typescript::TypeScriptLanguage, _>(verilization, options, &mut output)?,
         "java" => verilization_generate_lang::<lang::java::JavaLanguage, _>(verilization, options, &mut output)?,
         "scala" => verilization_generate_lang::<lang::scala::ScalaLanguage, _>(verilization, options, &mut output)?,
-        _ => Err(GeneratorError::from(format!("Unknown language: {}", language)))?,
+        _ => Err(GeneratorError::UnknownLanguage(String::from(language)))?,
     };
 
     Ok(OutputFileMap::allocate(&output.files))
@@ -200,8 +200,8 @@ unsafe fn verilization_generate_impl(verilization: *const model::Verilization, l
 unsafe fn verilization_generate_lang<Lang: lang::Language, Output: for<'output> lang::OutputHandler<'output>>(verilization: &model::Verilization, options: &[LanguageOption], output: &mut Output) -> Result<(), GeneratorError> {
     let mut lang_options = Lang::empty_options();
     for option in options {
-        let name = option.name.as_ref().ok_or("Option name is null")?.to_str().ok_or("Invalid option name text")?;
-        let value = option.value.as_ref().ok_or("Option value is null")?.to_str().ok_or("Invalid option value text")?;
+        let name = option.name.as_ref().expect("Option name is null").to_str().expect("Invalid option name text");
+        let value = option.value.as_ref().expect("Option value is null").to_str().expect("Invalid option value text");
         Lang::add_option(&mut lang_options, name, OsString::from(value))?;
     }
     let lang_options = Lang::finalize_options(lang_options)?;

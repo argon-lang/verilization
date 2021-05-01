@@ -9,30 +9,32 @@ use crate::model;
 use std::ffi::OsString;
 use std::io;
 use std::path::Path;
+use num_bigint::BigUint;
 
 /// Error that could occur during generation.
 #[derive(Debug)]
 pub enum GeneratorError {
 	IOError(io::Error),
-	CustomError(String),
-	InvalidTypeForRandomValue,
+	UnknownLanguage(String),
+	InvalidOptions(String),
+	UnmappedPackage(model::PackageName),
+	CouldNotFind(model::QualifiedName),
+	CouldNotFindVersion(model::QualifiedName, BigUint),
+	CouldNotResolveTypeParameter(String),
+	TypeCannotBeSequence(model::QualifiedName),
+	TypeDoesNotHaveCase(model::QualifiedName, Option<BigUint>, String),
+	IncorrectCaseArity(model::QualifiedName, String),
+	RecordLiteralNotForStruct,
+	ExternTypeDoesNotHaveRecordLiteral(model::QualifiedName),
+	CouldNotFindRecordField(model::QualifiedName, Option<BigUint>, String),
+	CouldNotGenerateType,
+	InvalidTypeForConstant,
+	InvalidTypeForCodec,
 }
 
 impl From<io::Error> for GeneratorError {
 	fn from(err: io::Error) -> Self {
 		GeneratorError::IOError(err)
-	}
-}
-
-impl From<String> for GeneratorError {
-	fn from(str: String) -> Self {
-		GeneratorError::CustomError(str)
-	}
-}
-
-impl From<&str> for GeneratorError {
-	fn from(str: &str) -> Self {
-		GeneratorError::CustomError(str.to_string())
 	}
 }
 

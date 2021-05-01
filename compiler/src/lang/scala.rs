@@ -40,11 +40,9 @@ fn make_field_name(field_name: &str) -> String {
 
 
 fn scala_package_impl<'a>(options: &'a ScalaOptions, package: &model::PackageName) -> Result<&'a model::PackageName, GeneratorError> {
-	Ok(
-		options.package_mapping.get(&package)
-			.or_else(|| options.library_mapping.get(&package))
-			.ok_or_else(|| format!("Unmapped package: {}", package))?
-	)
+	options.package_mapping.get(&package)
+		.or_else(|| options.library_mapping.get(&package))
+		.ok_or_else(|| GeneratorError::UnmappedPackage(package.clone()))
 }
 
 
@@ -504,7 +502,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenera
 					writeln!(self.file)?;
 				}
 			},
-			_ => return Err(GeneratorError::from("Could not generate type"))
+			_ => return Err(GeneratorError::CouldNotGenerateType)
 		}
 
 		Ok(())
@@ -798,7 +796,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaTypeGenerator<
 							self.write_qual_name(name)?;
 							write!(self.file, ".V{}.{}({})", version, make_type_name(&case_name), binding_name)?;
 						},
-						_ => Err("Invalid enum type.")?,
+						_ => panic!("Invalid enum type."),
 					}
 					
 					write!(self.file, " => ")?;
@@ -891,7 +889,7 @@ impl Language for ScalaLanguage {
 	fn add_option(builder: &mut ScalaOptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError> {
 		if name == "out_dir" {
 			if builder.output_dir.is_some() {
-				return Err(GeneratorError::from("Output directory already specified"))
+				return Err(GeneratorError::InvalidOptions(String::from("Output directory already specified")))
 			}
 
 			builder.output_dir = Some(value);
@@ -903,7 +901,7 @@ impl Language for ScalaLanguage {
             let scala_package = model::PackageName::from_str(value.to_str().unwrap());
 
 			if builder.library_mapping.contains_key(&package) || builder.package_mapping.insert(package, scala_package).is_some() {
-				return Err(GeneratorError::from(format!("Package already mapped: {}", pkg)))
+				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
 			}
 			Ok(())
 		}
@@ -913,19 +911,18 @@ impl Language for ScalaLanguage {
             let scala_package = model::PackageName::from_str(value.to_str().unwrap());
 
 			if builder.package_mapping.contains_key(&package) || builder.library_mapping.insert(package, scala_package).is_some() {
-				return Err(GeneratorError::from(format!("Package already mapped: {}", pkg)))
+				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
 			}
 			Ok(())
 		}
 		else {
-			Err(GeneratorError::from(format!("Unknown option: {}", name)))
+			Err(GeneratorError::InvalidOptions(format!("Unknown option: {}", name)))
 		}
 	}
 
 	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
-		let output_dir = builder.output_dir.ok_or("Output directory not specified")?;
 		Ok(ScalaOptions {
-			output_dir: output_dir,
+			output_dir: builder.output_dir.ok_or_else(|| GeneratorError::InvalidOptions(String::from("Output directory not specified")))?,
 			package_mapping: builder.package_mapping,
 			library_mapping: builder.library_mapping,
 		})

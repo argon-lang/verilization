@@ -84,7 +84,7 @@ pub fn generate_random_value<R: Rng>(random: &mut R, t: LangType) -> Result<Cons
             }
         },
         
-        LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) => Err(GeneratorError::InvalidTypeForRandomValue)?,
+        LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) => Err(GeneratorError::InvalidTypeForConstant)?,
     })
 }
 
@@ -102,7 +102,7 @@ pub fn write_constant_value<W: FormatWriter<Error = GeneratorError>>(writer: &mu
             ("i32", []) => n.to_i32().unwrap().write_verilization(writer)?,
             ("u64", []) => n.to_u64().unwrap().write_verilization(writer)?,
             ("i64", []) => n.to_i64().unwrap().write_verilization(writer)?,
-            _ => return Err(GeneratorError::from("Invalid type for integer.")),
+            _ => return Err(GeneratorError::InvalidTypeForConstant),
         },
 
         (ConstantValue::String(s), LangType::Extern(name, type_args, _)) if name.package.package.is_empty() && name.name == "string" && type_args.is_empty() =>
@@ -115,7 +115,7 @@ pub fn write_constant_value<W: FormatWriter<Error = GeneratorError>>(writer: &mu
                         write_constant_value(writer, value, element_type.clone())?;
                     }
                 },
-                _ => return Err(GeneratorError::from("Invalid type for sequence.")),
+                _ => return Err(GeneratorError::InvalidTypeForConstant),
             },
 
         (ConstantValue::Case(case_name, mut values), LangType::Extern(name, mut type_args, _))
@@ -142,28 +142,28 @@ pub fn write_constant_value<W: FormatWriter<Error = GeneratorError>>(writer: &mu
             b.write_verilization(writer)?;
         },
 
-        (ConstantValue::Case(case_name, mut values), LangType::Versioned(VersionedTypeKind::Enum, _, _, _, fields)) if values.len() == 1 => {
+        (ConstantValue::Case(case_name, mut values), LangType::Versioned(VersionedTypeKind::Enum, type_name, version, _, fields)) if values.len() == 1 => {
             let value = values.remove(0);
 
             let (index, field) = fields.build()?.into_iter()
                 .enumerate()
                 .find(|(_, field)| *field.name == case_name)
-                .ok_or("Could not find case for type")?;
+                .ok_or_else(|| GeneratorError::TypeDoesNotHaveCase(type_name.clone(), Some(version.clone()), case_name.clone()))?;
 
             let index = BigUint::from(index);
             index.write_verilization(writer)?;
             write_constant_value(writer, value, field.field_type)?;
         },
 
-        (ConstantValue::Record(record), LangType::Versioned(VersionedTypeKind::Struct, _, _, _, fields)) => {
+        (ConstantValue::Record(record), LangType::Versioned(VersionedTypeKind::Struct, type_name, version, _, fields)) => {
             let mut values = record.into_field_values();
             for field in fields.build()? {
-                let value = values.remove(field.name).ok_or("Field missing from record.")?;
+                let value = values.remove(field.name).ok_or_else(|| GeneratorError::CouldNotFindRecordField(type_name.clone(), Some(version.clone()), field.name.clone()))?;
                 write_constant_value(writer, value, field.field_type)?;
             }
         },
 
-        (value, t) => return Err(GeneratorError::from(format!("Could not write constant value: {:?} of type {:?}", value, t))),
+        (_, _) => return Err(GeneratorError::InvalidTypeForConstant),
     }
 
     Ok(())

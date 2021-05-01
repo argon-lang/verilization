@@ -11,7 +11,7 @@ pub struct MemoryOutputHandler {
 impl <'output> OutputHandler<'output> for MemoryOutputHandler {
     type FileHandle = &'output mut Vec<u8>;
     fn create_file<P: AsRef<Path>>(&'output mut self, path: P) -> Result<Self::FileHandle, GeneratorError> {
-        let filename = path.as_ref().to_str().ok_or("Invalid filename")?.to_string();
+        let filename = path.as_ref().to_str().expect("Invalid filename").to_string();
         Ok(self.files.entry(filename).or_insert_with(Vec::new))
     }
 }

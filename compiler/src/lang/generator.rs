@@ -294,14 +294,14 @@ fn build_type_impl<'model>(model: &'model model::Verilization, version: &BigUint
 		.collect::<Result<Vec<_>, _>>()?;
 
 	Ok(match scope.lookup(t.name.clone()) {
-		model::ScopeLookup::NamedType(name) => match model.get_type(&name).ok_or("Could not find type")? {
+		model::ScopeLookup::NamedType(name) => match model.get_type(&name).ok_or_else(|| GeneratorError::CouldNotFind(name.clone()))? {
 			model::NamedTypeDefinition::StructType(type_def) => {
 				let lang_args_map = type_def.type_params().clone().into_iter()
 					.zip(lang_args.clone().into_iter())
 					.collect::<HashMap<_, _>>();
 
-				let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
-				let type_ver = ver_type.version.clone();
+					let ver_type = type_def.versioned(version).ok_or_else(|| GeneratorError::CouldNotFindVersion(name, version.clone()))?;
+					let type_ver = ver_type.version.clone();
 
 				let fields = LangVerTypeFields {
 					model: model,
@@ -318,7 +318,7 @@ fn build_type_impl<'model>(model: &'model model::Verilization, version: &BigUint
 					.zip(lang_args.clone().into_iter())
 					.collect::<HashMap<_, _>>();
 
-				let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
+				let ver_type = type_def.versioned(version).ok_or_else(|| GeneratorError::CouldNotFindVersion(name, version.clone()))?;
 				let type_ver = ver_type.version.clone();
 
 				let fields = LangVerTypeFields {
@@ -345,7 +345,7 @@ fn build_type_impl<'model>(model: &'model model::Verilization, version: &BigUint
 				LangType::Extern(type_def.name(), lang_args, literals)
 			},
 		},
-		model::ScopeLookup::TypeParameter(name) => type_args.get(&name).ok_or_else(|| format!("Could not find type parameter: {}", name))?.clone(),
+		model::ScopeLookup::TypeParameter(name) => type_args.get(&name).ok_or_else(|| GeneratorError::CouldNotResolveTypeParameter(name))?.clone(),
 	})
 }
 
@@ -353,8 +353,7 @@ fn constant_invoke_operation<'model>(op: Operation, values: Vec<LangExpr<'model>
 	let (target, type_args) = match t {
 		LangType::Versioned(_, name, version, type_args, _) => (OperationTarget::VersionedType(name, version), type_args),
 		LangType::Extern(name, type_args, _) => (OperationTarget::ExternType(name), type_args),
-		LangType::TypeParameter(_) => return Err(GeneratorError::from("Cannot create constant for type parameter")),
-		LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::from("Cannot create constant non-verilization type")),
+		LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForConstant),
 	};
 
 	Ok(LangExpr::InvokeOperation(op, target, type_args, values))
@@ -399,7 +398,7 @@ pub trait Generator<'model> : Sized {
 
 			LangType::TypeParameter(name) => LangExpr::Identifier(Self::Lang::codec_codec_param_name(&name)),
 
-			LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::from("Cannot create codec for non-verilization type")),
+			LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForCodec),
 		})
 	}
 
@@ -424,12 +423,12 @@ pub trait Generator<'model> : Sized {
 				}
 
 
-				let named_type_def = self.model().get_type(&name).ok_or("Could not find type")?;
+				let named_type_def = self.model().get_type(&name).ok_or_else(|| GeneratorError::CouldNotFind(name.clone()))?;
 				let operation;
 				let target;
 				match named_type_def {
 					model::NamedTypeDefinition::StructType(type_def) | model::NamedTypeDefinition::EnumType(type_def) => {
-						let ver_type = type_def.versioned(version).ok_or_else(|| format!("Could not find version {} of type: {:?}", version, t))?;
+						let ver_type = type_def.versioned(version).ok_or_else(|| GeneratorError::CouldNotFindVersion(name.clone(), version.clone()))?;
 
 						operation =
 							if ver_type.version < *version {
@@ -482,7 +481,7 @@ pub trait Generator<'model> : Sized {
 							LangLiteral::Sequence(element_type) => Some(element_type),
 							_ => None,
 						})
-						.ok_or("Type does not have a sequence literal")?;
+						.ok_or_else(|| GeneratorError::TypeCannotBeSequence(type_name.clone()))?;
 
 					let args = seq.into_iter()
 						.map(|elem| self.build_value(version, element_type.clone(), elem))
@@ -495,19 +494,18 @@ pub trait Generator<'model> : Sized {
 						args,
 					)
 				},
-				LangType::Versioned(..) => return Err(GeneratorError::from("Cannot use sequence syntax for non-extern type")),
-				LangType::TypeParameter(_) => return Err(GeneratorError::from("Cannot create constant for type parameter")),
-				LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::from("Cannot create constant non-verilization type")),
+				LangType::Versioned(_, type_name, ..) => return Err(GeneratorError::TypeCannotBeSequence(type_name.clone())),
+				LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForConstant),
 			},
 			
 			model::ConstantValue::Case(case_name, mut args) => match t {
 				LangType::Versioned(VersionedTypeKind::Enum, type_name, type_version, type_args, fields) if args.len() == 1 => {
-					let field = fields.build()?.into_iter().find(|field| *field.name == case_name).ok_or("Could not find field")?;
+					let field = fields.build()?.into_iter().find(|field| *field.name == case_name).ok_or_else(|| GeneratorError::TypeDoesNotHaveCase(type_name.clone(), Some(type_version.clone()), case_name.clone()))?;
 					
 					let arg = self.build_value(version, field.field_type, args.remove(0))?;
 					LangExpr::CreateEnum(type_name, type_version, type_args, field.name, Box::new(arg))
 				},
-				LangType::Versioned(VersionedTypeKind::Enum, ..) => return Err(GeneratorError::from("Incorrect number of arguments")),
+				LangType::Versioned(VersionedTypeKind::Enum, type_name, ..) => return Err(GeneratorError::IncorrectCaseArity(type_name.clone(), case_name.clone())),
 
 				LangType::Extern(type_name, type_args, literals) => {
 					let case_params = literals.build()?
@@ -516,7 +514,7 @@ pub trait Generator<'model> : Sized {
 							LangLiteral::Case(name, case_params) if name == *case_name => Some(case_params),
 							_ => None,
 						})
-						.ok_or("Type does not have a matching case")?;
+						.ok_or_else(|| GeneratorError::TypeDoesNotHaveCase(type_name.clone(), None, case_name.clone()))?;
 
 					let args = args.into_iter().zip(case_params.into_iter())
 						.map(|(arg, param)| self.build_value(version, param, arg))
@@ -530,9 +528,8 @@ pub trait Generator<'model> : Sized {
 					)
 				},
 
-				LangType::Versioned(VersionedTypeKind::Struct, ..) => return Err(GeneratorError::from("Cannot use case syntax for struct literal")),
-				LangType::TypeParameter(_) => return Err(GeneratorError::from("Cannot create constant for type parameter")),
-				LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::from("Cannot create constant non-verilization type")),
+				LangType::Versioned(VersionedTypeKind::Struct, ..) => return Err(GeneratorError::RecordLiteralNotForStruct),
+				LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForConstant),
 			},
 			
 			model::ConstantValue::Record(record) => match t {
@@ -541,7 +538,7 @@ pub trait Generator<'model> : Sized {
 					let mut field_values = record.into_field_values();
 
 					for field in fields.build()? {
-						let value = field_values.remove(field.name).ok_or("Could not find record field in literal")?;
+						let value = field_values.remove(field.name).ok_or_else(|| GeneratorError::CouldNotFindRecordField(type_name.clone(), Some(type_version.clone()), field.name.clone()))?;
 						let value = self.build_value(version, field.field_type, value)?;
 						lang_args.push((field.name, value));
 					}
@@ -556,39 +553,39 @@ pub trait Generator<'model> : Sized {
 							LangLiteral::Record(fields) => Some(fields),
 							_ => None,
 						})
-						.ok_or("Type does not have a record literal")?;
+						.ok_or_else(|| GeneratorError::ExternTypeDoesNotHaveRecordLiteral(type_name.clone()))?;
 
-						let mut field_values = record.into_field_values();
-						let mut field_names = Vec::new();
-						let mut args = Vec::new();
+					let mut field_values = record.into_field_values();
+					let mut field_names = Vec::new();
+					let mut args = Vec::new();
 
-						for field in record_fields {
-							let value = field_values.remove(field.name).ok_or("Could not find record field in literal")?;
-							let value = self.build_value(version, field.field_type, value)?;
-							field_names.push(field.name.clone());
-							args.push(value);
-						}
+					for field in record_fields {
+						let value = field_values.remove(field.name).ok_or_else(|| GeneratorError::CouldNotFindRecordField(type_name.clone(), None, field.name.clone()))?;
+						let value = self.build_value(version, field.field_type, value)?;
+						field_names.push(field.name.clone());
+						args.push(value);
+					}
 
-						LangExpr::InvokeOperation(
-							Operation::FromRecord(field_names),
-							OperationTarget::ExternType(type_name),
-							type_args,
-							args,
-						)
+					LangExpr::InvokeOperation(
+						Operation::FromRecord(field_names),
+						OperationTarget::ExternType(type_name),
+						type_args,
+						args,
+					)
 				},
 
-				LangType::Versioned(VersionedTypeKind::Enum, ..) => return Err(GeneratorError::from("Cannot use record syntax for enum literal")),
-				LangType::TypeParameter(_) => return Err(GeneratorError::from("Cannot create constant for type parameter")),
-				LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::from("Cannot create constant non-verilization type")),
+				LangType::Versioned(VersionedTypeKind::Enum, ..) => return Err(GeneratorError::InvalidTypeForConstant),
+				LangType::TypeParameter(_) => return Err(GeneratorError::InvalidTypeForConstant),
+				LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForConstant),
 			},
 			model::ConstantValue::Constant(name) => {
 				match self.scope().lookup(name) {
 					model::ScopeLookup::NamedType(name) => {
-						let constant = self.model().get_constant(&name).ok_or("Could not find constant.")?;
+						let constant = self.model().get_constant(&name).ok_or_else(|| GeneratorError::CouldNotFind(name))?;
 
 						LangExpr::ConstantValue(constant.name(), version.clone())
 					},
-					model::ScopeLookup::TypeParameter(_) => return Err(GeneratorError::from("Could not find constant."))
+					model::ScopeLookup::TypeParameter(name) => return Err(GeneratorError::CouldNotFind(model::QualifiedName { package: model::PackageName::new(), name: name, }))
 				}
 				
 			},
@@ -671,7 +668,7 @@ pub trait VersionedTypeGenerator<'model> : Generator<'model> {
 			let t = self.build_type(version, &model::Type { name: self.type_def().name().clone(), args: type_params_as_args.clone() })?;
 			let type_kind = match &t {
 				LangType::Versioned(kind, ..) => *kind,
-				_ => return Err(GeneratorError::from("Could not generate type")),
+				_ => return Err(GeneratorError::CouldNotGenerateType),
 			};
 			self.write_version_header(t)?;
 
@@ -881,7 +878,7 @@ fn codec_read_implementation<'model, Gen>(gen: &Gen, t: LangType<'model>) -> Res
 			}
 		},
 
-		_ => return Err(GeneratorError::from("Could not create codec read implementation")),
+		_ => return Err(GeneratorError::InvalidTypeForCodec),
 	})
 }
 
@@ -934,7 +931,7 @@ fn codec_write_implementation<'model, Gen>(gen: &Gen, t: LangType<'model>) -> Re
 			}
 		},
 
-		_ => return Err(GeneratorError::from("Could not create codec read implementation")),
+		_ => return Err(GeneratorError::InvalidTypeForCodec),
 	})
 }
 

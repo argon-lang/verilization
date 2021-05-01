@@ -23,7 +23,7 @@ pub struct TSOptions {
 
 
 fn open_ts_file<'output, Output: OutputHandler<'output>>(options: &TSOptions, output: &'output mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle, GeneratorError> {
-	let pkg_dir = options.package_mapping.get(&name.package).ok_or(format!("Unmapped package: {}", name.package))?;
+	let pkg_dir = options.package_mapping.get(&name.package).ok_or_else(|| GeneratorError::UnmappedPackage(name.package.clone()))?;
 	let mut path = PathBuf::from(&options.output_dir);
 	path.push(pkg_dir);
 	path.push(name.name.clone() + ".ts");
@@ -70,14 +70,14 @@ pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 			abs_import_path.push(import_pkg_dir);
 
 			is_rel = true;
-			pathdiff::diff_paths(abs_import_path, current_path).ok_or("Could not find relative path.")?
+			pathdiff::diff_paths(abs_import_path, current_path).expect("Could not find relative path.")
 		}
 		else if let Some(import_lib) = self.options().library_mapping.get(&t.package) {
 			is_rel = false;
 			PathBuf::from(import_lib)
 		}
 		else {
-			return Err(GeneratorError::from(format!("Unmapped package: {}", t.package)))
+			return Err(GeneratorError::UnmappedPackage(t.package.clone()))
 		};
 
 		import_path.push(t.name.clone() + ".js");
@@ -346,7 +346,7 @@ impl GeneratorNameMapping for TypeScriptLanguage {
 fn current_dir_of_name<'model, Gen: TSGenerator<'model>>(gen: &Gen, name: &model::QualifiedName) -> Result<PathBuf, GeneratorError> {
 	let current_pkg_dir = gen.options().package_mapping.get(&name.package)
 		.or_else(|| gen.options().library_mapping.get(&name.package))
-		.ok_or_else(|| format!("Unmapped package: {}", name.package))?;
+		.ok_or_else(|| GeneratorError::UnmappedPackage(name.package.clone()))?;
 	let mut current_path = PathBuf::from(&gen.options().output_dir);
 	current_path.push(current_pkg_dir);
 	Ok(current_path)
@@ -560,7 +560,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenera
 				writeln!(self.file, ";")?;
 			},
 
-			_ => return Err(GeneratorError::from("Could not generate type"))
+			_ => return Err(GeneratorError::CouldNotGenerateType)
 		}
 
 		self.versions.insert(version.clone());
@@ -862,7 +862,7 @@ impl Language for TypeScriptLanguage {
 	fn add_option(builder: &mut TSOptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError> {
 		if name == "out_dir" {
 			if builder.output_dir.is_some() {
-				return Err(GeneratorError::from("Output directory already specified"))
+				return Err(GeneratorError::InvalidOptions(String::from("Output directory already specified")))
 			}
 
 			builder.output_dir = Some(value);
@@ -872,7 +872,7 @@ impl Language for TypeScriptLanguage {
 			let package = model::PackageName::from_str(pkg);
 
 			if builder.library_mapping.contains_key(&package) || builder.package_mapping.insert(package, value).is_some() {
-				return Err(GeneratorError::from(format!("Package already mapped: {}", pkg)))
+				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
 			}
 			Ok(())
 		}
@@ -880,18 +880,18 @@ impl Language for TypeScriptLanguage {
 			let package = model::PackageName::from_str(pkg);
 
 			if builder.package_mapping.contains_key(&package) || builder.library_mapping.insert(package, value).is_some() {
-				return Err(GeneratorError::from(format!("Package already mapped: {}", pkg)))
+				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
 			}
 			Ok(())
 		}
 		else {
-			Err(GeneratorError::from(format!("Unknown option: {}", name)))
+			Err(GeneratorError::InvalidOptions(format!("Unknown option: {}", name)))
 		}
 	}
 
 	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
 		Ok(TSOptions {
-			output_dir: builder.output_dir.ok_or("Output directory not specified")?,
+			output_dir: builder.output_dir.ok_or_else(|| GeneratorError::InvalidOptions(String::from("Output directory not specified")))?,
 			package_mapping: builder.package_mapping,
 			library_mapping: builder.library_mapping,
 		})

@@ -5,8 +5,7 @@ use std::fs;
 use std::fs::File;
 use std::path::Path;
 use std::ffi::OsString;
-use lang::GeneratorError;
-use verilization_compiler::lang;
+use verilization_compiler::lang::GeneratorError;
 use sha2::Digest;
 use std::convert::TryInto;
 
@@ -33,7 +32,7 @@ fn build_file_map(path: &Path, rel_path: &Path, map: &mut HashMap<OsString, [u8;
 
         let hash = hash.finalize();
 
-        let data = hash.as_slice().try_into().map_err(|_| format!("Invalid hash: {} bytes", hash.as_slice().len()))?;
+        let data = hash.as_slice().try_into().expect(&format!("Invalid hash: {} bytes", hash.as_slice().len()));
         map.insert(OsString::from(rel_path), data);
     }
 

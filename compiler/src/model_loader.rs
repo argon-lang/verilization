@@ -9,7 +9,7 @@ use std::path::Path;
 /// 
 /// ```no_run
 /// use verilization_compiler::load_files;
-/// # fn main() -> Result<(), verilization_compiler::lang::GeneratorError> {
+/// # fn main() -> Result<(), verilization_compiler::VError> {
 /// let model = load_files(vec!("hello.verilization", "world.verilization"))?;
 /// // ...
 /// # Ok(())
