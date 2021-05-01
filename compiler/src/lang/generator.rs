@@ -75,7 +75,7 @@ impl <'model> LangVerTypeFields<'model> {
 		let scope = self.type_def.scope();
 		let mut fields = Vec::new();
 
-		for (name, field) in &self.ver_type.ver_type.fields {
+		for (name, field) in self.ver_type.ver_type.fields() {
 			let t = build_type_impl(self.model, &self.ver_type.version, &field.field_type, &scope, &self.type_args)?;
 			
 			fields.push(LangField {
@@ -535,9 +535,10 @@ pub trait Generator<'model> : Sized {
 				LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::from("Cannot create constant non-verilization type")),
 			},
 			
-			model::ConstantValue::Record(mut field_values) => match t {
+			model::ConstantValue::Record(record) => match t {
 				LangType::Versioned(VersionedTypeKind::Struct, type_name, type_version, type_args, fields) => {
 					let mut lang_args = Vec::new();
+					let mut field_values = record.into_field_values();
 
 					for field in fields.build()? {
 						let value = field_values.remove(field.name).ok_or("Could not find record field in literal")?;
@@ -557,6 +558,7 @@ pub trait Generator<'model> : Sized {
 						})
 						.ok_or("Type does not have a record literal")?;
 
+						let mut field_values = record.into_field_values();
 						let mut field_names = Vec::new();
 						let mut args = Vec::new();
 
@@ -779,7 +781,7 @@ fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_
 			VersionedTypeKind::Struct => {
 				let mut fields = Vec::new();
 		
-				for (field_name, field) in &ver_type.ver_type.fields {
+				for (field_name, field) in ver_type.ver_type.fields() {
 					let obj_value = LangExpr::Identifier(Gen::Lang::convert_prev_param_name().to_string());
 		
 					let value_expr = LangExpr::StructField(gen.type_def().name(), ver_type.version.clone(), field_name, Box::new(obj_value));
@@ -796,7 +798,7 @@ fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_
 				let mut cases = Vec::new();
 		
 		
-				for (field_name, field) in &ver_type.ver_type.fields {
+				for (field_name, field) in ver_type.ver_type.fields() {
 		
 					let value_expr = LangExpr::Identifier(field_name.clone());
 					let conv_value = gen.build_conversion(prev_ver, &ver_type.version, &field.field_type, ConvertParam::Expression(value_expr))?;

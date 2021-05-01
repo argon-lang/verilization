@@ -141,6 +141,39 @@ impl PartialOrd for QualifiedName {
 	}
 }
 
+#[derive(Debug)]
+pub enum ModelError {
+	DuplicateConstant(QualifiedName),
+	DuplicateType(QualifiedName),
+	DuplicateVersion(QualifiedName, BigUint),
+	DuplicateField(QualifiedName, BigUint, String),
+	DuplicateLiteralInteger(QualifiedName),
+	DuplicateLiteralString(QualifiedName),
+	DuplicateLiteralSequence(QualifiedName),
+	DuplicateLiteralCase(QualifiedName, String),
+	DuplicateLiteralRecord(QualifiedName),
+	DuplicateLiteralRecordField(QualifiedName, String),
+	DuplicateFieldValue(String),
+}
+
+impl fmt::Display for ModelError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			ModelError::DuplicateConstant(name) => write!(f, "Cannot declare constant {}. Name is already defined.", name),
+			ModelError::DuplicateType(name) => write!(f, "Cannot declare type {}. Name is already defined.", name),
+			ModelError::DuplicateVersion(name, version) => write!(f, "Version {} of type {} is already defined.", version, name),
+			ModelError::DuplicateField(name, version, field) => write!(f, "Version {} of type {} already has a field named {}.", version, name, field),
+			ModelError::DuplicateLiteralInteger(type_name) => write!(f, "Type {} already has an integer literal.", type_name),
+			ModelError::DuplicateLiteralString(type_name) => write!(f, "Type {} already has a string literal.", type_name),
+			ModelError::DuplicateLiteralSequence(type_name) => write!(f, "Type {} already has a sequence literal.", type_name),
+			ModelError::DuplicateLiteralCase(type_name, name) => write!(f, "Type {} already has a literal for case {}.", type_name, name),
+			ModelError::DuplicateLiteralRecord(type_name) => write!(f, "Type {} already has a record literal.", type_name),
+			ModelError::DuplicateLiteralRecordField(type_name, field) => write!(f, "Record literal for type {} already has a field named {}.", type_name, field),
+			ModelError::DuplicateFieldValue(name) => write!(f, "Record constant already has a field named {}.", name),
+		}
+	}
+}
+
 /// A data type. This includes the name of the type and the type arguments.
 #[derive(Clone, Debug)]
 pub struct Type {
@@ -198,9 +231,55 @@ pub enum ConstantValue {
 	String(String),
 	Sequence(Vec<ConstantValue>),
 	Case(String, Vec<ConstantValue>),
-	Record(HashMap<String, ConstantValue>),
+	Record(ConstantValueRecord),
 	Constant(QualifiedName),
 }
+
+#[derive(Clone, Debug)]
+pub struct ConstantValueRecord {
+	field_values: HashMap<String, ConstantValue>,
+}
+
+impl ConstantValueRecord {
+	pub fn field_values<'a>(&'a self) -> &'a HashMap<String, ConstantValue> {
+		&self.field_values
+	}
+
+	pub fn into_field_values(self) -> HashMap<String, ConstantValue> {
+		self.field_values
+	}
+}
+
+pub struct ConstantValueRecordBuilder {
+	field_names: HashSet<String>,
+	record: ConstantValueRecord,
+}
+
+impl ConstantValueRecordBuilder {
+	pub fn new() -> Self {
+		ConstantValueRecordBuilder {
+			field_names: HashSet::new(),
+			record: ConstantValueRecord {
+				field_values: HashMap::new(),
+			},
+		}
+	}
+
+	pub fn add_field(&mut self, name: String, value: ConstantValue) -> Result<(), ModelError> {
+		if self.field_names.insert(name.to_ascii_uppercase()) {
+			self.record.field_values.insert(name, value);
+			Ok(())
+		}
+		else {
+			Err(ModelError::DuplicateFieldValue(name))
+		}
+	}
+
+	pub fn build(self) -> ConstantValueRecord {
+		self.record
+	}
+}
+
 
 /// The result of looking up a constant for a specific format version.
 /// If value is None, then the value was defined in a previous version.
@@ -215,9 +294,37 @@ pub struct ConstantVersionInfo<'a> {
 /// 
 /// See accessor methods for [`Named`] constants.
 pub struct Constant {
-	pub(crate) imports: HashMap<String, ScopeLookup>,
-	pub(crate) value_type: Type,
-	pub(crate) versions: HashMap<BigUint, ConstantValue>,
+	imports: HashMap<String, ScopeLookup>,
+	value_type: Type,
+	versions: HashMap<BigUint, ConstantValue>,
+}
+
+pub struct ConstantBuilder {
+	name: QualifiedName,
+	constant: Constant,
+}
+
+impl ConstantBuilder {
+	pub fn new(name: QualifiedName, value_type: Type, imports: HashMap<String, ScopeLookup>) -> Self {
+		ConstantBuilder {
+			name: name,
+			constant: Constant {
+				imports: imports,
+				value_type: value_type,
+				versions: HashMap::new(),
+			},
+		}
+	}
+
+	pub fn add_version(&mut self, version: BigUint, value: ConstantValue) -> Result<(), ModelError> {
+		if self.constant.versions.contains_key(&version) {
+			Err(ModelError::DuplicateVersion(self.name.clone(), version.clone()))
+		}
+		else {
+			self.constant.versions.insert(version, value);
+			Ok(())
+		}
+	}
 }
 
 impl <'a> Named<'a, Constant> {
@@ -258,16 +365,37 @@ impl <'a> Named<'a, Constant> {
 #[derive(Debug)]
 pub struct FieldInfo {
 	pub field_type: Type,
-
-	pub(crate) dummy: PhantomData<()>,
 }
 
 /// A versioned type defines the contents of a type for a specific format version.
 #[derive(Debug)]
 pub struct TypeVersionDefinition {
-	pub fields: Vec<(String, FieldInfo)>,
+	fields: Vec<(String, FieldInfo)>,
+}
 
-	pub(crate) dummy: PhantomData<()>,
+impl TypeVersionDefinition {
+	pub fn fields(&self) -> &Vec<(String, FieldInfo)> {
+		&self.fields
+	}
+}
+
+pub struct TypeVersionDefinitionBuilder<'a> {
+	name: &'a QualifiedName,
+	version: BigUint,
+	field_names: HashSet<String>,
+	ver_type: &'a mut TypeVersionDefinition,
+}
+
+impl <'a> TypeVersionDefinitionBuilder<'a> {
+	pub fn add_field(&mut self, name: String, field: FieldInfo) -> Result<(), ModelError> {
+		if self.field_names.insert(name.to_ascii_uppercase()) {
+			self.ver_type.fields.push((name, field));
+			Ok(())
+		}
+		else {
+			Err(ModelError::DuplicateField(self.name.clone(), self.version.clone(), name))
+		}
+	}
 }
 
 /// The result of looking up a version of a type.
@@ -295,10 +423,47 @@ impl <'a> Clone for TypeVersionInfo<'a> {
 /// Defines a versioned type. Could be a struct or enum.
 #[derive(Debug)]
 pub struct VersionedTypeDefinitionData {
-	pub(crate) imports: HashMap<String, ScopeLookup>,
-	pub(crate) type_params: Vec<String>,
-	pub(crate) versions: HashMap<BigUint, TypeVersionDefinition>,
-	pub(crate) is_final: bool,
+	imports: HashMap<String, ScopeLookup>,
+	type_params: Vec<String>,
+	versions: HashMap<BigUint, TypeVersionDefinition>,
+	is_final: bool,
+}
+
+pub struct VersionedTypeDefinitionBuilder {
+	name: QualifiedName,
+	t: VersionedTypeDefinitionData,
+}
+
+impl VersionedTypeDefinitionBuilder {
+	pub fn new(name: QualifiedName, type_params: Vec<String>, is_final: bool, imports: HashMap<String, ScopeLookup>) -> Self {
+		VersionedTypeDefinitionBuilder {
+			name: name,
+			t: VersionedTypeDefinitionData {
+				imports: imports,
+				type_params: type_params,
+				is_final: is_final,
+				versions: HashMap::new(),
+			},
+		}
+	}
+
+	pub fn add_version<'a>(&'a mut self, version: BigUint) -> Result<TypeVersionDefinitionBuilder<'a>, ModelError> {
+		match self.t.versions.entry(version.clone()) {
+			std::collections::hash_map::Entry::Occupied(_) => Err(ModelError::DuplicateVersion(self.name.clone(), version)),
+			std::collections::hash_map::Entry::Vacant(entry) => {
+				let ver_type = entry.insert(TypeVersionDefinition {
+					fields: Vec::new(),
+				});
+
+				Ok(TypeVersionDefinitionBuilder {
+					name: &self.name,
+					version: version,
+					field_names: HashSet::new(),
+					ver_type: ver_type,
+				})
+			}
+		}
+	}
 }
 
 impl <'a> Named<'a, VersionedTypeDefinitionData> {
@@ -382,9 +547,119 @@ impl <'a> Named<'a, VersionedTypeDefinitionData> {
 /// Defines an extern type.
 #[derive(Debug)]
 pub struct ExternTypeDefinitionData {
-	pub(crate) imports: HashMap<String, ScopeLookup>,
-	pub(crate) type_params: Vec<String>,
-	pub(crate) literals: Vec<ExternLiteralSpecifier>,
+	imports: HashMap<String, ScopeLookup>,
+	type_params: Vec<String>,
+	literals: Vec<ExternLiteralSpecifier>,
+}
+
+pub struct ExternTypeDefinitionBuilder {
+	name: QualifiedName,
+	has_integer: bool,
+	has_string: bool,
+	has_sequence: bool,
+	cases: HashSet<String>,
+	has_record: bool,
+	t: ExternTypeDefinitionData,
+}
+
+pub struct ExternLiteralRecordBuilder<'a> {
+	name: &'a QualifiedName,
+	field_names: HashSet<String>,
+	fields: &'a mut Vec<(String, FieldInfo)>,
+}
+
+impl ExternTypeDefinitionBuilder {
+	pub fn new(name: QualifiedName, type_params: Vec<String>, imports: HashMap<String, ScopeLookup>) -> Self {
+		ExternTypeDefinitionBuilder {
+			name: name,
+			has_integer: false,
+			has_string: false,
+			has_sequence: false,
+			cases: HashSet::new(),
+			has_record: false,
+			t: ExternTypeDefinitionData {
+				imports: imports,
+				type_params: type_params,
+				literals: Vec::new(),
+			},
+		}
+	}
+	
+	pub fn add_integer_literal(&mut self, lower_type: ExternLiteralIntBound, lower: Option<BigInt>, upper_type: ExternLiteralIntBound, upper: Option<BigInt>) -> Result<(), ModelError> {
+		if self.has_integer {
+			Err(ModelError::DuplicateLiteralInteger(self.name.clone()))
+		}
+		else {
+			self.t.literals.push(ExternLiteralSpecifier::Integer(lower_type, lower, upper_type, upper));
+			self.has_integer = true;
+			Ok(())
+		}
+	}
+	
+	pub fn add_string_literal(&mut self) -> Result<(), ModelError> {
+		if self.has_string {
+			Err(ModelError::DuplicateLiteralString(self.name.clone()))
+		}
+		else {
+			self.t.literals.push(ExternLiteralSpecifier::String);
+			self.has_string = true;
+			Ok(())
+		}
+	}
+	
+	pub fn add_sequence_literal(&mut self, element_type: Type) -> Result<(), ModelError> {
+		if self.has_sequence {
+			Err(ModelError::DuplicateLiteralSequence(self.name.clone()))
+		}
+		else {
+			self.t.literals.push(ExternLiteralSpecifier::Sequence(element_type));
+			self.has_sequence = true;
+			Ok(())
+		}
+	}
+	
+	pub fn add_case_literal(&mut self, case_name: String, params: Vec<Type>) -> Result<(), ModelError> {
+		if self.cases.insert(case_name.to_ascii_uppercase()) {
+			self.t.literals.push(ExternLiteralSpecifier::Case(case_name, params));
+			Ok(())
+		}
+		else {
+			Err(ModelError::DuplicateLiteralCase(self.name.clone(), case_name))
+		}
+	}
+	
+	pub fn add_record_literal<'a>(&'a mut self) -> Result<ExternLiteralRecordBuilder<'a>, ModelError> {
+		if self.has_record {
+			Err(ModelError::DuplicateLiteralRecord(self.name.clone()))
+		}
+		else {
+			self.has_record = true;
+			self.t.literals.push(ExternLiteralSpecifier::Record(Vec::new()));
+			let fields = match self.t.literals.last_mut() {
+				Some(ExternLiteralSpecifier::Record(fields)) => fields,
+				_ => panic!("Last element should have been a record"),
+			};
+			Ok(ExternLiteralRecordBuilder {
+				name: &self.name,
+				field_names: HashSet::new(),
+				fields: fields,
+			})
+		}
+	}
+
+
+}
+
+impl <'a> ExternLiteralRecordBuilder<'a> {
+	pub fn add_field(&mut self, name: String, field: FieldInfo) -> Result<(), ModelError> {
+		if self.field_names.insert(name.to_ascii_uppercase()) {
+			self.fields.push((name, field));
+			Ok(())
+		}
+		else {
+			Err(ModelError::DuplicateLiteralRecordField(self.name.clone(), name))
+		}
+	}
 }
 
 /// Defines a bound for an integer literal definition.
@@ -575,28 +850,54 @@ impl Verilization {
 	}
 
 	/// Adds a constant to the serialization format.
-	pub fn add_constant(&mut self, name: QualifiedName, constant: Constant) -> Result<(), QualifiedName> {
-		let mut case_name = name.clone();
+	pub fn add_constant(&mut self, constant: ConstantBuilder) -> Result<(), ModelError> {
+		let mut case_name = constant.name.clone();
 		make_name_uppercase(&mut case_name);
 		if self.names.insert(case_name) {
-			self.constants.insert(name, constant);
+			self.constants.insert(constant.name, constant.constant);
 			Ok(())
 		}
 		else {
-			Err(name)
+			Err(ModelError::DuplicateConstant(constant.name))
 		}
 	}
 
-	/// Adds a type definition to the serialization format.
-	pub fn add_type(&mut self, name: QualifiedName, t: TypeDefinition) -> Result<(), QualifiedName> {
-		let mut case_name = name.clone();
+	/// Adds a struct to the serialization format.
+	pub fn add_struct_type(&mut self, type_def: VersionedTypeDefinitionBuilder) -> Result<(), ModelError> {
+		let mut case_name = type_def.name.clone();
 		make_name_uppercase(&mut case_name);
 		if self.names.insert(case_name) {
-			self.type_definitions.insert(name, t);
+			self.type_definitions.insert(type_def.name, TypeDefinition::StructType(type_def.t));
 			Ok(())
 		}
 		else {
-			Err(name)
+			Err(ModelError::DuplicateType(type_def.name))
+		}
+	}
+
+	/// Adds an enum to the serialization format.
+	pub fn add_enum_type(&mut self, type_def: VersionedTypeDefinitionBuilder) -> Result<(), ModelError> {
+		let mut case_name = type_def.name.clone();
+		make_name_uppercase(&mut case_name);
+		if self.names.insert(case_name) {
+			self.type_definitions.insert(type_def.name, TypeDefinition::EnumType(type_def.t));
+			Ok(())
+		}
+		else {
+			Err(ModelError::DuplicateType(type_def.name))
+		}
+	}
+
+	/// Adds an extern to the serialization format.
+	pub fn add_extern_type(&mut self, type_def: ExternTypeDefinitionBuilder) -> Result<(), ModelError> {
+		let mut case_name = type_def.name.clone();
+		make_name_uppercase(&mut case_name);
+		if self.names.insert(case_name) {
+			self.type_definitions.insert(type_def.name, TypeDefinition::ExternType(type_def.t));
+			Ok(())
+		}
+		else {
+			Err(ModelError::DuplicateType(type_def.name))
 		}
 	}
 
@@ -624,13 +925,17 @@ impl Verilization {
 	}
 
 	/// Merges two serialization formats.
-	pub fn merge(&mut self, other: Verilization) -> Result<(), QualifiedName> {
+	pub fn merge(&mut self, other: Verilization) -> Result<(), ModelError> {
 		if self.metadata.latest_version < other.metadata.latest_version {
 			self.metadata.latest_version = other.metadata.latest_version
 		}
 
-		other.constants.into_iter().try_for_each(|(name, constant)| self.add_constant(name, constant))?;
-		other.type_definitions.into_iter().try_for_each(|(name, constant)| self.add_type(name, constant))?;
+		other.constants.into_iter().try_for_each(|(name, constant)| self.add_constant(ConstantBuilder { name: name, constant: constant }))?;
+		other.type_definitions.into_iter().try_for_each(|(name, t)| match t {
+			TypeDefinition::StructType(type_def) => self.add_struct_type(VersionedTypeDefinitionBuilder { name: name, t: type_def }),
+			TypeDefinition::EnumType(type_def) => self.add_enum_type(VersionedTypeDefinitionBuilder { name: name, t: type_def }),
+			TypeDefinition::ExternType(type_def) => self.add_extern_type(ExternTypeDefinitionBuilder { name: name, t: type_def, has_integer: false, has_string: false, has_sequence: false, cases: HashSet::new(), has_record: false, }),
+		})?;
 
 		Ok(())
 	}

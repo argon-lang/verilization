@@ -1,27 +1,26 @@
 use verilization_compiler::*;
 use lang::generator::*;
 use lang::GeneratorError;
-use model::ConstantValue;
+use model::{ConstantValue, ConstantValueRecordBuilder};
 use verilization_runtime::{FormatWriter, VerilizationCodec};
 use rand::Rng;
 use num_bigint::{BigInt, BigUint, RandBigInt};
 use num_traits::{One, ToPrimitive};
 use std::str::FromStr;
-use std::collections::HashMap;
 
 
 
 pub fn generate_random_value<R: Rng>(random: &mut R, t: LangType) -> Result<ConstantValue, GeneratorError> {
     Ok(match t {
         LangType::Versioned(VersionedTypeKind::Struct, _, _, _, fields) => {
-            let mut field_values = HashMap::new();
+            let mut record = ConstantValueRecordBuilder::new();
 
             for field in fields.build()? {
                 let value = generate_random_value(random, field.field_type)?;
-                field_values.insert(field.name.clone(), value);
+                record.add_field(field.name.clone(), value)?;
             }
 
-            ConstantValue::Record(field_values)
+            ConstantValue::Record(record.build())
         },
 
         LangType::Versioned(VersionedTypeKind::Enum, _, _, _, fields) => {
@@ -76,11 +75,11 @@ pub fn generate_random_value<R: Rng>(random: &mut R, t: LangType) -> Result<Cons
                     ConstantValue::Case(case_name, values)
                 },
                 LangLiteral::Record(fields) => {
-                    let mut values = HashMap::new();
+                    let mut record = ConstantValueRecordBuilder::new();
                     for field in fields {
-                        values.insert(field.name.clone(), generate_random_value(random, field.field_type)?);
+                        record.add_field(field.name.clone(), generate_random_value(random, field.field_type)?)?;
                     }
-                    ConstantValue::Record(values)
+                    ConstantValue::Record(record.build())
                 },
             }
         },
@@ -156,7 +155,8 @@ pub fn write_constant_value<W: FormatWriter<Error = GeneratorError>>(writer: &mu
             write_constant_value(writer, value, field.field_type)?;
         },
 
-        (ConstantValue::Record(mut values), LangType::Versioned(VersionedTypeKind::Struct, _, _, _, fields)) => {
+        (ConstantValue::Record(record), LangType::Versioned(VersionedTypeKind::Struct, _, _, _, fields)) => {
+            let mut values = record.into_field_values();
             for field in fields.build()? {
                 let value = values.remove(field.name).ok_or("Field missing from record.")?;
                 write_constant_value(writer, value, field.field_type)?;

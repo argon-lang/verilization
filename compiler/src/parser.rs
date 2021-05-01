@@ -1,41 +1,27 @@
 use crate::model;
 use num_bigint::{ BigUint, BigInt, Sign };
 use num_traits::Zero;
-use std::collections::{HashMap, HashSet};
-use std::marker::PhantomData;
+use std::collections::{HashMap};
 
 use nom::{
 	IResult,
 	branch::{alt},
 	multi::{many0, separated_list1, separated_list0},
 	character::complete::{multispace0, multispace1, alphanumeric1, one_of, none_of, char},
-	combinator::{map, opt, eof, value},
+	combinator::{map, opt, eof, value, cut},
 	bytes::complete::tag,
 	sequence::{preceded, terminated},
-	error::{ParseError, ErrorKind},
 };
 
-#[derive(Debug)]
-pub enum PErrorType<I> {
-	ParseError(I, ErrorKind),
-	DuplicateVersion(I, String, BigUint),
-	DuplicateField(I, BigUint, String),
-	DuplicateFieldValue,
-	DuplicateConstant(model::QualifiedName),
-	DuplicateType(model::QualifiedName),
-}
+type PResult<I, A> = IResult<I, A>;
 
-impl<I> ParseError<I> for PErrorType<I> {
-	fn from_error_kind(input: I, kind: ErrorKind) -> Self {
-		PErrorType::ParseError(input, kind)
-	}
+type ImportMap = HashMap<String, model::ScopeLookup>;
+type LazyConstantValue = dyn FnOnce() -> Result<model::ConstantValue, model::ModelError>;
+type TopLevelDefinitionAdder = dyn FnOnce(&mut model::Verilization) -> Result<(), model::ModelError>;
+type TypeVersionAdder = dyn FnOnce(&mut model::VersionedTypeDefinitionBuilder) -> Result<(), model::ModelError>;
+type ExternLiteralAdder = dyn FnOnce(&mut model::ExternTypeDefinitionBuilder) -> Result<(), model::ModelError>;
+type LazyModel = dyn FnOnce() -> Result<model::Verilization, model::ModelError>;
 
-	fn append(_input: I, _kind: ErrorKind, other: Self) -> Self {
-		other
-	}
-}
-
-type PResult<I, A> = IResult<I, A, PErrorType<I>>;
 
 // Keywords
 fn kw_version(input: &str) -> PResult<&str, ()> {
@@ -283,7 +269,17 @@ fn type_expr(input: &str) -> PResult<&str, model::Type> {
 	Ok((input, model::Type { name: qual_name, args: args }))
 }
 
-fn sequence_literal(input: &str) -> PResult<&str, model::ConstantValue> {
+fn constant_integer_literal(input: &str) -> PResult<&str, Box<LazyConstantValue>> {
+	let (input, n) = bigint(input)?;
+	Ok((input, Box::new(move || Ok(model::ConstantValue::Integer(n)))))
+}
+
+fn constant_string_literal(input: &str) -> PResult<&str, Box<LazyConstantValue>> {
+	let (input, s) = string_literal(input)?;
+	Ok((input, Box::new(move || Ok(model::ConstantValue::String(s)))))
+}
+
+fn sequence_literal(input: &str) -> PResult<&str, Box<LazyConstantValue>> {
 	let (input, _) = sym_open_bracket(input)?;
 	let (input, values) = opt(
 		terminated(
@@ -293,21 +289,34 @@ fn sequence_literal(input: &str) -> PResult<&str, model::ConstantValue> {
 	)(input)?;
 	let (input, _) = sym_close_bracket(input)?;
 
-	Ok((input, model::ConstantValue::Sequence(values.unwrap_or_else(|| Vec::new()))))
+	Ok((input, Box::new(move || {
+		let values = values
+			.unwrap_or_else(|| Vec::new())
+			.into_iter()
+			.map(|lazy_const| lazy_const())
+			.collect::<Result<Vec<_>, _>>()?;
+		Ok(model::ConstantValue::Sequence(values))
+	})))
 }
 
-fn case_literal(input: &str) -> PResult<&str, model::ConstantValue> {
+fn case_literal(input: &str) -> PResult<&str, Box<LazyConstantValue>> {
 	let (input, name) = identifier(input)?;
 	let (input, _) = sym_open_paren(input)?;
 	let (input, args) = opt(separated_list1(sym_comma, constant_value))(input)?;
 	let (input, _) = sym_close_paren(input)?;
 
-	let args = args.unwrap_or_else(|| Vec::new());
+	Ok((input, Box::new(move || {
+		let args = args
+			.unwrap_or_else(|| Vec::new())
+			.into_iter()
+			.map(|lazy_const| lazy_const())
+			.collect::<Result<Vec<_>, _>>()?;
 
-	Ok((input, model::ConstantValue::Case(name, args)))
+		Ok(model::ConstantValue::Case(name, args))
+	})))
 }
 
-fn record_field_literal(input: &str) -> PResult<&str, (String, model::ConstantValue)> {
+fn record_field_literal(input: &str) -> PResult<&str, (String, Box<LazyConstantValue>)> {
 	let (input, name) = identifier(input)?;
 	let (input, _) = sym_eq(input)?;
 	let (input, value) = constant_value(input)?;
@@ -315,27 +324,24 @@ fn record_field_literal(input: &str) -> PResult<&str, (String, model::ConstantVa
 	Ok((input, (name, value)))
 }
 
-fn record_literal(input: &str) -> PResult<&str, model::ConstantValue> {
+fn record_literal(input: &str) -> PResult<&str, Box<LazyConstantValue>> {
 	let (input, _) = sym_open_curly(input)?;
 
 	let (input, fields) = many0(record_field_literal)(input)?;
 
 	let (input, _) = sym_close_curly(input)?;
 
-
-	let mut field_map = HashMap::new();
-	for (name, value) in fields {
-		if field_map.contains_key(&name) {
-			return Err(nom::Err::Failure(PErrorType::DuplicateFieldValue));
+	Ok((input, Box::new(move || {
+		let mut record = model::ConstantValueRecordBuilder::new();
+		for (name, value) in fields {
+			record.add_field(name, value()?)?;
 		}
 
-		field_map.insert(name, value);
-	}
-
-	Ok((input, model::ConstantValue::Record(field_map)))
+		Ok(model::ConstantValue::Record(record.build()))
+	})))
 }
 
-fn other_constant(input: &str) -> PResult<&str, model::ConstantValue> {
+fn other_constant(input: &str) -> PResult<&str, Box<LazyConstantValue>> {
 	let (input, parts) = separated_list1(sym_dot, identifier)(input)?;
 
 	let mut iter = parts.into_iter();
@@ -348,21 +354,21 @@ fn other_constant(input: &str) -> PResult<&str, model::ConstantValue> {
 		name = part;
 	}
 
-	Ok((input, model::ConstantValue::Constant(
+	Ok((input, Box::new(move || Ok(model::ConstantValue::Constant(
 		model::QualifiedName {
 			package: model::PackageName {
 				package: package,
 			},
 			name: name
 		}
-	)))
+	)))))
 }
 
 
-fn constant_value(input: &str) -> PResult<&str, model::ConstantValue> {
+fn constant_value(input: &str) -> PResult<&str, Box<LazyConstantValue>> {
 	alt((
-		map(bigint, model::ConstantValue::Integer),
-		map(string_literal, model::ConstantValue::String),
+		constant_integer_literal,
+		constant_string_literal,
 		sequence_literal,
 		case_literal,
 		record_literal,
@@ -370,13 +376,7 @@ fn constant_value(input: &str) -> PResult<&str, model::ConstantValue> {
 	))(input)
 }
 
-
-enum TopLevelDefinition {
-	Constant(model::Constant),
-	Type(model::TypeDefinition),
-}
-
-fn versioned_constant(input: &str) -> PResult<&str, (BigUint, model::ConstantValue)> {
+fn versioned_constant(input: &str) -> PResult<&str, (BigUint, Box<LazyConstantValue>)> {
 	let (input, _) = kw_version(input)?;
 	let (input, ver) = biguint(input)?;
 	let (input, _) = sym_eq(input)?;
@@ -389,42 +389,40 @@ fn versioned_constant(input: &str) -> PResult<&str, (BigUint, model::ConstantVal
 // const name: Type {
 //     version 1 = ...;
 //}
-fn constant_defn(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
-	let (input, _) = kw_const(input)?;
-	let (input, name) = identifier(input)?;
-	let (input, _) = sym_colon(input)?;
-	let (input, t) = type_expr(input)?;
-	let (input, _) = multispace0(input)?;
-	let (input, _) = sym_open_curly(input)?;
-	let (input, versions) = many0(versioned_constant)(input)?;
-	let (input, _) = sym_close_curly(input)?;
-
-	let mut version_map = HashMap::new();
-	for (ver, value) in versions.into_iter() {
-		if version_map.contains_key(&ver) {
-			return Err(nom::Err::Failure(PErrorType::DuplicateVersion(input, name, ver)))
-		}
-
-		version_map.insert(ver, value);
+fn constant_defn(current_package: model::PackageName, imports: ImportMap) -> impl Fn(&str) -> PResult<&str, Box<TopLevelDefinitionAdder>> {
+	move |input| {
+		let (input, _) = kw_const(input)?;
+		let (input, name) = identifier(input)?;
+		let (input, _) = sym_colon(input)?;
+		let (input, t) = type_expr(input)?;
+		let (input, _) = multispace0(input)?;
+		let (input, _) = sym_open_curly(input)?;
+		let (input, versions) = many0(versioned_constant)(input)?;
+		let (input, _) = sym_close_curly(input)?;
+	
+		let name = model::QualifiedName { package: current_package.clone(), name: name, };
+		let imports = imports.clone();
+	
+		Ok((input, Box::new(|model| {
+			let mut constant = model::ConstantBuilder::new(name, t, imports);
+			for (ver, value) in versions {
+				constant.add_version(ver, value()?)?;
+			}
+			
+			model.add_constant(constant)
+		})))
 	}
-
-	Ok((input, (name, TopLevelDefinition::Constant(model::Constant {
-		imports: HashMap::new(),
-		value_type: t,
-		versions: version_map,
-	}))))
 }
 
 // Ex: name: Type;
 fn field_definition(input: &str) -> PResult<&str, (String, model::FieldInfo)> {
 	let (input, name) = identifier(input)?;
-	let (input, _) = sym_colon(input)?;
-	let (input, t) = type_expr(input)?;
-	let (input, _) = sym_semicolon(input)?;
+	let (input, _) = cut(sym_colon)(input)?;
+	let (input, t) = cut(type_expr)(input)?;
+	let (input, _) = cut(sym_semicolon)(input)?;
 
 	Ok((input, (name, model::FieldInfo {
 		field_type: t,
-		dummy: PhantomData {},
 	})))
 }
 
@@ -432,28 +430,19 @@ fn field_definition(input: &str) -> PResult<&str, (String, model::FieldInfo)> {
 // version 5 {
 //   ...	
 // }
-fn type_version_definition(input: &str) -> PResult<&str, (BigUint, model::TypeVersionDefinition)> {
+fn type_version_definition(input: &str) -> PResult<&str, Box<TypeVersionAdder>> {
 	let (input, _) = kw_version(input)?;
-	let (input, ver) = biguint(input)?;
-	let (input, _) = sym_open_curly(input)?;
+	let (input, ver) = cut(biguint)(input)?;
+	let (input, _) = cut(sym_open_curly)(input)?;
 	let (input, fields_orig) = many0(field_definition)(input)?;
-	let (input, _) = sym_close_curly(input)?;
+	let (input, _) = cut(sym_close_curly)(input)?;
 
-	let mut field_names: HashSet<String> = HashSet::new();
-	let mut fields: Vec<(String, model::FieldInfo)> = Vec::new();
-	for (name, field) in fields_orig {
-		let mut case_name = name.clone();
-		case_name.make_ascii_uppercase();
-		if !field_names.insert(case_name) {
-			return Err(nom::Err::Failure(PErrorType::DuplicateField(input, ver, name)))
+	Ok((input, Box::new(|type_def| {
+		let mut ver_type = type_def.add_version(ver)?;
+		for (name, field) in fields_orig {	
+			ver_type.add_field(name, field)?;
 		}
-
-		fields.push((name, field));
-	}
-
-	Ok((input, (ver, model::TypeVersionDefinition {
-		fields: fields,
-		dummy: PhantomData {},
+		Ok(())
 	})))
 }
 
@@ -474,55 +463,45 @@ fn type_param_list(input: &str) -> PResult<&str, Vec<String>> {
 //   version 5 {...}
 //   ...
 // }
-fn versioned_type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
-	let (input, is_final) = opt(kw_final)(input)?;
-	let (input, is_enum) = alt((
-		map(kw_enum, |_| true),
-		map(kw_struct, |_| false),
-	))(input)?;
+fn versioned_type_definition(current_package: model::PackageName, imports: ImportMap) -> impl Fn(&str) -> PResult<&str, Box<TopLevelDefinitionAdder>> {
+	move |input| {
+		let (input, is_final) = opt(kw_final)(input)?;
+		let is_final = is_final.is_some();
 
-	let (input, name) = identifier(input)?;
-	let (input, type_params) = opt(type_param_list)(input)?;
-	let type_params = type_params.unwrap_or(Vec::new());
+		let (input, is_enum) = alt((
+			map(kw_enum, |_| true),
+			map(kw_struct, |_| false),
+		))(input)?;
 	
-	let (input, _) = sym_open_curly(input)?;
-	let (input, versions) = many0(type_version_definition)(input)?;
-	let (input, _) = sym_close_curly(input)?;
+		let (input, name) = cut(identifier)(input)?;
+		let (input, type_params) = opt(type_param_list)(input)?;
+		let type_params = type_params.unwrap_or(Vec::new());
+		
+		let (input, _) = cut(sym_open_curly)(input)?;
+		let (input, versions) = many0(type_version_definition)(input)?;
+		let (input, _) = cut(sym_close_curly)(input)?;
+	
+		let name = model::QualifiedName { package: current_package.clone(), name: name, };
+		let imports = imports.clone();
+	
+		
+		Ok((input, Box::new(move |model| {
+			let mut type_def = model::VersionedTypeDefinitionBuilder::new(name, type_params, is_final, imports);
+			for adder in versions {
+				adder(&mut type_def)?;
+			}
 
-	let mut version_map: HashMap<BigUint, model::TypeVersionDefinition> = HashMap::new();
-	for (ver, ver_type) in versions.into_iter() {
-		if version_map.contains_key(&ver) {
-			return Err(nom::Err::Failure(PErrorType::DuplicateVersion(input, name, ver)))
-		}
-
-		version_map.insert(ver, ver_type);
+			if is_enum {
+				model.add_enum_type(type_def)
+			}
+			else {
+				model.add_struct_type(type_def)
+			}
+		})))
 	}
-
-	
-	Ok((input, (name, TopLevelDefinition::Type(
-		if is_enum {
-			model::TypeDefinition::EnumType(model::VersionedTypeDefinitionData {
-				imports: HashMap::new(),
-				type_params: type_params,
-				versions: version_map,
-				is_final: is_final.is_some(),
-			})
-		}
-		else {
-			model::TypeDefinition::StructType(model::VersionedTypeDefinitionData {
-				imports: HashMap::new(),
-				type_params: type_params,
-				versions: version_map,
-				is_final: is_final.is_some(),
-			})
-		}
-	))))
-	
 }
 
-
-
-fn extern_literal_integer(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
+fn extern_literal_integer(input: &str) -> PResult<&str, Box<ExternLiteralAdder>> {
 	let (input, _) = multispace0(input)?;
 	let (input, _) = tag("integer")(input)?;
 	let (input, _) = multispace0(input)?;
@@ -536,27 +515,27 @@ fn extern_literal_integer(input: &str) -> PResult<&str, model::ExternLiteralSpec
 
 	let bound = |ch: char| if ch == '(' { model::ExternLiteralIntBound::Exclusive } else { model::ExternLiteralIntBound::Inclusive };
 
-	Ok((input, model::ExternLiteralSpecifier::Integer(bound(open), lower, bound(close), upper)))
+	Ok((input, Box::new(move |type_def| type_def.add_integer_literal(bound(open), lower, bound(close), upper))))
 }
 
-fn extern_literal_string(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
+fn extern_literal_string(input: &str) -> PResult<&str, Box<ExternLiteralAdder>> {
 	let (input, _) = multispace0(input)?;
 	let (input, _) = tag("string")(input)?;
 
-	Ok((input, model::ExternLiteralSpecifier::String))
+	Ok((input, Box::new(model::ExternTypeDefinitionBuilder::add_string_literal)))
 }
 
-fn extern_literal_sequence(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
+fn extern_literal_sequence(input: &str) -> PResult<&str, Box<ExternLiteralAdder>> {
 	let (input, _) = multispace0(input)?;
 	let (input, _) = tag("sequence")(input)?;
 	let (input, _) = multispace1(input)?;
 	let (input, element_type) = type_expr(input)?;
 
-	Ok((input, model::ExternLiteralSpecifier::Sequence(element_type)))
+	Ok((input, Box::new(|type_def| type_def.add_sequence_literal(element_type))))
 }
 
 
-fn extern_literal_case(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
+fn extern_literal_case(input: &str) -> PResult<&str, Box<ExternLiteralAdder>> {
 	let (input, _) = multispace0(input)?;
 	let (input, _) = tag("case")(input)?;
 	let (input, name) = identifier(input)?;
@@ -564,21 +543,27 @@ fn extern_literal_case(input: &str) -> PResult<&str, model::ExternLiteralSpecifi
 	let (input, params) = separated_list0(sym_comma, type_expr)(input)?;
 	let (input, _) = sym_close_paren(input)?;
 
-	Ok((input, model::ExternLiteralSpecifier::Case(name, params)))
+	Ok((input, Box::new(|type_def| type_def.add_case_literal(name, params))))
 }
 
 
-fn extern_literal_record(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
+fn extern_literal_record(input: &str) -> PResult<&str, Box<ExternLiteralAdder>> {
 	let (input, _) = multispace0(input)?;
 	let (input, _) = tag("record")(input)?;
 	let (input, _) = sym_open_curly(input)?;
 	let (input, fields) = many0(field_definition)(input)?;
 	let (input, _) = sym_close_curly(input)?;
 
-	Ok((input, model::ExternLiteralSpecifier::Record(fields)))
+	Ok((input, Box::new(|type_def| {
+		let mut record = type_def.add_record_literal()?;
+		for (name, field) in fields {
+			record.add_field(name, field)?;
+		}
+		Ok(())
+	})))
 }
 
-fn extern_literal(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
+fn extern_literal(input: &str) -> PResult<&str, Box<ExternLiteralAdder>> {
 	let (input, literal) = alt((extern_literal_integer, extern_literal_string, extern_literal_sequence, extern_literal_case, extern_literal_record))(input)?;
 	let (input, _) = sym_semicolon(input)?;
 
@@ -590,7 +575,7 @@ fn extern_literal(input: &str) -> PResult<&str, model::ExternLiteralSpecifier> {
 // literal {
 //   ...
 // }
-fn extern_literal_block(input: &str) -> PResult<&str, Vec<model::ExternLiteralSpecifier>> {
+fn extern_literal_block(input: &str) -> PResult<&str, Vec<Box<ExternLiteralAdder>>> {
 	let (input, _) = kw_literal(input)?;
 	let (input, _) = sym_open_curly(input)?;
 	
@@ -606,33 +591,45 @@ fn extern_literal_block(input: &str) -> PResult<&str, Vec<model::ExternLiteralSp
 // extern Name {
 //   ...
 // }
-fn extern_type_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
-	let (input, _) = kw_extern(input)?;
-	let (input, name) = identifier(input)?;
-	let (input, type_params) = opt(type_param_list)(input)?;
-	let type_params = type_params.unwrap_or(Vec::new());
-
-	let (input, _) = sym_open_curly(input)?;
+fn extern_type_definition(current_package: model::PackageName, imports: ImportMap) -> impl Fn(&str) -> PResult<&str, Box<TopLevelDefinitionAdder>> {
+	move |input| {
+		let (input, _) = kw_extern(input)?;
+		let (input, name) = identifier(input)?;
+		let (input, type_params) = opt(type_param_list)(input)?;
+		let type_params = type_params.unwrap_or(Vec::new());
 	
-	let (input, literals) = opt(extern_literal_block)(input)?;
-	let literals = literals.unwrap_or_else(|| Vec::new());
+		let (input, _) = sym_open_curly(input)?;
+		
+		let (input, literals) = opt(extern_literal_block)(input)?;
+		let literals = literals.unwrap_or_else(|| Vec::new());
+		
+		let (input, _) = sym_close_curly(input)?;
+		
+		let name = model::QualifiedName { package: current_package.clone(), name: name, };
+		let imports = imports.clone();
 	
-	let (input, _) = sym_close_curly(input)?;
-
-	Ok((input, (name, TopLevelDefinition::Type(model::TypeDefinition::ExternType(model::ExternTypeDefinitionData {
-		imports: HashMap::new(),
-		type_params: type_params,
-		literals: literals,
-	})))))
+	
+		Ok((input, Box::new(|model| {
+			let mut type_def = model::ExternTypeDefinitionBuilder::new(name, type_params, imports);
+			for literal_adder in literals {
+				literal_adder(&mut type_def)?;
+			}
+			model.add_extern_type(type_def)
+		})))
+	}
 }
 
 
-fn top_level_definition(input: &str) -> PResult<&str, (String, TopLevelDefinition)> {
-	alt((constant_defn, versioned_type_definition, extern_type_definition))(input)
+fn top_level_definition(current_package: model::PackageName, imports: ImportMap) -> impl Fn(&str) -> PResult<&str, Box<TopLevelDefinitionAdder>> {
+	move |input| alt((
+		constant_defn(current_package.clone(), imports.clone()),
+		versioned_type_definition(current_package.clone(), imports.clone()),
+		extern_type_definition(current_package.clone(), imports.clone())
+	))(input)
 }
 
 
-pub fn parse_model(input: &str) -> PResult<&str, model::Verilization> {
+pub fn parse_model(input: &str) -> PResult<&str, Box<LazyModel>> {
 	let (input, latest_ver) = version_directive(input)?;
 	let (input, package) = opt(package_directive)(input)?;
 	let package =
@@ -640,27 +637,22 @@ pub fn parse_model(input: &str) -> PResult<&str, model::Verilization> {
 			else { model::PackageName { package: Vec::new() } };
 
 
-	let mut data = model::Verilization::new(model::VerilizationMetadata {
-		latest_version: latest_ver,
-	});
 
-	let (input, defs) = many0(top_level_definition)(input)?;
-
-	for (name, def) in defs.into_iter() {
-		let qual_name = model::QualifiedName {
-			package: package.clone(),
-			name: name,
-		};
-
-		match def {
-			TopLevelDefinition::Constant(constant) => data.add_constant(qual_name, constant).map_err(|qual_name| nom::Err::Failure(PErrorType::DuplicateConstant(qual_name)))?,
-			TopLevelDefinition::Type(t) => data.add_type(qual_name, t).map_err(|qual_name| nom::Err::Failure(PErrorType::DuplicateType(qual_name)))?,
-		}
-	}
-
-
+	let (input, defs) = many0(top_level_definition(package, HashMap::new()))(input)?;
 	let (input, _) = multispace0(input)?;
 	let (input, _) = eof(input)?;
 
-	Ok((input, data))
+
+
+	Ok((input, Box::new(move || {
+		let mut model = model::Verilization::new(model::VerilizationMetadata {
+			latest_version: latest_ver,
+		});
+	
+		for def_adder in defs.into_iter() {
+			def_adder(&mut model)?;
+		}
+
+		Ok(model)
+	})))
 }

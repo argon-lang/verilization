@@ -23,9 +23,9 @@ pub fn load_files<P : AsRef<Path>>(files: Vec<P>) -> Result<model::Verilization,
 		.into_iter()
 		.map(|file| {
 			let content = std::fs::read_to_string(file).expect("Could not read input file.");
-			parser::parse_model(&content)
-				.map(|(_, model)| model)
-				.map_err(GeneratorError::from)
+			let (_, model) = parser::parse_model(&content)?;
+			let model = model()?;
+			Ok(model)
 		});
 
 	load_all_models(models)

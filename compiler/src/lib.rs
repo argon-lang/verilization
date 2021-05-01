@@ -20,5 +20,4 @@ pub use memory_output_handler::MemoryOutputHandler;
 #[cfg(not(target_arch = "wasm32"))]
 pub use model_loader::load_files;
 
-pub use parser::PErrorType as ParserError;
 pub use type_check::TypeCheckError;

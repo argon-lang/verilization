@@ -138,9 +138,9 @@ pub unsafe extern "C" fn verilization_parse(nfiles: usize, files: *const *const 
 unsafe fn verilization_parse_impl(files: &[*const APIString]) -> Result<model::Verilization, GeneratorError> {
     let models = files.iter().map(|content| {
         let content = content.as_ref().ok_or("Pointer was null")?.to_str().ok_or("Invalid String")?;
-        parser::parse_model(content)
-            .map(|(_, model)| model)
-            .map_err(GeneratorError::from)
+        let (_, model) = parser::parse_model(content)?;
+        let model = model()?;
+        Ok(model)
     });
 
     model_loader::load_all_models(models)

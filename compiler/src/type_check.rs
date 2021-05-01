@@ -91,14 +91,14 @@ fn type_check_versioned_type<'model>(model: &'model Verilization, t: Named<'mode
     };
 
     for ver in t.versions() {
-        for (_, field) in &ver.ver_type.fields {
+        for (_, field) in ver.ver_type.fields() {
             tc.check_type(&ver.version, &field.field_type)?;
         }
     }
 
     if t.is_final() {
         if let Some(last_ver) = t.versions().last() {
-            for (_, field) in &last_ver.ver_type.fields {
+            for (_, field) in last_ver.ver_type.fields() {
                 if !tc.check_is_final(&field.field_type, &last_ver.version)? {
                     return Err(TypeCheckError::TypeNotFinal(t.name().clone()))
                 }
