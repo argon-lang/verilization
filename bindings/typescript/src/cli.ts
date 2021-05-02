@@ -4,16 +4,12 @@ import * as path from "path";
 import * as url from "url";
 
 async function command_version(): Promise<void> {
-    const cliFile = url.fileURLToPath(import.meta.url);
-    const packageJsonFile = path.join(path.dirname(cliFile), "..", "package.json");
-    const packageJson = JSON.parse(await fs.readFile(packageJsonFile, { encoding: "utf-8" }));
+    const packageJson = JSON.parse(await fs.readFile(new url.URL("../package.json", import.meta.url), { encoding: "utf-8" }));
     console.log(`verilization compiler version ${packageJson.version} (JS)`);
 }
 
 async function command_help(): Promise<void> {
-    const cliFile = url.fileURLToPath(import.meta.url);
-    const helpFile = path.join(path.dirname(cliFile), "help.txt");
-    const helpMessage = await fs.readFile(helpFile, { encoding: "utf-8" });
+    const helpMessage = await fs.readFile(new url.URL("./help.txt", import.meta.url), { encoding: "utf-8" });
     console.log(helpMessage);
 }
 

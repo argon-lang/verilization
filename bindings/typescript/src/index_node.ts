@@ -2,11 +2,10 @@
 import {VerilizationCompiler, VerilizationModule, Verilization} from "./compiler.js";
 export {Verilization, LangOption, LangOptions, OutputFileMap} from "./compiler.js";
 import * as fs from "fs/promises";
-import * as path from "path";
 import * as url from "url";
 
 
-const moduleFile = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "verilization_compiler.wasm");
+const moduleFile = new url.URL("./verilization_compiler.wasm", import.meta.url);
 
 const moduleWasm = await WebAssembly.instantiate(await fs.readFile(moduleFile), {});
 
