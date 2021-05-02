@@ -14,6 +14,9 @@
     "build-wasm": "cd ../c-api && cargo build --lib --release --target wasm32-unknown-unknown",
     "build": "npm run build-wasm && mkdirp lib && cpy --rename verilization_compiler.wasm ../../target/wasm32-unknown-unknown/release/verilization_bindings_c_api.wasm lib/ && cpy ../../compiler-cli-core/src/help.txt lib/ && tsc --project tsconfig.json"
   },
+  "bin": {
+    "verilization-compiler": "./bin/cli.js"
+  },
   "devDependencies": {
     "@types/node": "^14.14.37",
     "cpy-cli": "^3.1.1",
