@@ -84,7 +84,6 @@ fn run_test_case<Lang: TestLanguage>(model_file: &str) -> Result<(), VError> {
 
         
         let mut run = Command::new("node");
-        run.arg("--experimental-wasm-modules");
         run.arg("../../bindings/typescript/bin/cli.js");
 
         commands.push(GeneratorCommand {

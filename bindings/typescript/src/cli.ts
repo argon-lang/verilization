@@ -1,4 +1,4 @@
-import {Verilization, OutputFileMap, LangOptions, LangOption} from "./index.js";
+import {parse, OutputFileMap, LangOptions, LangOption} from "./index_node.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as url from "url";
@@ -21,7 +21,7 @@ async function command_generate(lang: string, inputFiles: readonly string[], opt
     const file_content = await Promise.all(inputFiles.map(filename =>
         fs.readFile(filename, { encoding: "utf-8" })
     ));
-    const model = Verilization.parse(file_content);
+    const model = parse(file_content);
     let output: OutputFileMap;
     try {
         output = model.generate(lang, options);
@@ -108,6 +108,8 @@ async function parse_args(args: Iterator<string>): Promise<void> {
                 throw new Error(`Unexpected argument: ${arg}`);
         }
     }
+
+	throw new Error("No command specified");
 }
 
 try {

@@ -3,9 +3,12 @@
   "version": "0.1.0",
   "description": "Compiler for verilization.",
   "type": "module",
-  "main": "bin/index.js",
   "exports": {
-    ".": "./bin/index.js"
+    ".": {
+      "node": "./bin/index_node.js",
+      "default": "./bin/index_web.js"
+    },
+    "./compiler": "./bin/compiler.js"
   },
   "scripts": {
     "build-wasm": "cd ../c-api && cargo build --lib --release --target wasm32-unknown-unknown",
