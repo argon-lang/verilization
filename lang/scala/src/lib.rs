@@ -1,13 +1,14 @@
-use crate::model;
+use verilization_compiler::{lang, model, util, for_sep};
+
 use model::Named;
-use crate::lang::{GeneratorError, Language, OutputHandler};
+use lang::{GeneratorError, Language, OutputHandler};
 use std::ffi::OsString;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use num_bigint::BigUint;
-use super::generator::*;
-use crate::util::{capitalize_identifier, uncapitalize_identifier};
+use lang::generator::*;
+use util::{capitalize_identifier, uncapitalize_identifier};
 use num_traits::ToPrimitive;
 
 type PackageMap = HashMap<model::PackageName, model::PackageName>;

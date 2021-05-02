@@ -7,3 +7,6 @@ edition = "2018"
 [dependencies]
 verilization-compiler = { path = "../compiler" }
 verilization-compiler-cli-core = { path = "../compiler-cli-core" }
+verilization-lang-java = { path = "../lang/java" }
+verilization-lang-scala = { path = "../lang/scala" }
+verilization-lang-typescript = { path = "../lang/typescript" }

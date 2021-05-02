@@ -1,5 +1,5 @@
 use verilization_compiler::{lang, model, VError};
-use lang::java::{JavaGenerator, JavaOptions};
+use verilization_lang_java::{JavaGenerator, JavaOptions};
 use model::{Verilization, Named};
 use lang::generator::*;
 
@@ -31,7 +31,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> GeneratorWithFile for JavaTest
 }
 
 impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model> for JavaTestCaseGen<'model, 'opt, 'output, F, R> {
-    type Lang = lang::java::JavaLanguage;
+    type Lang = verilization_lang_java::JavaLanguage;
 	fn model(&self) -> &'model model::Verilization {
 		self.model
 	}
@@ -109,7 +109,7 @@ impl TestGenerator for JavaTestGenerator {
     }
 
     fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), VError> {
-        let options = lang::java::JavaLanguage::test_options();
+        let options = verilization_lang_java::JavaLanguage::test_options();
 
         for t in model.types() {
             let t = match t {

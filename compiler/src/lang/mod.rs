@@ -1,9 +1,6 @@
 //! Defines generator related code for languages.
 
 pub mod generator;
-pub mod typescript;
-pub mod java;
-pub mod scala;
 
 use crate::model;
 use std::ffi::OsString;

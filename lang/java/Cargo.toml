@@ -1,10 +1,11 @@
 [package]
-name = "verilization-compiler"
+name = "verilization-lang-java"
 version = "0.1.0"
 authors = ["argon-dev <argon@argon.dev>"]
 edition = "2018"
 
 [dependencies]
+verilization-compiler = { path = "../../compiler" }
 nom = "6.1.2"
 num-bigint = "0.4.0"
 num-traits = "0.2.14"

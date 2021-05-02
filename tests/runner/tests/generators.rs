@@ -1,6 +1,6 @@
 use verilization_test_runner::*;
 
-use verilization_compiler::{lang, FileOutputHandler, VError};
+use verilization_compiler::{FileOutputHandler, VError};
 
 use test_lang::{TestLanguage, TestGenerator};
 
@@ -66,17 +66,17 @@ fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), VError> {
 
 #[test]
 fn run_typescript_tests() -> Result<(), VError> {
-    run_tests_for_lang::<lang::typescript::TypeScriptLanguage>()
+    run_tests_for_lang::<verilization_lang_typescript::TypeScriptLanguage>()
 }
 
 #[test]
 fn run_java_tests() -> Result<(), VError> {
-    run_tests_for_lang::<lang::java::JavaLanguage>()
+    run_tests_for_lang::<verilization_lang_java::JavaLanguage>()
 }
 
 #[test]
 fn run_scala_tests() -> Result<(), VError> {
-    run_tests_for_lang::<lang::scala::ScalaLanguage>()
+    run_tests_for_lang::<verilization_lang_scala::ScalaLanguage>()
 }
 
 

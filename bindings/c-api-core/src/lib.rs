@@ -1,9 +1,8 @@
 //! Defines the C API for use in bindings.
 //! Most notably for WebAssembly.
 
-use crate::{lang, model, parser, model_loader, VError};
-use lang::GeneratorError;
-use crate::memory_output_handler::MemoryOutputHandler;
+use verilization_compiler::{lang, model, parser, load_all_models, VError, MemoryOutputHandler};
+use lang::{GeneratorError, Language, LanguageRegistry, LanguageHandler};
 
 use std::ffi::{c_void, OsString};
 use std::collections::HashMap;
@@ -143,7 +142,7 @@ unsafe fn verilization_parse_impl(files: &[*const APIString]) -> Result<model::V
         Ok(model)
     });
 
-    model_loader::load_all_models(models)
+    load_all_models(models)
 }
 
 /// Destroys a verilization model.
@@ -159,9 +158,8 @@ pub unsafe extern "C" fn verilization_destroy(verilization: *mut model::Veriliza
 /// The options are a C-style array of the language options.
 /// These options are the same as the -o: flags (without the -o: prefix) to the command line interface.
 /// The result and all dependent pointers must be freed using verilization_mem_free.
-#[no_mangle]
-pub unsafe extern "C" fn verilization_generate(verilization: *const model::Verilization, language: *const APIString, noptions: usize, options: *const LanguageOption, result: *mut APIResult<OutputFileMap>) {
-    *result = match verilization_generate_impl(verilization, language, noptions, options) {
+pub unsafe fn verilization_generate_impl<Registry: LanguageRegistry>(verilization: *const model::Verilization, language: *const APIString, noptions: usize, options: *const LanguageOption, result: *mut APIResult<OutputFileMap>, registry: &Registry) {
+    *result = match verilization_generate_impl_result(verilization, language, noptions, options, registry) {
         Ok(map) => APIResult {
             is_error: 0,
             data: APIResultPtr {
@@ -178,35 +176,48 @@ pub unsafe extern "C" fn verilization_generate(verilization: *const model::Veril
 }
 
 
-unsafe fn verilization_generate_impl(verilization: *const model::Verilization, language: *const APIString, noptions: usize, options: *const LanguageOption) -> Result<*mut OutputFileMap, GeneratorError> {
+unsafe fn verilization_generate_impl_result<Registry: LanguageRegistry>(verilization: *const model::Verilization, language: *const APIString, noptions: usize, options: *const LanguageOption, registry: &Registry) -> Result<*mut OutputFileMap, GeneratorError> {
     let verilization = verilization.as_ref().expect("Verilization pointer is null");
     let language = language.as_ref().expect("Language string is null").to_str().expect("Language is invalid text");
-    let options = std::slice::from_raw_parts(options, noptions);
+    let options = std::slice::from_raw_parts(options, noptions)
+        .iter()
+        .map(|option| {
+            let name = option.name.as_ref().expect("Option name is null").to_str().expect("Invalid option name text");
+            let value = option.value.as_ref().expect("Option value is null").to_str().expect("Invalid option value text");
+            (name, value)
+        })
+        .collect::<Vec<_>>();
 
     let mut output = MemoryOutputHandler {
         files: HashMap::new(),
     };
 
-    match language {
-        "typescript" => verilization_generate_lang::<lang::typescript::TypeScriptLanguage, _>(verilization, options, &mut output)?,
-        "java" => verilization_generate_lang::<lang::java::JavaLanguage, _>(verilization, options, &mut output)?,
-        "scala" => verilization_generate_lang::<lang::scala::ScalaLanguage, _>(verilization, options, &mut output)?,
-        _ => Err(GeneratorError::UnknownLanguage(String::from(language)))?,
-    };
+    match registry.handle_language(language, &mut VerilizationGenerateLang { verilization: verilization, options: options, output: &mut output, }) {
+        Some(result) => result?,
+        None =>Err(GeneratorError::UnknownLanguage(String::from(language)))?,
+    }
 
     Ok(OutputFileMap::allocate(&output.files))
 }
 
-unsafe fn verilization_generate_lang<Lang: lang::Language, Output: for<'output> lang::OutputHandler<'output>>(verilization: &model::Verilization, options: &[LanguageOption], output: &mut Output) -> Result<(), GeneratorError> {
-    let mut lang_options = Lang::empty_options();
-    for option in options {
-        let name = option.name.as_ref().expect("Option name is null").to_str().expect("Invalid option name text");
-        let value = option.value.as_ref().expect("Option value is null").to_str().expect("Invalid option value text");
-        Lang::add_option(&mut lang_options, name, OsString::from(value))?;
-    }
-    let lang_options = Lang::finalize_options(lang_options)?;
+struct VerilizationGenerateLang<'a, Output> {
+    verilization: &'a model::Verilization,
+    options: Vec<(&'a str, &'a str)>,
+    output: &'a mut Output,
+}
 
-    Lang::generate(verilization, lang_options, output)
+impl <'a, Output: for<'output> lang::OutputHandler<'output>> LanguageHandler for VerilizationGenerateLang<'a, Output> {
+    type Result = Result<(), GeneratorError>;
+
+    fn run<Lang: Language>(&mut self) -> Self::Result {
+        let mut lang_options = Lang::empty_options();
+        for (name, value) in &self.options {
+            Lang::add_option(&mut lang_options, name, OsString::from(value))?;
+        }
+        let lang_options = Lang::finalize_options(lang_options)?;
+    
+        Lang::generate(self.verilization, lang_options, self.output)
+    }
 }
 
 

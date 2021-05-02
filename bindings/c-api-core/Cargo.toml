@@ -1,0 +1,8 @@
+[package]
+name = "verilization-bindings-c-api-core"
+version = "0.1.0"
+authors = ["argon-dev <argon@argon.dev>"]
+edition = "2018"
+
+[dependencies]
+verilization-compiler = { path = "../../compiler" }

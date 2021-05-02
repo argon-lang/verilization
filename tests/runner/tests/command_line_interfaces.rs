@@ -1,4 +1,4 @@
-use verilization_compiler::{lang, FileOutputHandler, VError};
+use verilization_compiler::{FileOutputHandler, VError};
 
 use verilization_test_runner::*;
 
@@ -130,15 +130,15 @@ fn run_test_case<Lang: TestLanguage>(model_file: &str) -> Result<(), VError> {
 
 #[test_resources("tests/verilization/*.verilization")]
 fn run_cli_typescript(file: &str) {
-    run_test_case::<lang::typescript::TypeScriptLanguage>(file).unwrap()
+    run_test_case::<verilization_lang_typescript::TypeScriptLanguage>(file).unwrap()
 }
 
 #[test_resources("tests/verilization/*.verilization")]
 fn run_cli_java(file: &str) {
-    run_test_case::<lang::java::JavaLanguage>(file).unwrap()
+    run_test_case::<verilization_lang_java::JavaLanguage>(file).unwrap()
 }
 
 #[test_resources("tests/verilization/*.verilization")]
 fn run_cli_scala(file: &str) {
-    run_test_case::<lang::scala::ScalaLanguage>(file).unwrap()
+    run_test_case::<verilization_lang_scala::ScalaLanguage>(file).unwrap()
 }

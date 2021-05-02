@@ -26,7 +26,7 @@ pub trait TestGenerator : Sized {
     fn end(self) -> Result<(), VError>;
 }
 
-impl TestLanguage for lang::typescript::TypeScriptLanguage {
+impl TestLanguage for verilization_lang_typescript::TypeScriptLanguage {
     type TestGen = crate::ts_test_gen::TSTestGenerator;
     
     fn test_options() -> Self::Options {
@@ -34,7 +34,7 @@ impl TestLanguage for lang::typescript::TypeScriptLanguage {
     }
     
     fn test_options_dir(dir: OsString) -> Self::Options {
-        lang::typescript::TSOptions {
+        verilization_lang_typescript::TSOptions {
             output_dir: dir,
             package_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( PackageName::from_parts(&["struct", "versions"]), OsString::from("struct/versions") ),
@@ -71,7 +71,7 @@ impl TestLanguage for lang::typescript::TypeScriptLanguage {
 
 }
 
-impl TestLanguage for lang::java::JavaLanguage {
+impl TestLanguage for verilization_lang_java::JavaLanguage {
     type TestGen = crate::java_test_gen::JavaTestGenerator;
     
     fn test_options() -> Self::Options {
@@ -79,7 +79,7 @@ impl TestLanguage for lang::java::JavaLanguage {
     }
     
     fn test_options_dir(dir: OsString) -> Self::Options {
-        lang::java::JavaOptions {
+        verilization_lang_java::JavaOptions {
             output_dir: dir,
             package_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( PackageName::from_parts(&["struct", "versions"]), PackageName::from_parts(&["struct", "versions"]) ),
@@ -132,7 +132,7 @@ impl TestLanguage for lang::java::JavaLanguage {
     }
 }
 
-impl TestLanguage for lang::scala::ScalaLanguage {
+impl TestLanguage for verilization_lang_scala::ScalaLanguage {
     type TestGen = crate::scala_test_gen::ScalaTestGenerator;
 
     fn test_options() -> Self::Options {
@@ -140,7 +140,7 @@ impl TestLanguage for lang::scala::ScalaLanguage {
     }
 
     fn test_options_dir(dir: OsString) -> Self::Options {
-        lang::scala::ScalaOptions {
+        verilization_lang_scala::ScalaOptions {
             output_dir: dir,
             package_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( PackageName::from_parts(&["struct", "versions"]), PackageName::from_parts(&["struct", "versions"]) ),

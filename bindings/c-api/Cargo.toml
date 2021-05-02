@@ -1,25 +1,15 @@
 [package]
-name = "verilization-test-runner"
+name = "verilization-bindings-c-api"
 version = "0.1.0"
 authors = ["argon-dev <argon@argon.dev>"]
 edition = "2018"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 verilization-compiler = { path = "../../compiler" }
-verilization-runtime = { path = "../../runtime/rust" }
+verilization-bindings-c-api-core = { path = "../c-api-core" }
 verilization-lang-java = { path = "../../lang/java" }
 verilization-lang-scala = { path = "../../lang/scala" }
 verilization-lang-typescript = { path = "../../lang/typescript" }
-rand = "0.8.3"
-num-bigint = { version = "0.4.0", features = ["rand"] }
-num-traits = "0.2.14"
-random-string = "0.2.0"
-rand_chacha = "0.3.0"
-hex-literal = "0.3.1"
-tempdir = "0.3.7"
-sha2 = "0.9.3"
-
-[dev-dependencies]
-test-generator = "0.3.0"
-
-

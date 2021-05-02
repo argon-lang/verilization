@@ -3,8 +3,7 @@
 pub mod util;
 pub mod model;
 pub mod lang;
-pub mod c_api;
-mod parser;
+pub mod parser;
 mod type_check;
 mod model_loader;
 mod verror;
@@ -12,6 +11,7 @@ mod memory_output_handler;
 
 
 pub use memory_output_handler::MemoryOutputHandler;
+pub use model_loader::load_all_models;
 
 pub use verror::VError;
 pub use type_check::TypeCheckError;

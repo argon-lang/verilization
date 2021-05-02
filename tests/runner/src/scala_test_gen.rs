@@ -1,5 +1,5 @@
 use verilization_compiler::{lang, model, VError};
-use lang::scala::{ScalaGenerator, ScalaOptions};
+use verilization_lang_scala::{ScalaGenerator, ScalaOptions};
 use model::{Verilization, Named};
 use lang::generator::*;
 
@@ -31,7 +31,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> GeneratorWithFile for ScalaTes
 }
 
 impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model> for ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
-    type Lang = lang::scala::ScalaLanguage;
+    type Lang = verilization_lang_scala::ScalaLanguage;
 
 	fn model(&self) -> &'model model::Verilization {
 		self.model
@@ -119,7 +119,7 @@ impl TestGenerator for ScalaTestGenerator {
     }
 
     fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), VError> {
-        let options = lang::scala::ScalaLanguage::test_options();
+        let options = verilization_lang_scala::ScalaLanguage::test_options();
 
         for t in model.types() {
             let t = match t {

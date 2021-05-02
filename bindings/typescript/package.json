@@ -8,8 +8,8 @@
     ".": "./bin/index.js"
   },
   "scripts": {
-    "build-wasm": "cd ../../compiler && cargo build --lib --release --target wasm32-unknown-unknown",
-    "build": "npm run build-wasm && mkdirp bin && cpy ../../target/wasm32-unknown-unknown/release/verilization_compiler.wasm bin/ && cpy ../../compiler-cli-core/src/help.txt bin/ && tsc --project tsconfig.json"
+    "build-wasm": "cd ../c-api && cargo build --lib --release --target wasm32-unknown-unknown",
+    "build": "npm run build-wasm && mkdirp bin && cpy --rename verilization_compiler.wasm ../../target/wasm32-unknown-unknown/release/verilization_bindings_c_api.wasm bin/ && cpy ../../compiler-cli-core/src/help.txt bin/ && tsc --project tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^14.14.37",

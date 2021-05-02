@@ -1,6 +1,6 @@
 use verilization_compiler::{lang, model, VError};
 use lang::GeneratorError;
-use lang::typescript::{TSGenerator, TSOptions};
+use verilization_lang_typescript::{TSGenerator, TSOptions};
 use lang::generator::*;
 use model::{Verilization, Named};
 use crate::value_generator::{generate_random_value, write_constant_value};
@@ -34,7 +34,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> GeneratorWithFile for TSTestCa
 }
 
 impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model> for TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
-    type Lang = lang::typescript::TypeScriptLanguage;
+    type Lang = verilization_lang_typescript::TypeScriptLanguage;
 
 	fn model(&self) -> &'model model::Verilization {
 		self.model
@@ -146,7 +146,7 @@ impl TestGenerator for TSTestGenerator {
     }
 
     fn generate_tests<'a, R: Rng>(&'a mut self, model: &'a Verilization, random: &'a mut R) -> Result<(), VError> {
-        let options = lang::typescript::TypeScriptLanguage::test_options();
+        let options = verilization_lang_typescript::TypeScriptLanguage::test_options();
 
         for t in model.types() {
             let t = match t {

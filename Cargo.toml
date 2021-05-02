@@ -1,8 +1,13 @@
 [workspace]
 members = [
+    "bindings/c-api",
+    "bindings/c-api-core",
     "compiler",
     "compiler-cli",
     "compiler-cli-core",
+    "lang/java",
+    "lang/scala",
+    "lang/typescript",
     "runtime/rust",
     "tests/runner",
 ]
