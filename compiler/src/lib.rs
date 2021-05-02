@@ -10,6 +10,7 @@ mod model_loader;
 mod verror;
 
 pub use verror::VError;
+pub use type_check::TypeCheckError;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod file_output_handler;
@@ -23,4 +24,3 @@ pub use memory_output_handler::MemoryOutputHandler;
 #[cfg(not(target_arch = "wasm32"))]
 pub use model_loader::load_files;
 
-pub use type_check::TypeCheckError;
