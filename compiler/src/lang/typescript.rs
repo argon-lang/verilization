@@ -851,6 +851,10 @@ impl Language for TypeScriptLanguage {
 	type OptionsBuilder = TSOptionsBuilder;
 	type Options = TSOptions;
 
+    fn name() -> &'static str {
+        "typescript"
+    }
+
 	fn empty_options() -> TSOptionsBuilder {
 		TSOptionsBuilder {
 			output_dir: None,

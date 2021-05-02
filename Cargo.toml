@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "compiler",
+    "compiler-cli",
+    "compiler-cli-core",
+    "runtime/rust",
+    "tests/runner",
+]

@@ -878,6 +878,10 @@ impl Language for ScalaLanguage {
 	type OptionsBuilder = ScalaOptionsBuilder;
 	type Options = ScalaOptions;
 
+    fn name() -> &'static str {
+        "scala"
+    }
+
 	fn empty_options() -> ScalaOptionsBuilder {
 		ScalaOptionsBuilder {
 			output_dir: None,

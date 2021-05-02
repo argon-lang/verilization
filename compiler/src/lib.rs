@@ -8,6 +8,10 @@ mod parser;
 mod type_check;
 mod model_loader;
 mod verror;
+mod memory_output_handler;
+
+
+pub use memory_output_handler::MemoryOutputHandler;
 
 pub use verror::VError;
 pub use type_check::TypeCheckError;
@@ -17,9 +21,6 @@ mod file_output_handler;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use file_output_handler::FileOutputHandler;
-
-mod memory_output_handler;
-pub use memory_output_handler::MemoryOutputHandler;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use model_loader::load_files;

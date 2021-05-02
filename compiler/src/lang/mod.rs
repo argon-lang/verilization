@@ -10,6 +10,7 @@ use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use num_bigint::BigUint;
+use std::marker::PhantomData;
 
 /// Error that could occur during generation.
 #[derive(Debug)]
@@ -55,6 +56,9 @@ pub trait Language {
 	/// Finalized options.
 	type Options;
 
+	/// Gets the name of the language.
+	fn name() -> &'static str;
+
 	/// Gets an option builder with no options set.
 	fn empty_options() -> Self::OptionsBuilder;
 
@@ -69,4 +73,66 @@ pub trait Language {
 
 }
 
+pub trait LanguageHandler {
+	type Result;
+	fn run<Lang: Language>(&mut self) -> Self::Result;
+}
+
+pub trait LanguageRegistry : Sized {
+	fn has_language(&self, lang_name: &str) -> bool;
+	fn handle_language<Handler: LanguageHandler>(&self, lang_name: &str, handler: &mut Handler) -> Option<Handler::Result>;
+	fn each_language<Handler: LanguageHandler>(&self, handler: &mut Handler) -> Vec<Handler::Result>;
+
+	fn add_language<Lang: Language>(self) -> LanguageRegistryCons<Lang, Self> {
+		LanguageRegistryCons {
+			prev: self,
+			dummy_lang: PhantomData {},
+		}
+	}
+}
+
+pub struct EmptyLanguageRegistry {}
+pub struct LanguageRegistryCons<Lang: Language, Prev: LanguageRegistry> {
+	prev: Prev,
+	dummy_lang: PhantomData<Lang>,
+}
+
+pub fn language_registry_new() -> EmptyLanguageRegistry {
+	EmptyLanguageRegistry {}
+}
+
+impl LanguageRegistry for EmptyLanguageRegistry {
+	fn has_language(&self, _lang_name: &str) -> bool {
+		false
+	}
+
+	fn handle_language<Handler: LanguageHandler>(&self, _lang_name: &str, _handler: &mut Handler) -> Option<Handler::Result> {
+		None
+	}
+
+	fn each_language<Handler: LanguageHandler>(&self, _handler: &mut Handler) -> Vec<Handler::Result> {
+		Vec::new()
+	}
+}
+
+impl <Lang: Language, Prev: LanguageRegistry> LanguageRegistry for LanguageRegistryCons<Lang, Prev> {
+	fn has_language(&self, lang_name: &str) -> bool  {
+		lang_name == Lang::name() || self.prev.has_language(lang_name)
+	}
+
+	fn handle_language<Handler: LanguageHandler>(&self, lang_name: &str, handler: &mut Handler) -> Option<Handler::Result> {
+		if lang_name == Lang::name() {
+			Some(handler.run::<Lang>())
+		}
+		else {
+			self.prev.handle_language(lang_name, handler)
+		}
+	}
+
+	fn each_language<Handler: LanguageHandler>(&self, handler: &mut Handler) -> Vec<Handler::Result> {
+		let mut results = self.prev.each_language(handler);
+		results.push(handler.run::<Lang>());
+		results
+	}
+}
 

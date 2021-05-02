@@ -1,0 +1,9 @@
+[package]
+name = "verilization-compiler-cli"
+version = "0.1.0"
+authors = ["argon-dev <argon@argon.dev>"]
+edition = "2018"
+
+[dependencies]
+verilization-compiler = { path = "../compiler" }
+verilization-compiler-cli-core = { path = "../compiler-cli-core" }

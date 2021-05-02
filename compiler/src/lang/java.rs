@@ -939,6 +939,10 @@ impl Language for JavaLanguage {
 	type OptionsBuilder = JavaOptionsBuilder;
 	type Options = JavaOptions;
 
+    fn name() -> &'static str {
+        "java"
+    }
+
 	fn empty_options() -> JavaOptionsBuilder {
 		JavaOptionsBuilder {
 			output_dir: None,

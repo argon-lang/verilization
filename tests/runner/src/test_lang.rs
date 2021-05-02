@@ -13,7 +13,6 @@ use rand::Rng;
 pub trait TestLanguage: Language {
     type TestGen : TestGenerator;
 
-    fn name() -> String;
     fn test_options() -> Self::Options;
     fn test_options_dir(dir: OsString) -> Self::Options;
     fn append_options(command: &mut Command, options: &Self::Options);
@@ -29,10 +28,6 @@ pub trait TestGenerator : Sized {
 
 impl TestLanguage for lang::typescript::TypeScriptLanguage {
     type TestGen = crate::ts_test_gen::TSTestGenerator;
-
-    fn name() -> String {
-        String::from("typescript")
-    }
     
     fn test_options() -> Self::Options {
         Self::test_options_dir(OsString::from("../typescript/src/gen/"))
@@ -78,10 +73,6 @@ impl TestLanguage for lang::typescript::TypeScriptLanguage {
 
 impl TestLanguage for lang::java::JavaLanguage {
     type TestGen = crate::java_test_gen::JavaTestGenerator;
-
-    fn name() -> String {
-        String::from("java")
-    }
     
     fn test_options() -> Self::Options {
         Self::test_options_dir(OsString::from("../java/gen/"))
@@ -143,10 +134,6 @@ impl TestLanguage for lang::java::JavaLanguage {
 
 impl TestLanguage for lang::scala::ScalaLanguage {
     type TestGen = crate::scala_test_gen::ScalaTestGenerator;
-
-    fn name() -> String {
-        String::from("scala")
-    }
 
     fn test_options() -> Self::Options {
         Self::test_options_dir(OsString::from("../scala/gen/"))
