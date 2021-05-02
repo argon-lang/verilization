@@ -84,7 +84,7 @@ fn run_test_case<Lang: TestLanguage>(model_file: &str) -> Result<(), VError> {
 
         
         let mut run = Command::new("node");
-        run.arg("../../bindings/typescript/bin/cli.js");
+        run.arg("../../bindings/typescript/lib/cli.js");
 
         commands.push(GeneratorCommand {
             build_cmd: build,

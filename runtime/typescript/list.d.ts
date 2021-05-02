@@ -1,1 +1,1 @@
-export {List, codec, fromSequence} from "./bin/List.js";
+export {List, codec, fromSequence} from "./lib/List.js";

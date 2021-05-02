@@ -51,6 +51,9 @@ fn run_tests_for_lang<Lang: TestLanguage>() -> Result<(), VError> {
     let output_text = String::from_utf8_lossy(&output.stdout);
     print!("{}", output_text);
 
+    let error_text = String::from_utf8_lossy(&output.stderr);
+    print!("{}", error_text);
+
 
     if !output.status.success() {
         if let Some(code) = output.status.code() {

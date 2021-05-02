@@ -1,1 +1,1 @@
-export * from "./bin/List.js";
+export * from "./lib/List.js";

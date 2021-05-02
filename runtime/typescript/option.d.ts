@@ -1,1 +1,1 @@
-export {Option, codec, fromCaseSome, fromCaseNone} from "./bin/Option.js";
+export {Option, codec, fromCaseSome, fromCaseNone} from "./lib/Option.js";

@@ -1,7 +1,7 @@
 target/
 
 node_modules/
-bin/
+lib/
 
 tests/java/gen
 tests/java/gen-test

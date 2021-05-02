@@ -1,1 +1,1 @@
-export {String, codec, fromString} from "./bin/String.js";
+export {String, codec, fromString} from "./lib/String.js";

@@ -1,1 +1,1 @@
-export * from "./bin/Int.js";
+export * from "./lib/Int.js";

@@ -1,1 +1,1 @@
-export * from "./bin/I16.js";
+export * from "./lib/I16.js";

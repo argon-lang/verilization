@@ -1,2 +1,2 @@
 
-export * from "./bin/String.js";
+export * from "./lib/String.js";

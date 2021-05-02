@@ -1,1 +1,1 @@
-export {U8, codec, fromInteger} from "./bin/U8.js";
+export {U8, codec, fromInteger} from "./lib/U8.js";

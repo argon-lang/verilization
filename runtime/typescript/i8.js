@@ -1,1 +1,1 @@
-export * from "./bin/I8.js";
+export * from "./lib/I8.js";

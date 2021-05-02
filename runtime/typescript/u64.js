@@ -1,1 +1,1 @@
-export * from "./bin/U64.js";
+export * from "./lib/U64.js";

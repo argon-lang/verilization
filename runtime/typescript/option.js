@@ -1,1 +1,1 @@
-export * from "./bin/Option.js";
+export * from "./lib/Option.js";

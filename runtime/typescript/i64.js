@@ -1,1 +1,1 @@
-export * from "./bin/I64.js";
+export * from "./lib/I64.js";

@@ -5,14 +5,14 @@
   "type": "module",
   "exports": {
     ".": {
-      "node": "./bin/index_node.js",
-      "default": "./bin/index_web.js"
+      "node": "./lib/index_node.js",
+      "default": "./lib/index_web.js"
     },
-    "./compiler": "./bin/compiler.js"
+    "./compiler": "./lib/compiler.js"
   },
   "scripts": {
     "build-wasm": "cd ../c-api && cargo build --lib --release --target wasm32-unknown-unknown",
-    "build": "npm run build-wasm && mkdirp bin && cpy --rename verilization_compiler.wasm ../../target/wasm32-unknown-unknown/release/verilization_bindings_c_api.wasm bin/ && cpy ../../compiler-cli-core/src/help.txt bin/ && tsc --project tsconfig.json"
+    "build": "npm run build-wasm && mkdirp lib && cpy --rename verilization_compiler.wasm ../../target/wasm32-unknown-unknown/release/verilization_bindings_c_api.wasm lib/ && cpy ../../compiler-cli-core/src/help.txt lib/ && tsc --project tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^14.14.37",

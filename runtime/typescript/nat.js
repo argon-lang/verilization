@@ -1,1 +1,1 @@
-export * from "./bin/Nat.js";
+export * from "./lib/Nat.js";

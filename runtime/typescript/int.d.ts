@@ -1,1 +1,1 @@
-export {Int, codec, fromInteger} from "./bin/Int.js";
+export {Int, codec, fromInteger} from "./lib/Int.js";

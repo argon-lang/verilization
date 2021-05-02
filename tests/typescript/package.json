@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "tsc --project tsconfig.json && node bin/gen/tests.js"
+    "test": "tsc --project tsconfig.json && node lib/gen/tests.js"
   },
   "dependencies": {
     "@verilization/runtime": "file:../../runtime/typescript"

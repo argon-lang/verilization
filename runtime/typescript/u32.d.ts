@@ -1,1 +1,1 @@
-export {U32, codec, fromInteger} from "./bin/U32.js";
+export {U32, codec, fromInteger} from "./lib/U32.js";
