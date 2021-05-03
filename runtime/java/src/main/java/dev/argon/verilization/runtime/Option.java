@@ -1,4 +1,4 @@
-package dev.argon.verilization.java_runtime;
+package dev.argon.verilization.runtime;
 
 import java.util.Optional;
 import java.io.IOException;

@@ -13,7 +13,7 @@ use num_traits::ToPrimitive;
 
 type PackageMap = HashMap<model::PackageName, model::PackageName>;
 type ExternMap = HashMap<model::QualifiedName, model::QualifiedName>;
-const RUNTIME_PACKAGE: &str = "dev.argon.verilization.java_runtime";
+const RUNTIME_PACKAGE: &str = "dev.argon.verilization.runtime";
 
 
 pub struct JavaOptionsBuilder {
@@ -242,8 +242,8 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model> + GeneratorWithFile {
 				self.write_type(t, true)?;
 				write!(self.file(), ">identity()")?;
 			},
-			LangExpr::ReadDiscriminator => write!(self.file(), "{}.StandardCodecs.natCodec.read(reader)", RUNTIME_PACKAGE)?,
-			LangExpr::WriteDiscriminator(value) => write!(self.file(), "{}.StandardCodecs.natCodec.write(writer, java.math.BigInteger.valueOf({}))", RUNTIME_PACKAGE, value)?,
+			LangExpr::ReadDiscriminator => write!(self.file(), "{}.Nat.codec.read(reader)", RUNTIME_PACKAGE)?,
+			LangExpr::WriteDiscriminator(value) => write!(self.file(), "{}.Nat.codec.write(writer, java.math.BigInteger.valueOf({}))", RUNTIME_PACKAGE, value)?,
 			LangExpr::CodecRead { codec } => {
 				self.write_expr(&*codec)?;
 				write!(self.file(), ".read(reader)")?;

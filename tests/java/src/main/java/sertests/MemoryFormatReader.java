@@ -1,6 +1,6 @@
 package sertests;
 
-import dev.argon.verilization.java_runtime.FormatReader;
+import dev.argon.verilization.runtime.FormatReader;
 import java.io.IOException;
 import java.io.EOFException;
 import java.nio.BufferUnderflowException;

@@ -3,7 +3,7 @@ package sertests;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
-import dev.argon.verilization.java_runtime.FormatWriter;
+import dev.argon.verilization.runtime.FormatWriter;
 
 public final class MemoryFormatWriter implements FormatWriter {
 

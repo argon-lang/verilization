@@ -1,4 +1,4 @@
-package dev.argon.verilization.java_runtime;
+package dev.argon.verilization.runtime;
 
 public final class U8 {
     private U8() {}

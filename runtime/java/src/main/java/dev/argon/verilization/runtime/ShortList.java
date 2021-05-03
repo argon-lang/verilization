@@ -1,13 +1,13 @@
-package dev.argon.verilization.java_runtime;
+package dev.argon.verilization.runtime;
 
 import java.util.Arrays;
 
-public final class LongList extends List<Long> {
-    LongList(long[] values) {
+public final class ShortList extends List<Short> {
+    ShortList(short[] values) {
         this.values = values;
     }
 
-    private final long[] values;
+    private final short[] values;
 
     @Override
     public int size() {
@@ -15,25 +15,25 @@ public final class LongList extends List<Long> {
     }
 
     @Override
-    public Long get(int index) {
+    public Short get(int index) {
         return values[index];
     }
 
-    public long getUnboxed(int index) {
+    public short getUnboxed(int index) {
         return values[index];
     }
 
-    public static LongList unbox(List<Long> l) {
-        if(l instanceof LongList) {
-            return (LongList)l;
+    public static ShortList unbox(List<Short> l) {
+        if(l instanceof ShortList) {
+            return (ShortList)l;
         }
 
-        long[] values = new long[l.size()];
+        short[] values = new short[l.size()];
         for(int i = 0; i < values.length; ++i) {
             values[i] = l.get(i);
         }
 
-        return new LongList(values);
+        return new ShortList(values);
     }
 
     @Override
@@ -43,11 +43,11 @@ public final class LongList extends List<Long> {
 
     @Override
     public boolean equals(Object obj) {
-        if(!(obj instanceof LongList)) {
+        if(!(obj instanceof ShortList)) {
             return false;
         }
 
-        var other = (LongList)obj;
+        var other = (ShortList)obj;
         return Arrays.equals(values, other.values);
     }
 }

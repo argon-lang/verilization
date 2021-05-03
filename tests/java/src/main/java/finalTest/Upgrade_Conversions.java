@@ -1,6 +1,6 @@
 package finalTest;
 
-import dev.argon.verilization.java_runtime.Converter;
+import dev.argon.verilization.runtime.Converter;
 
 import java.util.function.Function;
 

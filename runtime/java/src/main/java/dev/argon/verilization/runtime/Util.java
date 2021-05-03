@@ -1,4 +1,4 @@
-package dev.argon.verilization.java_runtime;
+package dev.argon.verilization.runtime;
 
 import java.util.function.Function;
 import java.util.stream.Collectors;

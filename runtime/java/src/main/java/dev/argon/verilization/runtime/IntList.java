@@ -1,13 +1,13 @@
-package dev.argon.verilization.java_runtime;
+package dev.argon.verilization.runtime;
 
 import java.util.Arrays;
 
-public final class ShortList extends List<Short> {
-    ShortList(short[] values) {
+public final class IntList extends List<Integer> {
+    IntList(int[] values) {
         this.values = values;
     }
 
-    private final short[] values;
+    private final int[] values;
 
     @Override
     public int size() {
@@ -15,25 +15,25 @@ public final class ShortList extends List<Short> {
     }
 
     @Override
-    public Short get(int index) {
+    public Integer get(int index) {
         return values[index];
     }
 
-    public short getUnboxed(int index) {
+    public int getUnboxed(int index) {
         return values[index];
     }
 
-    public static ShortList unbox(List<Short> l) {
-        if(l instanceof ShortList) {
-            return (ShortList)l;
+    public static IntList unbox(List<Integer> l) {
+        if(l instanceof IntList) {
+            return (IntList)l;
         }
 
-        short[] values = new short[l.size()];
+        int[] values = new int[l.size()];
         for(int i = 0; i < values.length; ++i) {
             values[i] = l.get(i);
         }
 
-        return new ShortList(values);
+        return new IntList(values);
     }
 
     @Override
@@ -43,11 +43,11 @@ public final class ShortList extends List<Short> {
 
     @Override
     public boolean equals(Object obj) {
-        if(!(obj instanceof ShortList)) {
+        if(!(obj instanceof IntList)) {
             return false;
         }
 
-        var other = (ShortList)obj;
+        var other = (IntList)obj;
         return Arrays.equals(values, other.values);
     }
 }

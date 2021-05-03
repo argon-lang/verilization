@@ -1,3 +1,3 @@
-module dev.argon.verilization.java_runtime {
-    exports dev.argon.verilization.java_runtime;
+module dev.argon.verilization.runtime {
+    exports dev.argon.verilization.runtime;
 }

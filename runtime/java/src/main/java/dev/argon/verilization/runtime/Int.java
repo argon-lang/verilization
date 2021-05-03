@@ -1,32 +1,32 @@
-package dev.argon.verilization.java_runtime;
+package dev.argon.verilization.runtime;
 
 import java.math.BigInteger;
 import java.io.IOException;
 
-public final class Nat {
-    private Nat() {}
+public final class Int {
+    private Int() {}
 
     public static BigInteger fromInteger(int i) {
-        return BigInteger.valueOf(i).abs();
+        return BigInteger.valueOf(i);
     }
 
     public static BigInteger fromInteger(long l) {
-        return BigInteger.valueOf(l).abs();
+        return BigInteger.valueOf(l);
     }
 
     public static BigInteger fromInteger(BigInteger i) {
-        return i.abs();
+        return i;
     }
 
-    public static final Codec<BigInteger> codec = new Codec<BigInteger>() {
+    public static final Codec<BigInteger> intCodec = new Codec<BigInteger>() {
         @Override
         public BigInteger read(FormatReader reader) throws IOException {
-            return VLQ.decodeVLQ(reader, false);
+            return VLQ.decodeVLQ(reader, true);
         }
 
         @Override
         public void write(FormatWriter writer, BigInteger value) throws IOException {
-            VLQ.encodeVLQ(writer, false, value);
+            VLQ.encodeVLQ(writer, true, value);
         }
 
     };

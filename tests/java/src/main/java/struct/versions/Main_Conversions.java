@@ -1,6 +1,6 @@
 package struct.versions;
 
-import dev.argon.verilization.java_runtime.Converter;
+import dev.argon.verilization.runtime.Converter;
 
 final class Main_Conversions {
     private Main_Conversions() {}

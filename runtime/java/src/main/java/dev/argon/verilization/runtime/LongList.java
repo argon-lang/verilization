@@ -1,13 +1,13 @@
-package dev.argon.verilization.java_runtime;
+package dev.argon.verilization.runtime;
 
 import java.util.Arrays;
 
-public final class IntList extends List<Integer> {
-    IntList(int[] values) {
+public final class LongList extends List<Long> {
+    LongList(long[] values) {
         this.values = values;
     }
 
-    private final int[] values;
+    private final long[] values;
 
     @Override
     public int size() {
@@ -15,25 +15,25 @@ public final class IntList extends List<Integer> {
     }
 
     @Override
-    public Integer get(int index) {
+    public Long get(int index) {
         return values[index];
     }
 
-    public int getUnboxed(int index) {
+    public long getUnboxed(int index) {
         return values[index];
     }
 
-    public static IntList unbox(List<Integer> l) {
-        if(l instanceof IntList) {
-            return (IntList)l;
+    public static LongList unbox(List<Long> l) {
+        if(l instanceof LongList) {
+            return (LongList)l;
         }
 
-        int[] values = new int[l.size()];
+        long[] values = new long[l.size()];
         for(int i = 0; i < values.length; ++i) {
             values[i] = l.get(i);
         }
 
-        return new IntList(values);
+        return new LongList(values);
     }
 
     @Override
@@ -43,11 +43,11 @@ public final class IntList extends List<Integer> {
 
     @Override
     public boolean equals(Object obj) {
-        if(!(obj instanceof IntList)) {
+        if(!(obj instanceof LongList)) {
             return false;
         }
 
-        var other = (IntList)obj;
+        var other = (LongList)obj;
         return Arrays.equals(values, other.values);
     }
 }

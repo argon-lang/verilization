@@ -1,4 +1,4 @@
-package dev.argon.verilization.java_runtime;
+package dev.argon.verilization.runtime;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

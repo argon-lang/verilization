@@ -88,7 +88,7 @@ impl TestLanguage for verilization_lang_java::JavaLanguage {
                 ( PackageName::from_parts(&["finalTest"]), PackageName::from_parts(&["finalTest"]) ),
             ])),
             library_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
-                ( PackageName::from_parts(&[]), PackageName::from_parts(&["dev", "argon", "verilization", "java_runtime"]) ),
+                ( PackageName::from_parts(&[]), PackageName::from_parts(&["dev", "argon", "verilization", "runtime"]) ),
             ])),
             extern_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( QualifiedName::from_parts(&[], "nat"), QualifiedName::from_parts(&["java", "math"], "BigInteger") ),

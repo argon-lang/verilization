@@ -1,6 +1,6 @@
 package genericsTest;
 
-import dev.argon.verilization.java_runtime.Converter;
+import dev.argon.verilization.runtime.Converter;
 
 public final class Pair_Conversions {
     private Pair_Conversions() {}
