@@ -1,0 +1,61 @@
+[config]
+default_to_workspace = false
+
+[tasks.build-rust]
+command = "cargo"
+args = ["build"]
+
+[tasks.bindings-typescript-install-packages]
+command = "npm"
+args = ["install"]
+cwd = "bindings/typescript"
+
+[tasks.build-bindings-typescript]
+command = "npm"
+args = ["run", "build"]
+cwd = "bindings/typescript"
+dependencies = [
+    "bindings-typescript-install-packages"
+]
+
+[tasks.build-bindings]
+dependencies = [
+    "build-bindings-typescript",
+]
+
+[tasks.runtime-typescript-install-packages]
+command = "npm"
+args = ["install"]
+cwd = "runtime/typescript"
+
+[tasks.build-runtime-java]
+command = "sbt"
+args = ["compile"]
+cwd = "runtime/java"
+
+[tasks.build-runtime-scala]
+command = "sbt"
+args = ["compile"]
+cwd = "runtime/scala"
+
+[tasks.build-runtime-typescript]
+command = "npm"
+args = ["run", "build"]
+cwd = "runtime/typescript"
+dependencies = [
+    "runtime-typescript-install-packages"
+]
+
+[tasks.build-runtimes]
+dependencies = [
+    "build-runtime-java",
+    "build-runtime-scala",
+    "build-runtime-typescript",
+]
+
+[tasks.build]
+dependencies = [
+    "build-rust",
+    "build-bindings",
+    "build-runtimes",
+]
