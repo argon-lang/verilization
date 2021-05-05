@@ -19,7 +19,7 @@ object List {
             }.flatMap { length =>
                 IO.effectTotal { ChunkBuilder.make[A](length) }.flatMap { chunkBuilder =>
                     elementCodec.read(reader)
-                        .flatMap { a => IO.effectTotal { chunkBuilder.addOne(a) } }
+                        .flatMap { a => IO.effectTotal { chunkBuilder += a } }
                         .repeatN(length)
                         .flatMap { _ =>
                             IO.effectTotal { chunkBuilder.result() }

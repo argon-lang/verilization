@@ -2,11 +2,15 @@
 name = "verilization-compiler-cli"
 version = "0.1.0"
 authors = ["argon-dev <argon@argon.dev>"]
+license = "GPL-3.0-only"
+description = "The verilization serialization description language compiler command line."
+hompage = "https://github.com/argon-lang/verilization"
+repository = "https://github.com/argon-lang/verilization"
 edition = "2018"
 
 [dependencies]
-verilization-compiler = { path = "../compiler" }
-verilization-compiler-cli-core = { path = "../compiler-cli-core" }
-verilization-lang-java = { path = "../lang/java" }
-verilization-lang-scala = { path = "../lang/scala" }
-verilization-lang-typescript = { path = "../lang/typescript" }
+verilization-compiler = { path = "../compiler", version = "0.1.0" }
+verilization-compiler-cli-core = { path = "../compiler-cli-core", version = "0.1.0" }
+verilization-lang-java = { path = "../lang/java", version = "0.1.0" }
+verilization-lang-scala = { path = "../lang/scala", version = "0.1.0" }
+verilization-lang-typescript = { path = "../lang/typescript", version = "0.1.0" }

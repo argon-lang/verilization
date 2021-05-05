@@ -1,7 +1,10 @@
 {
   "name": "@verilization/runtime",
   "version": "0.1.0",
-  "description": "Runtime for verilization file formats.",
+  "description": "Runtime for verilization file format serialization.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/argon-lang/verilization",
+  "bugs": "https://github.com/argon-lang/verilization/issues",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

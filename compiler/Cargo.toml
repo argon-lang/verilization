@@ -2,6 +2,10 @@
 name = "verilization-compiler"
 version = "0.1.0"
 authors = ["argon-dev <argon@argon.dev>"]
+license = "GPL-3.0-only"
+description = "The verilization serialization description language compiler. This contains the core compiler library, but not the languages or CLI."
+hompage = "https://github.com/argon-lang/verilization"
+repository = "https://github.com/argon-lang/verilization"
 edition = "2018"
 
 [dependencies]

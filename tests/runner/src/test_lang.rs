@@ -169,7 +169,7 @@ impl TestLanguage for verilization_lang_scala::ScalaLanguage {
     
     fn test_command() -> Command {
         let mut cmd = Command::new("sbt");
-        cmd.arg("test");
+        cmd.arg("+test");
         cmd.current_dir("../scala");
         cmd
     }

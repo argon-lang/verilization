@@ -3,12 +3,12 @@ package dev.argon.verilization.scala_runtime
 import zio.{ZIO, IO, Chunk}
 import java.math.BigInteger
 import scala.math.BigInt
-import scala.Int
+import scala.{Int => SInt}
 
 object VLQ {
 
 
-    private final case class OutputState(currentByte: Byte, outBitIndex: Int)
+    private final case class OutputState(currentByte: Byte, outBitIndex: SInt)
 
     def encodeVLQ[R, E](writer: FormatWriter[R, E], isSigned: Boolean, n: BigInt): ZIO[R, E, Unit] = {
         val nBytes = (if(isSigned && n < 0) n + 1 else n).abs.toByteArray
@@ -34,7 +34,7 @@ object VLQ {
         def finish(state: OutputState): ZIO[R, E, Unit] =
             writer.writeByte(state.currentByte)
 
-        def iterBits(byteIndex: Int, bitIndex: Int, zeroCount: Int, outputState: OutputState): ZIO[R, E, Unit] =
+        def iterBits(byteIndex: SInt, bitIndex: SInt, zeroCount: SInt, outputState: OutputState): ZIO[R, E, Unit] =
             if(byteIndex < 0) {
                 if(isSigned) putSign(n < 0, outputState).flatMap(finish)
                 else finish(outputState)
@@ -48,7 +48,7 @@ object VLQ {
                     else
                         (byteIndex, bitIndex + 1)
 
-                def putZeroes(zeroCount: Int, outputState: OutputState): ZIO[R, E, OutputState] =
+                def putZeroes(zeroCount: SInt, outputState: OutputState): ZIO[R, E, OutputState] =
                     if(zeroCount > 0) putBit(false, outputState).flatMap { outputState => putZeroes(zeroCount - 1, outputState) }
                     else IO.succeed(outputState)
                     
@@ -84,7 +84,7 @@ object VLQ {
     }
 
 
-    private final case class BigIntBuildState(currentByte: Byte, otherBytes: Chunk[Byte], bitIndex: Int) {
+    private final case class BigIntBuildState(currentByte: Byte, otherBytes: Chunk[Byte], bitIndex: SInt) {
 
         def putBit(b: Boolean): BigIntBuildState = {
             val newByte = if(b) (currentByte | (1 << bitIndex)).toByte else currentByte
@@ -110,7 +110,7 @@ object VLQ {
 
     def decodeVLQ[R, E](reader: FormatReader[R, E], isSigned: Boolean): ZIO[R, E, BigInt] = {
 
-        def processBits(state: BigIntBuildState, b: Byte, i: Int, n: Int): BigIntBuildState =
+        def processBits(state: BigIntBuildState, b: Byte, i: SInt, n: SInt): BigIntBuildState =
             if(i < n) processBits(state.putBit((b & (1 << i)) != 0), b, i + 1, n)
             else state
 

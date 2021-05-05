@@ -2,10 +2,14 @@
 name = "verilization-lang-java"
 version = "0.1.0"
 authors = ["argon-dev <argon@argon.dev>"]
+license = "GPL-3.0-only"
+description = "Java language support for the verilization description language."
+hompage = "https://github.com/argon-lang/verilization"
+repository = "https://github.com/argon-lang/verilization"
 edition = "2018"
 
 [dependencies]
-verilization-compiler = { path = "../../compiler" }
+verilization-compiler = { path = "../../compiler", version = "0.1.0" }
 nom = "6.1.2"
 num-bigint = "0.4.0"
 num-traits = "0.2.14"

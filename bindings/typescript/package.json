@@ -1,7 +1,10 @@
 {
   "name": "@verilization/compiler",
   "version": "0.1.0",
-  "description": "Compiler for verilization.",
+  "description": "Compiler for the verilization description language.",
+  "license": "GPL-3.0-only",
+  "homepage": "https://github.com/argon-lang/verilization",
+  "bugs": "https://github.com/argon-lang/verilization/issues",
   "type": "module",
   "exports": {
     ".": {

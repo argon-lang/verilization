@@ -2,7 +2,11 @@
 name = "verilization-bindings-c-api-core"
 version = "0.1.0"
 authors = ["argon-dev <argon@argon.dev>"]
+license = "GPL-3.0-only"
+description = "The C api excluding the languages to allow adding extra languages."
+hompage = "https://github.com/argon-lang/verilization"
+repository = "https://github.com/argon-lang/verilization"
 edition = "2018"
 
 [dependencies]
-verilization-compiler = { path = "../../compiler" }
+verilization-compiler = { path = "../../compiler", version = "0.1.0" }
