@@ -71,8 +71,6 @@ The following literal specifications are supported.
 | Case | `case Positive()` | `'case' identifier '(' [ type_expr { ',' type_expr } ] ')'` | Defines a case. Multiple case literals may be specified if the names are distinct. |
 | Record| `record { a: A; b: B; }` | `'record' '{' { identifier ':' type_expr ';' } '}'` | Defines a record. |
 
- * `integer` - 
-
 ### Runtime Library Types
 
 There are a number of `extern` types provided by the runtime library.
@@ -133,6 +131,18 @@ However, since there are no direct changes to `Person`, version 2 is automaticly
 In the generated code, the user is expected to provide code that can upgrade `Name` from version 1 to version 2.
 However, there is no need to provide such code for upgrading `Person`.
 `Person` can be upgraded automaticially using the upgrade code for its fields.
+
+### Final
+
+Versioned types can be declared as `final` to indicate that no new versions of the type will be added.
+This restricts the type to the last explicitly declared version, preventing newer versions from being automaticially generated.
+Final types may only include fields of final or non-versioned types.
+
+    final struct FormatVersion {
+        version 1 {
+            major: nat;
+        }
+    }
 
 ## Generics
 
