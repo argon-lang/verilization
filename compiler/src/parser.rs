@@ -389,7 +389,7 @@ fn versioned_constant(input: &str) -> PResult<&str, (BigUint, Box<LazyConstantVa
 // const name: Type {
 //     version 1 = ...;
 //}
-fn constant_defn(current_package: model::PackageName, imports: ImportMap) -> impl Fn(&str) -> PResult<&str, Box<TopLevelDefinitionAdder>> {
+fn constant_defn(latest_version: BigUint, current_package: model::PackageName, imports: ImportMap) -> impl Fn(&str) -> PResult<&str, Box<TopLevelDefinitionAdder>> {
 	move |input| {
 		let (input, _) = kw_const(input)?;
 		let (input, name) = identifier(input)?;
@@ -402,9 +402,11 @@ fn constant_defn(current_package: model::PackageName, imports: ImportMap) -> imp
 	
 		let name = model::QualifiedName { package: current_package.clone(), name: name, };
 		let imports = imports.clone();
+
+		let latest_version = latest_version.clone();
 	
-		Ok((input, Box::new(|model| {
-			let mut constant = model::ConstantBuilder::new(name, t, imports);
+		Ok((input, Box::new(move |model| {
+			let mut constant = model::ConstantBuilder::new(latest_version.clone(), name, t, imports);
 			for (ver, value) in versions {
 				constant.add_version(ver, value()?)?;
 			}
@@ -463,7 +465,7 @@ fn type_param_list(input: &str) -> PResult<&str, Vec<String>> {
 //   version 5 {...}
 //   ...
 // }
-fn versioned_type_definition(current_package: model::PackageName, imports: ImportMap) -> impl Fn(&str) -> PResult<&str, Box<TopLevelDefinitionAdder>> {
+fn versioned_type_definition(latest_version: BigUint, current_package: model::PackageName, imports: ImportMap) -> impl Fn(&str) -> PResult<&str, Box<TopLevelDefinitionAdder>> {
 	move |input| {
 		let (input, is_final) = opt(kw_final)(input)?;
 		let is_final = is_final.is_some();
@@ -484,9 +486,10 @@ fn versioned_type_definition(current_package: model::PackageName, imports: Impor
 		let name = model::QualifiedName { package: current_package.clone(), name: name, };
 		let imports = imports.clone();
 	
+		let latest_version = latest_version.clone();
 		
 		Ok((input, Box::new(move |model| {
-			let mut type_def = model::VersionedTypeDefinitionBuilder::new(name, type_params, is_final, imports);
+			let mut type_def = model::VersionedTypeDefinitionBuilder::new(latest_version, name, type_params, is_final, imports);
 			for adder in versions {
 				adder(&mut type_def)?;
 			}
@@ -620,10 +623,10 @@ fn extern_type_definition(current_package: model::PackageName, imports: ImportMa
 }
 
 
-fn top_level_definition(current_package: model::PackageName, imports: ImportMap) -> impl Fn(&str) -> PResult<&str, Box<TopLevelDefinitionAdder>> {
+fn top_level_definition(latest_version: BigUint, current_package: model::PackageName, imports: ImportMap) -> impl Fn(&str) -> PResult<&str, Box<TopLevelDefinitionAdder>> {
 	move |input| alt((
-		constant_defn(current_package.clone(), imports.clone()),
-		versioned_type_definition(current_package.clone(), imports.clone()),
+		constant_defn(latest_version.clone(), current_package.clone(), imports.clone()),
+		versioned_type_definition(latest_version.clone(), current_package.clone(), imports.clone()),
 		extern_type_definition(current_package.clone(), imports.clone())
 	))(input)
 }
@@ -638,16 +641,14 @@ pub fn parse_model(input: &str) -> PResult<&str, Box<LazyModel>> {
 
 
 
-	let (input, defs) = many0(top_level_definition(package, HashMap::new()))(input)?;
+	let (input, defs) = many0(top_level_definition(latest_ver, package, HashMap::new()))(input)?;
 	let (input, _) = multispace0(input)?;
 	let (input, _) = eof(input)?;
 
 
 
 	Ok((input, Box::new(move || {
-		let mut model = model::Verilization::new(model::VerilizationMetadata {
-			latest_version: latest_ver,
-		});
+		let mut model = model::Verilization::new();
 	
 		for def_adder in defs.into_iter() {
 			def_adder(&mut model)?;

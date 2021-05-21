@@ -3,10 +3,13 @@ use num_bigint::BigUint;
 use num_traits::One;
 use std::collections::HashSet;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug)]
 pub enum TypeCheckError {
     TypeNotDefined(QualifiedName),
-    TypeAddedInNewerVersion(QualifiedName, BigUint),
+    TypeNotInVersion(QualifiedName, BigUint),
     CouldNotFindLastVersion(QualifiedName),
     ArityMismatch(usize, usize),
     TypeNotFinal(QualifiedName),
@@ -29,7 +32,7 @@ impl <'model> TypeCheck<'model> {
                 };
 
                 if !named_type_def.has_version(version) {
-                    return Err(TypeCheckError::TypeAddedInNewerVersion(name, version.clone()));
+                    return Err(TypeCheckError::TypeNotInVersion(name, version.clone()));
                 }
     
                 let arity = named_type_def.arity();
@@ -90,7 +93,10 @@ fn type_check_versioned_type<'model>(model: &'model Verilization, t: Named<'mode
         scope: t.scope(),
     };
 
+    println!("Checking type: {}", t.name());
+
     for ver in t.versions() {
+        println!("version: {}", ver.version);
         for (_, field) in ver.ver_type.fields() {
             tc.check_type(&ver.version, &field.field_type)?;
         }

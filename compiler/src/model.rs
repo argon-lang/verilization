@@ -294,6 +294,7 @@ pub struct ConstantVersionInfo<'a> {
 /// 
 /// See accessor methods for [`Named`] constants.
 pub struct Constant {
+	latest_version: BigUint,
 	imports: HashMap<String, ScopeLookup>,
 	value_type: Type,
 	versions: HashMap<BigUint, ConstantValue>,
@@ -305,10 +306,11 @@ pub struct ConstantBuilder {
 }
 
 impl ConstantBuilder {
-	pub fn new(name: QualifiedName, value_type: Type, imports: HashMap<String, ScopeLookup>) -> Self {
+	pub fn new(latest_version: BigUint, name: QualifiedName, value_type: Type, imports: HashMap<String, ScopeLookup>) -> Self {
 		ConstantBuilder {
 			name: name,
 			constant: Constant {
+				latest_version: latest_version,
 				imports: imports,
 				value_type: value_type,
 				versions: HashMap::new(),
@@ -345,7 +347,7 @@ impl <'a> Named<'a, Constant> {
 			constant: self,
 			version: BigUint::one(),
 			has_prev_version: false,
-			max_version: self.model.metadata.latest_version.clone(),
+			max_version: self.value.latest_version.clone(),
 		}
 	}
 
@@ -423,6 +425,7 @@ impl <'a> Clone for TypeVersionInfo<'a> {
 /// Defines a versioned type. Could be a struct or enum.
 #[derive(Debug)]
 pub struct VersionedTypeDefinitionData {
+	latest_version: BigUint,
 	imports: HashMap<String, ScopeLookup>,
 	type_params: Vec<String>,
 	versions: HashMap<BigUint, TypeVersionDefinition>,
@@ -435,10 +438,11 @@ pub struct VersionedTypeDefinitionBuilder {
 }
 
 impl VersionedTypeDefinitionBuilder {
-	pub fn new(name: QualifiedName, type_params: Vec<String>, is_final: bool, imports: HashMap<String, ScopeLookup>) -> Self {
+	pub fn new(latest_version: BigUint, name: QualifiedName, type_params: Vec<String>, is_final: bool, imports: HashMap<String, ScopeLookup>) -> Self {
 		VersionedTypeDefinitionBuilder {
 			name: name,
 			t: VersionedTypeDefinitionData {
+				latest_version: latest_version,
 				imports: imports,
 				type_params: type_params,
 				is_final: is_final,
@@ -475,26 +479,31 @@ impl <'a> Named<'a, VersionedTypeDefinitionData> {
 
 	/// Gets a version of this type.
 	pub fn versioned(self, version: &BigUint) -> Option<TypeVersionInfo<'a>> {
-		self.value.versions.iter()
-			.filter(|(ver, _)| ver <= &version)
-			.max_by_key(|(ver, _)| ver.clone())
-			.map(|(actual_ver, ver_type)| {
+		if version > &self.value.latest_version && !self.value.is_final {
+			None
+		}
+		else {
+			self.value.versions.iter()
+				.filter(|(ver, _)| ver <= &version)
+				.max_by_key(|(ver, _)| ver.clone())
+				.map(|(actual_ver, ver_type)| {
 
-				let ver =
-					if self.value.is_final && !self.value.versions.keys().any(|other_ver| other_ver > actual_ver) {
-						actual_ver.clone()
+					let ver =
+						if self.value.is_final && !self.value.versions.keys().any(|other_ver| other_ver > actual_ver) {
+							actual_ver.clone()
+						}
+						else {
+							version.clone()
+						};
+
+					TypeVersionInfo {
+						version: ver,
+						explicit_version: version == actual_ver,
+						ver_type: ver_type,
+						dummy: PhantomData {},
 					}
-					else {
-						version.clone()
-					};
-
-				TypeVersionInfo {
-					version: ver,
-					explicit_version: version == actual_ver,
-					ver_type: ver_type,
-					dummy: PhantomData {},
-				}
-			})
+				})
+		}
 	}
 
 	/// Finds the last explicitly defined version of this type.
@@ -521,7 +530,7 @@ impl <'a> Named<'a, VersionedTypeDefinitionData> {
 					self.last_explicit_version().map(|ver| ver.clone()).unwrap_or(BigUint::zero())
 				}
 				else {
-					self.model.metadata.latest_version.clone()
+					self.value.latest_version.clone()
 				},
 
 			last_seen_version: None,
@@ -752,14 +761,8 @@ impl <'a> NamedTypeDefinition<'a> {
 	}
 }
 
-/// Metadata about the format.
-pub struct VerilizationMetadata {
-	pub latest_version: BigUint,
-}
-
 /// Defines a versioned serialization format.
 pub struct Verilization {
-	metadata: VerilizationMetadata,
 	constants: HashMap<QualifiedName, Constant>,
 	type_definitions: HashMap<QualifiedName, TypeDefinition>,
 	names: HashSet<QualifiedName>,
@@ -840,9 +843,8 @@ fn make_name_uppercase(name: &mut QualifiedName) {
 impl Verilization {
 
 	/// Creates a new versioned format.
-	pub fn new(metadata: VerilizationMetadata) -> Self {
+	pub fn new() -> Self {
 		Verilization {
-			metadata: metadata,
 			constants: HashMap::new(),
 			type_definitions: HashMap::new(),
 			names: HashSet::new(),
@@ -926,10 +928,6 @@ impl Verilization {
 
 	/// Merges two serialization formats.
 	pub fn merge(&mut self, other: Verilization) -> Result<(), ModelError> {
-		if self.metadata.latest_version < other.metadata.latest_version {
-			self.metadata.latest_version = other.metadata.latest_version
-		}
-
 		other.constants.into_iter().try_for_each(|(name, constant)| self.add_constant(ConstantBuilder { name: name, constant: constant }))?;
 		other.type_definitions.into_iter().try_for_each(|(name, t)| match t {
 			TypeDefinition::StructType(type_def) => self.add_struct_type(VersionedTypeDefinitionBuilder { name: name, t: type_def }),
