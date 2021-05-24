@@ -616,15 +616,7 @@ pub trait ConstGenerator<'model> : Generator<'model> {
 		for ver in self.constant().versions() {
 			let version_name = Self::Lang::constant_version_name(&ver.version);
 			let t = self.build_type(&ver.version, self.constant().value_type())?;
-			let value =
-				if let Some(value) = ver.value {
-					self.build_value(&ver.version, t.clone(), value.clone())?
-				}
-				else {
-					let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, ver.version.clone()) - 1;
-					let prev_ver = prev_ver.to_biguint().unwrap();
-					self.build_value_from_prev(&prev_ver, &ver.version, self.constant().value_type())?
-				};
+			let value = self.build_value(&ver.version, t.clone(), ver.value.clone())?;
 
 			self.write_constant(version_name, t, value)?;
 		}

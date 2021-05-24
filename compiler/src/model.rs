@@ -285,7 +285,7 @@ impl ConstantValueRecordBuilder {
 /// If value is None, then the value was defined in a previous version.
 pub struct ConstantVersionInfo<'a> {
 	pub version: BigUint,
-	pub value: Option<&'a ConstantValue>,
+	pub value: &'a ConstantValue,
 
 	dummy: PhantomData<()>,
 }
@@ -346,7 +346,7 @@ impl <'a> Named<'a, Constant> {
 		ConstantVersionIterator {
 			constant: self,
 			version: BigUint::one(),
-			has_prev_version: false,
+			last_seen_version: None,
 			max_version: self.value.latest_version.clone(),
 		}
 	}
@@ -978,7 +978,7 @@ pub struct ConstantVersionIterator<'a> {
 	constant: Named<'a, Constant>,
 	version: BigUint,
 	max_version: BigUint,
-	has_prev_version: bool,
+	last_seen_version: Option<&'a ConstantValue>,
 }
 
 impl <'a> Iterator for ConstantVersionIterator<'a> {
@@ -989,18 +989,18 @@ impl <'a> Iterator for ConstantVersionIterator<'a> {
 			let version = self.version.clone();
 			self.version += BigUint::one();
 			
-			if let Some(ver_type) = self.constant.value.versions.get(&version) {
-				self.has_prev_version = true;
+			if let Some(ver_const) = self.constant.value.versions.get(&version) {
+				self.last_seen_version = Some(ver_const);
 				return Some(ConstantVersionInfo {
 					version: version,
-					value: Some(ver_type),
+					value: ver_const,
 					dummy: PhantomData {},
 				});
 			}
-			else if self.has_prev_version {
+			else if let Some(ver_const) = self.last_seen_version {
 				return Some(ConstantVersionInfo {
 					version: version,
-					value: None,
+					value: ver_const,
 					dummy: PhantomData {},
 				});
 			}
