@@ -56,7 +56,7 @@ impl <'model> TypeCheck<'model> {
         }
     }
 
-    fn check_is_final(&self, t: &Type, version: &BigUint) -> Result<bool, TypeCheckError> {
+    fn check_is_final(&self, version: &BigUint, t: &Type) -> Result<bool, TypeCheckError> {
         Ok(match self.scope.lookup(t.name.clone()) {
             ScopeLookup::NamedType(name) => {
                 match self.model.get_type(&name).ok_or_else(|| TypeCheckError::TypeNotDefined(name.clone()))? {
@@ -74,7 +74,7 @@ impl <'model> TypeCheck<'model> {
                 }
 
                 for arg in &t.args {
-                    if !self.check_is_final(&arg, version)? {
+                    if !self.check_is_final(version, &arg)? {
                         return Ok(false);
                     }
                 }
@@ -105,7 +105,7 @@ fn type_check_versioned_type<'model>(model: &'model Verilization, t: Named<'mode
     if t.is_final() {
         if let Some(last_ver) = t.versions().last() {
             for (_, field) in last_ver.ver_type.fields() {
-                if !tc.check_is_final(&field.field_type, &last_ver.version)? {
+                if !tc.check_is_final(&last_ver.version, &field.field_type)? {
                     return Err(TypeCheckError::TypeNotFinal(t.name().clone()))
                 }
             }
