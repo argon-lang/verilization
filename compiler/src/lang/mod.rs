@@ -1,6 +1,7 @@
 //! Defines generator related code for languages.
 
 pub mod generator;
+pub mod dummy_generator;
 
 use crate::model;
 use std::ffi::OsString;
@@ -22,12 +23,18 @@ pub enum GeneratorError {
 	TypeCannotBeSequence(model::QualifiedName),
 	TypeDoesNotHaveCase(model::QualifiedName, Option<BigUint>, String),
 	IncorrectCaseArity(model::QualifiedName, String),
+    ArityMismatch(usize, usize),
 	RecordLiteralNotForStruct,
 	ExternTypeDoesNotHaveRecordLiteral(model::QualifiedName),
 	CouldNotFindRecordField(model::QualifiedName, Option<BigUint>, String),
 	CouldNotGenerateType,
 	InvalidTypeForConstant,
 	InvalidTypeForCodec,
+	InvalidTypeForIntValue,
+	InvalidTypeForString,
+	TypeMismatch,
+    TypeNotFinal,
+	InvalidTypeInExternLiteral,
 }
 
 impl From<io::Error> for GeneratorError {

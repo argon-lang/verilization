@@ -16,7 +16,7 @@ lazy val proj = project.in(file("."))
         ),
 
         javacOptions ++= Seq(
-            "-target", "11",
+            "--release", "11",
             "-encoding", "UTF-8",
         ),
     )

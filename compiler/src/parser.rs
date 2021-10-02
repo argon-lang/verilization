@@ -15,7 +15,7 @@ use nom::{
 
 type PResult<I, A> = IResult<I, A>;
 
-type ImportMap = HashMap<String, model::ScopeLookup>;
+type ImportMap = HashMap<String, model::QualifiedName>;
 type LazyConstantValue = dyn FnOnce() -> Result<model::ConstantValue, model::ModelError>;
 type TopLevelDefinitionAdder = dyn FnOnce(&mut model::Verilization) -> Result<(), model::ModelError>;
 type TypeVersionAdder = dyn FnOnce(&mut model::VersionedTypeDefinitionBuilder) -> Result<(), model::ModelError>;

@@ -285,6 +285,7 @@ impl ConstantValueRecordBuilder {
 /// If value is None, then the value was defined in a previous version.
 pub struct ConstantVersionInfo<'a> {
 	pub version: BigUint,
+	pub explicit_version: bool,
 	pub value: &'a ConstantValue,
 
 	dummy: PhantomData<()>,
@@ -295,7 +296,7 @@ pub struct ConstantVersionInfo<'a> {
 /// See accessor methods for [`Named`] constants.
 pub struct Constant {
 	latest_version: BigUint,
-	imports: HashMap<String, ScopeLookup>,
+	imports: HashMap<String, QualifiedName>,
 	value_type: Type,
 	versions: HashMap<BigUint, ConstantValue>,
 }
@@ -306,7 +307,7 @@ pub struct ConstantBuilder {
 }
 
 impl ConstantBuilder {
-	pub fn new(latest_version: BigUint, name: QualifiedName, value_type: Type, imports: HashMap<String, ScopeLookup>) -> Self {
+	pub fn new(latest_version: BigUint, name: QualifiedName, value_type: Type, imports: HashMap<String, QualifiedName>) -> Self {
 		ConstantBuilder {
 			name: name,
 			constant: Constant {
@@ -359,6 +360,31 @@ impl <'a> Named<'a, Constant> {
 			imports: Some(&self.value.imports),
 			type_params: None,
 		}
+	}
+
+	/// Gets a version of this constant.
+	pub fn versioned(self, version: &BigUint) -> Option<ConstantVersionInfo<'a>> {
+		if version > &self.value.latest_version {
+			None
+		}
+		else {
+			self.value.versions.iter()
+				.filter(|(ver, _)| ver <= &version)
+				.max_by_key(|(ver, _)| ver.clone())
+				.map(|(actual_ver, value)| {
+					ConstantVersionInfo {
+						version: version.clone(),
+						explicit_version: version == actual_ver,
+						value: value,
+						dummy: PhantomData {},
+					}
+				})
+		}
+	}
+
+	/// Returns true if the constant exists in the specified version.
+	pub fn has_version(self, version: &BigUint) -> bool {
+		self.versioned(version).is_some()
 	}
 
 }
@@ -426,7 +452,7 @@ impl <'a> Clone for TypeVersionInfo<'a> {
 #[derive(Debug)]
 pub struct VersionedTypeDefinitionData {
 	latest_version: BigUint,
-	imports: HashMap<String, ScopeLookup>,
+	imports: HashMap<String, QualifiedName>,
 	type_params: Vec<String>,
 	versions: HashMap<BigUint, TypeVersionDefinition>,
 	is_final: bool,
@@ -438,7 +464,7 @@ pub struct VersionedTypeDefinitionBuilder {
 }
 
 impl VersionedTypeDefinitionBuilder {
-	pub fn new(latest_version: BigUint, name: QualifiedName, type_params: Vec<String>, is_final: bool, imports: HashMap<String, ScopeLookup>) -> Self {
+	pub fn new(latest_version: BigUint, name: QualifiedName, type_params: Vec<String>, is_final: bool, imports: HashMap<String, QualifiedName>) -> Self {
 		VersionedTypeDefinitionBuilder {
 			name: name,
 			t: VersionedTypeDefinitionData {
@@ -472,7 +498,7 @@ impl VersionedTypeDefinitionBuilder {
 
 impl <'a> Named<'a, VersionedTypeDefinitionData> {
 
-	// Gets whether this type is final.
+	/// Gets whether this type is final.
 	pub fn is_final(&self) -> bool {
 		self.value.is_final
 	}
@@ -556,7 +582,7 @@ impl <'a> Named<'a, VersionedTypeDefinitionData> {
 /// Defines an extern type.
 #[derive(Debug)]
 pub struct ExternTypeDefinitionData {
-	imports: HashMap<String, ScopeLookup>,
+	imports: HashMap<String, QualifiedName>,
 	type_params: Vec<String>,
 	literals: Vec<ExternLiteralSpecifier>,
 }
@@ -578,7 +604,7 @@ pub struct ExternLiteralRecordBuilder<'a> {
 }
 
 impl ExternTypeDefinitionBuilder {
-	pub fn new(name: QualifiedName, type_params: Vec<String>, imports: HashMap<String, ScopeLookup>) -> Self {
+	pub fn new(name: QualifiedName, type_params: Vec<String>, imports: HashMap<String, QualifiedName>) -> Self {
 		ExternTypeDefinitionBuilder {
 			name: name,
 			has_integer: false,
@@ -759,6 +785,15 @@ impl <'a> NamedTypeDefinition<'a> {
 			NamedTypeDefinition::ExternType(_) => true,
 		}
 	}
+
+	/// Gets a scope for this type.
+	pub fn scope(self) -> Scope<'a> {
+		match self {
+			NamedTypeDefinition::StructType(t) => t.scope(),
+			NamedTypeDefinition::EnumType(t) => t.scope(),
+			NamedTypeDefinition::ExternType(t) => t.scope(),
+		}
+	}
 }
 
 /// Defines a versioned serialization format.
@@ -769,7 +804,7 @@ pub struct Verilization {
 }
 
 /// The result of looking up a name.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScopeLookup {
 	NamedType(QualifiedName),
 	TypeParameter(String),
@@ -781,7 +816,7 @@ pub enum ScopeLookup {
 pub struct Scope<'a> {
 	model: &'a Verilization,
 	current_pkg: Option<&'a PackageName>,
-	imports: Option<&'a HashMap<String, ScopeLookup>>,
+	imports: Option<&'a HashMap<String, QualifiedName>>,
 	type_params: Option<&'a Vec<String>>,
 }
 
@@ -804,7 +839,7 @@ impl <'a> Scope<'a> {
 			}
 
 			if let Some(import) = self.imports.and_then(|imports| imports.get(&name.name)) {
-				return import.clone();
+				return ScopeLookup::NamedType(import.clone());
 			}
 
 			if let Some(current_pkg) = self.current_pkg {
@@ -822,6 +857,29 @@ impl <'a> Scope<'a> {
 		}
 
 		ScopeLookup::NamedType(name)
+	}
+
+	pub fn lookup_constant(&self, mut name: QualifiedName) -> QualifiedName {
+		if name.package.package.is_empty() {
+			if let Some(import) = self.imports.and_then(|imports| imports.get(&name.name)) {
+				return import.clone();
+			}
+
+			if let Some(current_pkg) = self.current_pkg {
+				let current_pkg_name = QualifiedName {
+					package: current_pkg.clone(),
+					name: name.name,
+				};
+	
+				if self.model.has_constant(&current_pkg_name) {
+					return current_pkg_name;
+				}
+	
+				name.name = current_pkg_name.name; // restore name because current_pkg_name is not a type
+			}
+		}
+
+		name
 	}
 
 	pub fn type_params(&self) -> Vec<String> {
@@ -922,8 +980,12 @@ impl Verilization {
 	}
 
 	/// Determines whether a type with this name exists.
-	pub fn has_type<'a>(&'a self, name: &QualifiedName) -> bool {
+	pub fn has_type(&self, name: &QualifiedName) -> bool {
 		self.type_definitions.contains_key(name)
+	}
+
+	pub fn has_constant(&self, name: &QualifiedName) -> bool {
+		self.constants.contains_key(name)
 	}
 
 	/// Merges two serialization formats.
@@ -995,6 +1057,7 @@ impl <'a> Iterator for ConstantVersionIterator<'a> {
 					version: version,
 					value: ver_const,
 					dummy: PhantomData {},
+					explicit_version: true,
 				});
 			}
 			else if let Some(ver_const) = self.last_seen_version {
@@ -1002,6 +1065,7 @@ impl <'a> Iterator for ConstantVersionIterator<'a> {
 					version: version,
 					value: ver_const,
 					dummy: PhantomData {},
+					explicit_version: false,
 				});
 			}
 		}

@@ -24,6 +24,61 @@ pub enum LangType<'model> {
 	Codec(Box<LangType<'model>>),
 }
 
+impl <'model> LangType<'model> {
+	fn is_same_type(&self, other: &LangType<'model>) -> bool {
+		match (self, other) {
+			(LangType::Versioned(_, name1, _, args1, _), LangType::Versioned(_, name2, _, args2, _)) =>
+				name1 == name2 &&
+					args1.len() == args2.len() &&
+					args1.iter().zip(args2.iter()).all(|(arg1, arg2)| arg1.is_same_type(arg2)),
+
+			(LangType::Extern(name1, args1, _), LangType::Extern(name2, args2, _)) =>
+				name1 == name2 &&
+					args1.len() == args2.len() &&
+					args1.iter().zip(args2.iter()).all(|(arg1, arg2)| arg1.is_same_type(arg2)),
+
+			(LangType::TypeParameter(name1), LangType::TypeParameter(name2)) =>
+				name1 == name2,
+
+			(LangType::Converter(from1, to1), LangType::Converter(from2, to2)) =>
+				from1.is_same_type(from2) && to1.is_same_type(to2),
+
+			(LangType::Codec(elem1), LangType::Codec(elem2)) =>
+				elem1.is_same_type(elem2),
+
+			_ => false
+		}
+	}
+
+	fn is_final_in_version(&self, version: &BigUint, model: &'model model::Verilization) -> bool {
+		match self {
+			LangType::Versioned(_, name, _, args, _) => {
+				let t = match model.get_type(name) {
+					Some(model::NamedTypeDefinition::StructType(t)) => t,
+					Some(model::NamedTypeDefinition::EnumType(t)) => t,
+					Some(model::NamedTypeDefinition::ExternType(_)) => return true,
+					None => return false,
+				};
+
+				t.is_final() &&
+					t.last_explicit_version().iter().all(|last_ver| last_ver <= &version) &&
+					args.iter().all(|arg| arg.is_final_in_version(version, model))
+			},
+
+			LangType::Extern(_, args, _) =>
+				args.iter().all(|arg| arg.is_final_in_version(version, model)),
+
+			LangType::TypeParameter(_) => true,
+
+			LangType::Converter(from, to) =>
+				from.is_final_in_version(version, model) && to.is_final_in_version(version, model),
+
+			LangType::Codec(elem) =>
+				elem.is_final_in_version(version, model),
+		}
+	}
+}
+
 pub struct LangField<'model> {
 	pub name: &'model String,
 	pub field_type: LangType<'model>,
@@ -296,12 +351,16 @@ fn build_type_impl<'model>(model: &'model model::Verilization, version: &BigUint
 	Ok(match scope.lookup(t.name.clone()) {
 		model::ScopeLookup::NamedType(name) => match model.get_type(&name).ok_or_else(|| GeneratorError::CouldNotFind(name.clone()))? {
 			model::NamedTypeDefinition::StructType(type_def) => {
+				let ver_type = type_def.versioned(version).ok_or_else(|| GeneratorError::CouldNotFindVersion(name, version.clone()))?;
+				let type_ver = ver_type.version.clone();
+
+				if type_def.type_params().len() != lang_args.len() {
+					return Err(GeneratorError::ArityMismatch(type_def.type_params().len(), lang_args.len()));
+				}
+
 				let lang_args_map = type_def.type_params().clone().into_iter()
 					.zip(lang_args.clone().into_iter())
 					.collect::<HashMap<_, _>>();
-
-					let ver_type = type_def.versioned(version).ok_or_else(|| GeneratorError::CouldNotFindVersion(name, version.clone()))?;
-					let type_ver = ver_type.version.clone();
 
 				let fields = LangVerTypeFields {
 					model: model,
@@ -345,18 +404,35 @@ fn build_type_impl<'model>(model: &'model model::Verilization, version: &BigUint
 				LangType::Extern(type_def.name(), lang_args, literals)
 			},
 		},
-		model::ScopeLookup::TypeParameter(name) => type_args.get(&name).ok_or_else(|| GeneratorError::CouldNotResolveTypeParameter(name))?.clone(),
+		model::ScopeLookup::TypeParameter(name) => {
+			if !lang_args.is_empty() {
+				return Err(GeneratorError::ArityMismatch(0, lang_args.len()));
+			}
+
+			type_args.get(&name).ok_or_else(|| GeneratorError::CouldNotResolveTypeParameter(name))?.clone()
+		},
 	})
 }
 
-fn constant_invoke_operation<'model>(op: Operation, values: Vec<LangExpr<'model>>, t: LangType<'model>) -> Result<LangExpr<'model>, GeneratorError> {
-	let (target, type_args) = match t {
-		LangType::Versioned(_, name, version, type_args, _) => (OperationTarget::VersionedType(name, version), type_args),
-		LangType::Extern(name, type_args, _) => (OperationTarget::ExternType(name), type_args),
-		LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForConstant),
-	};
+fn is_valid_integer_for_type(n: &BigInt, literals: LangExternTypeLiterals) -> Result<bool, GeneratorError> {
+	Ok(literals.build()?.iter().any(|literal| match literal {
+		LangLiteral::Integer(lower_bound, lower_value, upper_bound, upper_value) =>
+			(
+				match (lower_bound, lower_value) {
+					(_, None) => true,
+					(model::ExternLiteralIntBound::Inclusive, Some(x)) => n >= x,
+					(model::ExternLiteralIntBound::Exclusive, Some(x)) => n > x,
+				}
+			) && (
+				match (upper_bound, upper_value) {
+					(_, None) => true,
+					(model::ExternLiteralIntBound::Inclusive, Some(x)) => n <= x,
+					(model::ExternLiteralIntBound::Exclusive, Some(x)) => n < x,
+				}
+			),
 
-	Ok(LangExpr::InvokeOperation(op, target, type_args, values))
+		_ => false,
+	}))
 }
 
 pub trait Generator<'model> : Sized {
@@ -469,8 +545,32 @@ pub trait Generator<'model> : Sized {
 
 	fn build_value(&self, version: &BigUint, t: LangType<'model>, value: model::ConstantValue) -> Result<LangExpr<'model>, GeneratorError> {
 		Ok(match value {
-			model::ConstantValue::Integer(n) => constant_invoke_operation(Operation::FromInteger, vec!(LangExpr::IntegerLiteral(n.clone())), t)?,
-			model::ConstantValue::String(s) => constant_invoke_operation(Operation::FromString, vec!(LangExpr::StringLiteral(s.clone())), t)?,
+			model::ConstantValue::Integer(n) =>
+				match t {
+					LangType::Extern(name, args, literals) =>
+						if !is_valid_integer_for_type(&n, literals)? {
+							return Err(GeneratorError::InvalidTypeForIntValue)
+						}
+						else {
+							LangExpr::InvokeOperation(Operation::FromInteger, OperationTarget::ExternType(name), args, vec!(LangExpr::IntegerLiteral(n)))
+						},
+
+					_ => return Err(GeneratorError::InvalidTypeForIntValue),
+				},
+
+			model::ConstantValue::String(s) =>
+				match t {
+					LangType::Extern(name, args, literals) =>
+						if !literals.build()?.iter().any(|literal| match literal { LangLiteral::String => true, _ => false, }) {
+							return Err(GeneratorError::InvalidTypeForString)
+						}
+						else {
+							LangExpr::InvokeOperation(Operation::FromString, OperationTarget::ExternType(name), args, vec!(LangExpr::StringLiteral(s)))
+						},
+
+					_ => return Err(GeneratorError::InvalidTypeForString),
+				},
+
 			model::ConstantValue::Sequence(seq) => match t {
 				LangType::Extern(type_name, type_args, literals) => {
 					let literals = literals.build()?;
@@ -581,7 +681,17 @@ pub trait Generator<'model> : Sized {
 			model::ConstantValue::Constant(name) => {
 				match self.scope().lookup(name) {
 					model::ScopeLookup::NamedType(name) => {
-						let constant = self.model().get_constant(&name).ok_or_else(|| GeneratorError::CouldNotFind(name))?;
+						let constant = self.model().get_constant(&name).ok_or_else(|| GeneratorError::CouldNotFind(name.clone()))?;
+
+						if !constant.has_version(version) {
+							return Err(GeneratorError::CouldNotFindVersion(name, version.clone()))
+						}
+						
+						let const_type = self.build_type(version, constant.value_type())?;
+
+						if !t.is_same_type(&const_type) {
+							return Err(GeneratorError::TypeMismatch)
+						}
 
 						LangExpr::ConstantValue(constant.name(), version.clone())
 					},
@@ -662,10 +772,25 @@ pub trait VersionedTypeGenerator<'model> : Generator<'model> {
 				LangType::Versioned(kind, ..) => *kind,
 				_ => return Err(GeneratorError::CouldNotGenerateType),
 			};
+
+			let is_final_last_version = t.is_final_in_version(version, self.model());
+
+
+			if is_final_last_version {
+				if let LangType::Versioned(_, _, _, _, ref fields) = t {
+					for field in fields.build()? {
+						if !field.field_type.is_final_in_version(version, self.model()) {
+							return Err(GeneratorError::TypeNotFinal)
+						}
+					}
+				}
+			}
+
+
 			self.write_version_header(t)?;
 
 			// Converter for latest version of final type with type parameters
-			if self.type_def().is_final() && !self.type_def().type_params().is_empty() && self.type_def().last_explicit_version() == Some(&ver_type.version) {
+			if is_final_last_version && !self.type_def().type_params().is_empty() {
 				self.write_operation(build_converter_operation_common(self, Operation::FinalTypeConverter, type_kind, &ver_type, version)?)?;
 			}
 			
@@ -951,3 +1076,88 @@ pub trait Indentation : GeneratorWithFile {
 		*self.indentation_size() -= 1;
 	}
 }
+
+
+struct ExternTypeChecker<'model, Lang> {
+	model: &'model model::Verilization,
+	scope: model::Scope<'model>,
+	dummy_lang: PhantomData<Lang>,
+}
+
+impl <'model, Lang: GeneratorNameMapping> Generator<'model> for ExternTypeChecker<'model, Lang> {
+	type Lang = Lang;
+
+	fn model(&self) -> &'model model::Verilization {
+		self.model
+	}
+
+	fn scope(&self) -> &model::Scope<'model> {
+		&self.scope
+	}
+}
+
+
+
+
+pub trait GeneratorFactory<'model> {
+	type ConstGen: ConstGenerator<'model>;
+	type VersionedTypeGen: VersionedTypeGenerator<'model>;
+
+	fn create_constant_generator(&self, constant: Named<'model, model::Constant>) -> Result<Option<Self::ConstGen>, GeneratorError>;
+	fn create_versioned_type_generator(&self, t: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Option<Self::ConstGen>, GeneratorError>;
+}
+
+pub trait GeneratorFactoryGenerate<'model> {
+	fn generate(&self, model: &'model model::Verilization) -> Result<(), GeneratorError>;
+}
+
+impl <'model, TImpl: GeneratorFactory<'model> + GeneratorNameMapping> GeneratorFactoryGenerate<'model> for TImpl {
+	fn generate(&self, model: &'model model::Verilization) -> Result<(), GeneratorError> {
+		for constant in model.constants() {
+			if let Some(mut gen) = self.create_constant_generator(constant)? {
+				gen.generate()?;
+			}
+		}
+
+		for t in model.types() {
+			match t {
+				model::NamedTypeDefinition::StructType(t) | model::NamedTypeDefinition::EnumType(t) => {
+					if let Some(mut gen) = self.create_versioned_type_generator(t)? {
+						gen.generate()?;
+					}
+				},
+				model::NamedTypeDefinition::ExternType(t) => {
+					let tc = ExternTypeChecker::<Self> {
+						model: model,
+						scope: t.scope(),
+						dummy_lang: PhantomData {},
+					};
+
+					let check_extern_literal_type = |lit_type: &model::Type| -> Result<(), GeneratorError> {
+						let lang_type = tc.build_type(&BigUint::one(), lit_type)?;
+						if !lang_type.is_final_in_version(&BigUint::one(), model) {
+							return Err(GeneratorError::TypeNotFinal)
+						}
+
+						Ok(())
+					};
+
+
+					for literal in t.literals() {
+						match literal {
+							model::ExternLiteralSpecifier::Integer(..) => (),
+							model::ExternLiteralSpecifier::String => (),
+							model::ExternLiteralSpecifier::Sequence(elem_type) => check_extern_literal_type(elem_type)?,
+							model::ExternLiteralSpecifier::Case(_, param_types) => param_types.iter().try_for_each(check_extern_literal_type)?,
+							model::ExternLiteralSpecifier::Record(fields) => fields.iter().try_for_each(|(_, field)| check_extern_literal_type(&field.field_type))?,
+						}
+					}
+				},
+			}
+		}
+
+		Ok(())
+	}
+}
+
+

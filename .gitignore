@@ -1,3 +1,6 @@
+.vscode/
+.metals/
+
 target/
 
 node_modules/
