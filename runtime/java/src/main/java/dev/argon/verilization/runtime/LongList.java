@@ -24,8 +24,8 @@ public final class LongList extends List<Long> {
     }
 
     public static LongList unbox(List<Long> l) {
-        if(l instanceof LongList) {
-            return (LongList)l;
+        if(l instanceof LongList l2) {
+            return l2;
         }
 
         long[] values = new long[l.size()];
@@ -43,11 +43,10 @@ public final class LongList extends List<Long> {
 
     @Override
     public boolean equals(Object obj) {
-        if(!(obj instanceof LongList)) {
+        if(!(obj instanceof LongList other)) {
             return false;
         }
 
-        var other = (LongList)obj;
         return Arrays.equals(values, other.values);
     }
 }

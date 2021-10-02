@@ -10,7 +10,7 @@ public class Upgrade_Conversions {
     static final Converter<Upgrade.V3, Upgrade.V4> v3ToV4 = new Converter<Upgrade.V3, Upgrade.V4>() {
         @Override
         public Upgrade.V4 convert(Upgrade.V3 prev) {
-            return new Upgrade.V4(prev.n);
+            return new Upgrade.V4(prev.n());
         }
     };
     

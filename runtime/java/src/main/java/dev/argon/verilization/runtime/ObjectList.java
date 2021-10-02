@@ -26,11 +26,10 @@ final class ObjectList<A> extends List<A> {
 
     @Override
     public boolean equals(Object obj) {
-        if(!(obj instanceof ObjectList<?>)) {
+        if(!(obj instanceof ObjectList<?> other)) {
             return false;
         }
 
-        var other = (ObjectList<?>)obj;
         return Arrays.equals(values, other.values);
     }
 }

@@ -8,18 +8,11 @@ final class Main_Conversions {
     static final Converter<Main.V3, Main.V4> v3ToV4 = new Converter<Main.V3, Main.V4>() {
         @Override
         public Main.V4 convert(Main.V3 prev) {
-            if(prev instanceof Main.V3.N) {
-                return new Main.V4.N(((Main.V3.N)prev).n);
-            }
-            else if(prev instanceof Main.V3.M) {
-                return new Main.V4.M(((Main.V3.M)prev).m);
-            }
-            else if(prev instanceof Main.V3.R) {
-                return new Main.V4.R(Referenced.V4.fromV3.convert(((Main.V3.R)prev).r));
-            }
-            else {
-                throw new IllegalArgumentException();
-            }
+            return switch(prev) {
+                case Main.V3.N prev2 -> new Main.V4.N(prev2.n());
+                case Main.V3.M prev2 -> new Main.V4.M(prev2.m());
+                case Main.V3.R prev2 -> new Main.V4.R(Referenced.V4.fromV3.convert(prev2.r()));
+            };
         }
     };
     

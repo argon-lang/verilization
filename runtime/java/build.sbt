@@ -28,7 +28,7 @@ autoScalaLibrary := false
 crossPaths := false
 
 javacOptions ++= Seq(
-    "--release", "11",
+    "--release", "17",
     "-encoding", "UTF-8",
     "-Xlint:unchecked"
 )

@@ -126,6 +126,7 @@ impl TestLanguage for verilization_lang_java::JavaLanguage {
 
     fn test_command() -> Command {
         let mut cmd = Command::new("sbt");
+        cmd.arg("-J--enable-preview");
         cmd.arg("test");
         cmd.current_dir("../java");
         cmd

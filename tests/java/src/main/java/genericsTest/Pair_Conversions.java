@@ -9,7 +9,7 @@ public final class Pair_Conversions {
         return new Converter<Pair.V3<A_1, B_1>, Pair.V4<A_2, B_2>>() {
             @Override
             public Pair.V4<A_2, B_2> convert(Pair.V3<A_1, B_1> prev) {
-                return new Pair.V4<A_2, B_2>(A_conv.convert(prev.left), B_conv.convert(prev.right), "dummy");
+                return new Pair.V4<A_2, B_2>(A_conv.convert(prev.left()), B_conv.convert(prev.right()), "dummy");
             }
         };
     }

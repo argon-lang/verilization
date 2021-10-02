@@ -60,6 +60,12 @@ fn open_java_file<'output, Output: OutputHandler<'output>>(options: &JavaOptions
 	Ok(output.create_file(path)?)
 }
 
+#[derive(Copy, Clone)]
+enum ResultHandling {
+	Return,
+	Yield,
+}
+
 pub trait JavaGenerator<'model, 'opt> : Generator<'model> + GeneratorWithFile {
 	fn options(&self) -> &'opt JavaOptions;
 	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model>;
@@ -482,23 +488,12 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenera
 	}
 
 	fn write_version_header(&mut self, t: LangType<'model>) -> Result<(), GeneratorError> {
-		self.write_indent()?;
-
-
-		match &t {
-			LangType::Versioned(VersionedTypeKind::Struct, _, version, _, _) => write!(self.file, "public static final class V{}", version)?,
-			LangType::Versioned(VersionedTypeKind::Enum, _, version, _, _) => write!(self.file, "public static abstract class V{}", version)?,
-			_ => return Err(GeneratorError::CouldNotGenerateType)
-		}
-		
-		self.write_type_params(self.type_def().type_params())?;
-		writeln!(self.file, " extends {} {{", self.type_def.name().name)?;
-		self.indent_increase();
-
 		match t {
 			LangType::Versioned(VersionedTypeKind::Struct, _, version, _, fields) => {
 				self.write_indent()?;
-				write!(self.file, "public V{}(", version)?;
+				write!(self.file, "public static record V{}", version)?;
+				self.write_type_params(self.type_def().type_params())?;
+				write!(self.file, "(")?;
 
 				let fields = fields.build()?;
 
@@ -509,118 +504,26 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenera
 
 				writeln!(self.file, ") {{")?;
 				self.indent_increase();
-				
-				for field in &fields {
-					self.write_indent()?;
-					writeln!(self.file, "this.{} = {};", make_field_name(field.name), make_field_name(field.name))?;
-				}
-
-				self.indent_decrease();
-				self.write_indent()?;
-				writeln!(self.file, "}}")?;
-
-				for field in &fields {
-					self.write_indent()?;
-					write!(self.file, "public final ")?;
-					self.write_type(&field.field_type, false)?;
-					writeln!(self.file, " {};", make_field_name(field.name))?;
-				}
-
-				self.write_indent()?;
-				writeln!(self.file, "@Override")?;
-
-				self.write_indent()?;
-				writeln!(self.file, "public int hashCode() {{")?;
-				self.indent_increase();
-
-				self.write_indent()?;
-				write!(self.file, "return java.util.Objects.hash(")?;
-				for_sep!(field, &fields, { write!(self.file, ", ")?; }, {
-					write!(self.file, "{}", make_field_name(field.name))?;
-				});
-				writeln!(self.file, ");")?;
-				self.indent_decrease();
-				self.write_indent()?;
-				writeln!(self.file, "}}")?;
-
-				self.write_indent()?;
-				writeln!(self.file, "@Override")?;
-				self.write_indent()?;
-				writeln!(self.file, "public boolean equals(Object obj) {{")?;
-				self.indent_increase();
-				self.write_indent()?;
-				writeln!(self.file, "if(!(obj instanceof V{})) return false;", version)?;
-				self.write_indent()?;
-				writeln!(self.file, "V{} other = (V{})obj;", version, version)?;
-				for field in &fields {
-					self.write_indent()?;
-					writeln!(self.file, "if(!java.util.Objects.deepEquals(this.{}, other.{})) return false;", make_field_name(field.name), make_field_name(field.name))?;
-				}
-				self.write_indent()?;
-				writeln!(self.file, "return true;")?;
-				self.indent_decrease();
-				self.write_indent()?;
-				writeln!(self.file, "}}")?;
 			},
 			LangType::Versioned(VersionedTypeKind::Enum, _, version, _, fields) => {
 				self.write_indent()?;
-				writeln!(self.file, "private V{}() {{}}", version)?;
+				write!(self.file, "public static sealed interface V{}", version)?;
+				self.write_type_params(self.type_def().type_params())?;
+				writeln!(self.file, " {{")?;
+
+				self.indent_increase();
 
 				let fields = fields.build()?;
 		
-				for (index, field) in fields.iter().enumerate() {
+				for field in fields {
 					self.write_indent()?;
-					write!(self.file, "public static final class {}", make_type_name(field.name))?;
+					write!(self.file, "public static record {}", make_type_name(field.name))?;
 					self.write_type_params(self.type_def().type_params())?;
-					write!(self.file, " extends V{}", version)?;
+					write!(self.file, "(")?;
+					self.write_type(&field.field_type, false)?;
+					write!(self.file, " {}) implements V{}", make_field_name(field.name), version)?;
 					self.write_type_params(self.type_def().type_params())?;
-					writeln!(self.file, " {{")?;
-		
-					self.indent_increase();
-					self.write_indent()?;
-					write!(self.file, "public {}(", make_type_name(field.name))?;
-					self.write_type(&field.field_type, false)?;
-					writeln!(self.file, " {}) {{", make_field_name(field.name))?;
-					self.indent_increase();
-					self.write_indent()?;
-					writeln!(self.file, "this.{} = {};", make_field_name(field.name), make_field_name(field.name))?;
-					self.indent_decrease();
-					self.write_indent()?;
-					writeln!(self.file, "}}")?;
-					self.write_indent()?;
-					write!(self.file, "public final ")?;
-					self.write_type(&field.field_type, false)?;
-					writeln!(self.file, " {};", make_field_name(field.name))?;
-					
-					self.write_indent()?;
-					writeln!(self.file, "@Override")?;
-					self.write_indent()?;
-					writeln!(self.file, "public int hashCode() {{")?;
-					self.indent_increase();
-					self.write_indent()?;
-					writeln!(self.file, "return java.util.Objects.hash({}, this.{});", index, make_field_name(field.name))?;
-					self.indent_decrease();
-					self.write_indent()?;
-					writeln!(self.file, "}}")?;
-					
-					self.write_indent()?;
-					writeln!(self.file, "@Override")?;
-					self.write_indent()?;
-					writeln!(self.file, "public boolean equals(Object obj) {{")?;
-					self.indent_increase();
-					self.write_indent()?;
-					writeln!(self.file, "if(!(obj instanceof {})) return false;", make_type_name(field.name))?;
-					self.write_indent()?;
-					writeln!(self.file, "{} other = ({})obj;", make_type_name(field.name), make_type_name(field.name))?;
-					self.write_indent()?;
-					writeln!(self.file, "return java.util.Objects.deepEquals(this.{}, other.{});", make_field_name(field.name), make_field_name(field.name))?;
-					self.indent_decrease();
-					self.write_indent()?;
-					writeln!(self.file, "}}")?;
-			
-					self.indent_decrease();
-					self.write_indent()?;
-					writeln!(self.file, "}}")?;
+					writeln!(self.file, " {{}}")?;
 				}
 			},
 			_ => return Err(GeneratorError::CouldNotGenerateType)
@@ -688,7 +591,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenera
 }
 
 
-fn write_enum_case_type<'model, 'opt, Gen>(gen: &mut Gen, value_type: &LangType<'model>, case_name: &str, wildcard: bool) -> Result<(), GeneratorError> where
+fn write_enum_case_type<'model, 'opt, Gen>(gen: &mut Gen, value_type: &LangType<'model>, case_name: &str) -> Result<(), GeneratorError> where
 	Gen : JavaGenerator<'model, 'opt> + GeneratorWithFile
 {
 	match value_type {
@@ -698,12 +601,7 @@ fn write_enum_case_type<'model, 'opt, Gen>(gen: &mut Gen, value_type: &LangType<
 			if !args.is_empty() {
 				write!(gen.file(), "<")?;
 				for_sep!(arg, args, { write!(gen.file(), ", ")?; }, {
-					if wildcard {
-						write!(gen.file(), "?")?;
-					}
-					else {
-						gen.write_type(arg, true)?;
-					}
+					gen.write_type(arg, true)?;
 				});
 				write!(gen.file(), ">")?;
 			}
@@ -757,7 +655,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaTypeGenerator<'
 				writeln!(self.file, " read({}.FormatReader reader) throws java.io.IOException {{", RUNTIME_PACKAGE)?;
 				self.indent_increase();
 				
-				self.write_statement(read)?;
+				self.write_statement(read, ResultHandling::Return)?;
 
 				self.indent_decrease();
 				self.write_indent()?;
@@ -772,7 +670,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaTypeGenerator<'
 				writeln!(self.file, " value) throws java.io.IOException {{")?;
 				self.indent_increase();
 
-				self.write_statement(write)?;
+				self.write_statement(write, ResultHandling::Return)?;
 
 				self.indent_decrease();
 				self.write_indent()?;
@@ -803,7 +701,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaTypeGenerator<'
 				writeln!(self.file, " {}) {{", JavaLanguage::convert_prev_param_name())?;
 				self.indent_increase();
 
-				self.write_statement(body)?;
+				self.write_statement(body, ResultHandling::Return)?;
 
 				self.indent_decrease();
 				self.write_indent()?;
@@ -819,7 +717,14 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaTypeGenerator<'
 		Ok(())
 	}
 	
-	fn write_statement(&mut self, stmt: &LangStmt<'model>) -> Result<(), GeneratorError> {
+	fn get_result_handling_kw(result_handling: ResultHandling) -> &'static str {
+		match result_handling {
+			ResultHandling::Return => "return",
+			ResultHandling::Yield => "yield",
+		}
+	}
+
+	fn write_statement(&mut self, stmt: &LangStmt<'model>, result_handling: ResultHandling) -> Result<(), GeneratorError> {
 		match stmt {
 			LangStmt::Expr(exprs, result_expr) => {
 				for expr in exprs {
@@ -830,7 +735,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaTypeGenerator<'
 
 				if let Some(result_expr) = result_expr {
 					self.write_indent()?;
-					write!(self.file, "return ")?;
+					write!(self.file, "{} ", Self::get_result_handling_kw(result_handling))?;
 					self.write_expr(result_expr)?;
 					writeln!(self.file, ";")?;
 				}
@@ -838,41 +743,53 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaTypeGenerator<'
 
 			LangStmt::MatchEnum { value, value_type, cases } => {
 				self.write_indent()?;
+				if stmt.has_value() {
+					write!(self.file, "{} ", Self::get_result_handling_kw(result_handling))?
+				}
+				
+				write!(self.file, "switch(")?;
+				self.write_expr(value)?;
+				writeln!(self.file, ") {{")?;
+				self.indent_increase();
+
 				for MatchCase { binding_name, case_name, body } in cases {
-					write!(self.file, "if(")?;
-					self.write_expr(value)?;
-					write!(self.file, " instanceof ")?;
-					write_enum_case_type(self, value_type, case_name, true)?;
-					writeln!(self.file, ") {{")?;
+					self.write_indent()?;
+					write!(self.file, "case ")?;
+					write_enum_case_type(self, value_type, case_name)?;
+					write!(self.file, " case_{}", binding_name)?;
+
+					if body.has_value() {
+						write!(self.file, " -> ")?;
+					}
+					else {
+						writeln!(self.file, ":")?;
+						self.write_indent()?;
+					}
+					writeln!(self.file, "{{")?;
+
 					self.indent_increase();
 
 					self.write_indent()?;
-					write!(self.file, "var {} = ((", binding_name)?;
-					write_enum_case_type(self, value_type, case_name, false)?;
-					write!(self.file, ")")?;
-					self.write_expr(value)?;
-					writeln!(self.file, ").{};", make_field_name(case_name))?;
+					writeln!(self.file, "var {} = case_{}.{}();", binding_name, binding_name, make_field_name(case_name))?;
+					self.write_statement(body, ResultHandling::Yield)?;
 
-					self.write_statement(body)?;
+					if !body.has_value() {
+						self.write_indent()?;
+						writeln!(self.file, "break;")?;
+					}
 
 					self.indent_decrease();
+
 					self.write_indent()?;
 					writeln!(self.file, "}}")?;
-
-					self.write_indent()?;
-					write!(self.file, "else ")?;
-				}
-				if !cases.is_empty() {
-					writeln!(self.file, "{{")?;
-					self.indent_increase();
-					self.write_indent()?;
 				}
 
-				writeln!(self.file, "throw new IllegalArgumentException();")?;
-				
-				if !cases.is_empty() {
-					self.indent_decrease();
-					self.write_indent()?;
+				self.indent_decrease();
+				self.write_indent()?;
+				if stmt.has_value() {
+					writeln!(self.file, "}};")?;
+				}
+				else {
 					writeln!(self.file, "}}")?;
 				}
 			},
@@ -891,7 +808,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaTypeGenerator<'
 					writeln!(self.file, "{{")?;
 					self.indent_increase();
 
-					self.write_statement(body)?;
+					self.write_statement(body, result_handling)?;
 
 
 					if !body.has_value() {

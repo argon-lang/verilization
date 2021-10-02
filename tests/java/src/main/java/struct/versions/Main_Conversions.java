@@ -9,9 +9,9 @@ final class Main_Conversions {
         @Override
         public Main.V4 convert(Main.V3 prev) {
             return new Main.V4(
-                prev.n,
-                prev.m,
-                Referenced.V4.fromV3.convert(prev.r),
+                prev.n(),
+                prev.m(),
+                Referenced.V4.fromV3.convert(prev.r()),
                 new Addition.V4(
                     5
                 )

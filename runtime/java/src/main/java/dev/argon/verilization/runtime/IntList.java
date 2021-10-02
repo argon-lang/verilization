@@ -24,8 +24,8 @@ public final class IntList extends List<Integer> {
     }
 
     public static IntList unbox(List<Integer> l) {
-        if(l instanceof IntList) {
-            return (IntList)l;
+        if(l instanceof IntList l2) {
+            return l2;
         }
 
         int[] values = new int[l.size()];
@@ -43,11 +43,10 @@ public final class IntList extends List<Integer> {
 
     @Override
     public boolean equals(Object obj) {
-        if(!(obj instanceof IntList)) {
+        if(!(obj instanceof IntList other)) {
             return false;
         }
 
-        var other = (IntList)obj;
         return Arrays.equals(values, other.values);
     }
 }

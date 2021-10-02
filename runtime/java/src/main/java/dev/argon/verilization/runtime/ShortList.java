@@ -24,8 +24,8 @@ public final class ShortList extends List<Short> {
     }
 
     public static ShortList unbox(List<Short> l) {
-        if(l instanceof ShortList) {
-            return (ShortList)l;
+        if(l instanceof ShortList l2) {
+            return l2;
         }
 
         short[] values = new short[l.size()];
@@ -43,11 +43,10 @@ public final class ShortList extends List<Short> {
 
     @Override
     public boolean equals(Object obj) {
-        if(!(obj instanceof ShortList)) {
+        if(!(obj instanceof ShortList other)) {
             return false;
         }
 
-        var other = (ShortList)obj;
         return Arrays.equals(values, other.values);
     }
 }

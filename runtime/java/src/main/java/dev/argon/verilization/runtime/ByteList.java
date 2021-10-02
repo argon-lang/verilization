@@ -24,8 +24,8 @@ public final class ByteList extends List<Byte> {
     }
 
     public static ByteList unbox(List<Byte> l) {
-        if(l instanceof ByteList) {
-            return (ByteList)l;
+        if(l instanceof ByteList l2) {
+            return l2;
         }
 
         byte[] values = new byte[l.size()];
@@ -43,11 +43,10 @@ public final class ByteList extends List<Byte> {
 
     @Override
     public boolean equals(Object obj) {
-        if(!(obj instanceof ByteList)) {
+        if(!(obj instanceof ByteList other)) {
             return false;
         }
 
-        var other = (ByteList)obj;
         return Arrays.equals(values, other.values);
     }
 }
