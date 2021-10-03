@@ -114,7 +114,7 @@ pub trait ScalaGenerator<'model, 'opt> : Generator<'model> + GeneratorWithFile {
 	
 	fn write_type(&mut self, t: &LangType<'model>) -> Result<(), GeneratorError> {
 		Ok(match t {
-			LangType::Versioned(_, name, version, args, _) => {
+			LangType::Versioned(_, name, version, args, _) | LangType::Interface(name, version, args, _) => {
 				self.write_qual_name(&name)?;
 				write!(self.file(), ".V{}", version)?;
 				self.write_type_args(args)?;
@@ -224,7 +224,7 @@ pub trait ScalaGenerator<'model, 'opt> : Generator<'model> + GeneratorWithFile {
 			},
 			LangExpr::InvokeOperation(op, target, type_args, args) => {
 				match target {
-					OperationTarget::VersionedType(name, version) => {
+					OperationTarget::VersionedType(name, version) | OperationTarget::InterfaceType(name, version) => {
 						self.write_qual_name(name)?;
 						write!(self.file(), ".V{}.", version)?;
 					},
@@ -946,6 +946,7 @@ impl Language for ScalaLanguage {
 					type_gen.generate()?;		
 				},
 				model::NamedTypeDefinition::ExternType(_) => (),
+				model::NamedTypeDefinition::InterfaceType(..) => (),
 			}
 		}
 

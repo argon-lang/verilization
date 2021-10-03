@@ -19,6 +19,8 @@ type ImportMap = HashMap<String, model::QualifiedName>;
 type LazyConstantValue = dyn FnOnce() -> Result<model::ConstantValue, model::ModelError>;
 type TopLevelDefinitionAdder = dyn FnOnce(&mut model::Verilization) -> Result<(), model::ModelError>;
 type TypeVersionAdder = dyn FnOnce(&mut model::VersionedTypeDefinitionBuilder) -> Result<(), model::ModelError>;
+type InterfaceVersionAdder = dyn FnOnce(&mut model::InterfaceTypeDefinitionBuilder) -> Result<(), model::ModelError>;
+type InterfaceMethodAdder = dyn FnOnce(&mut model::InterfaceVersionDefinitionBuilder) -> Result<(), model::ModelError>;
 type ExternLiteralAdder = dyn FnOnce(&mut model::ExternTypeDefinitionBuilder) -> Result<(), model::ModelError>;
 type LazyModel = dyn FnOnce() -> Result<model::Verilization, model::ModelError>;
 
@@ -62,6 +64,13 @@ fn kw_struct(input: &str) -> PResult<&str, ()> {
 fn kw_extern(input: &str) -> PResult<&str, ()> {
 	let (input, _) = multispace0(input)?;
 	let (input, _) = tag("extern")(input)?;
+	let (input, _) = multispace1(input)?;
+	Ok((input, ()))
+}
+
+fn kw_interface(input: &str) -> PResult<&str, ()> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = tag("interface")(input)?;
 	let (input, _) = multispace1(input)?;
 	Ok((input, ()))
 }
@@ -144,6 +153,18 @@ fn sym_open_bracket(input: &str) -> PResult<&str, ()> {
 fn sym_close_bracket(input: &str) -> PResult<&str, ()> {
 	let (input, _) = multispace0(input)?;
 	let (input, _) = char(']')(input)?;
+	Ok((input, ()))
+}
+
+fn sym_open_angle(input: &str) -> PResult<&str, ()> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = char('<')(input)?;
+	Ok((input, ()))
+}
+
+fn sym_close_angle(input: &str) -> PResult<&str, ()> {
+	let (input, _) = multispace0(input)?;
+	let (input, _) = char('>')(input)?;
 	Ok((input, ()))
 }
 
@@ -416,16 +437,31 @@ fn constant_defn(latest_version: BigUint, current_package: model::PackageName, i
 	}
 }
 
-// Ex: name: Type;
-fn field_definition(input: &str) -> PResult<&str, (String, model::FieldInfo)> {
+fn variable_declaration_part(input: &str) -> PResult<&str, (String, model::Type)> {
 	let (input, name) = identifier(input)?;
 	let (input, _) = cut(sym_colon)(input)?;
 	let (input, t) = cut(type_expr)(input)?;
+
+	Ok((input, (name, t)))
+}
+
+// Ex: name: Type;
+fn field_definition(input: &str) -> PResult<&str, (String, model::FieldInfo)> {
+	let (input, (name, t)) = variable_declaration_part(input)?;
 	let (input, _) = cut(sym_semicolon)(input)?;
 
 	Ok((input, (name, model::FieldInfo {
 		field_type: t,
 	})))
+}
+
+fn param_definition(input: &str) -> PResult<&str, model::ParameterInfo> {
+	let (input, (name, t)) = variable_declaration_part(input)?;
+
+	Ok((input, model::ParameterInfo {
+		name: name,
+		param_type: t,
+	}))
 }
 
 // Ex:
@@ -448,10 +484,53 @@ fn type_version_definition(input: &str) -> PResult<&str, Box<TypeVersionAdder>> 
 	})))
 }
 
+// Ex:
+// funcName<T1, T2>(arg1: A1, arg2: A2): R;
+fn method_definition(input: &str) -> PResult<&str, Box<InterfaceMethodAdder>> {
+	let (input, name) = identifier(input)?;
+	let (input, type_params) = opt(type_param_list)(input)?;
+	let type_params = type_params.unwrap_or(Vec::new());
+
+	let (input, _) = cut(sym_open_paren)(input)?;
+	let (input, params) = separated_list1(sym_comma, param_definition)(input)?;
+	let (input, _) = cut(sym_close_paren)(input)?;
+
+	let (input, _) = cut(sym_colon)(input)?;
+	let (input, t) = cut(type_expr)(input)?;
+	let (input, _) = cut(sym_semicolon)(input)?;
+
+	Ok((input, Box::new(|ver_builder| {
+		let mut method = ver_builder.add_method(name, t)?;
+		type_params.into_iter().try_for_each(|p| method.add_type_param(p))?;
+		params.into_iter().try_for_each(|p| method.add_param(p))?;
+		Ok(())
+	})))
+}
+
+// Ex:
+// version 5 {
+//   ...	
+// }
+fn interface_version_definition(input: &str) -> PResult<&str, Box<InterfaceVersionAdder>> {
+	let (input, _) = kw_version(input)?;
+	let (input, ver) = cut(biguint)(input)?;
+	let (input, _) = cut(sym_open_curly)(input)?;
+	let (input, methods_adders) = many0(method_definition)(input)?;
+	let (input, _) = cut(sym_close_curly)(input)?;
+
+	Ok((input, Box::new(|type_def| {
+		let mut ver_type = type_def.add_version(ver)?;
+		for method_adder in methods_adders {	
+			method_adder(&mut ver_type)?;
+		}
+		Ok(())
+	})))
+}
+
 fn type_param_list(input: &str) -> PResult<&str, Vec<String>> {
-	let (input, _) = sym_open_paren(input)?;
+	let (input, _) = sym_open_angle(input)?;
 	let (input, result) = separated_list1(sym_comma, identifier)(input)?;
-	let (input, _) = sym_close_paren(input)?;
+	let (input, _) = sym_close_angle(input)?;
 
 	Ok((input, result))
 }
@@ -623,11 +702,49 @@ fn extern_type_definition(current_package: model::PackageName, imports: ImportMa
 }
 
 
+// Ex:
+// interface Name {
+//     ...
+// }
+fn interface_type_definition(latest_version: BigUint, current_package: model::PackageName, imports: ImportMap) -> impl Fn(&str) -> PResult<&str, Box<TopLevelDefinitionAdder>> {
+	move |input| {
+		let (input, is_final) = opt(kw_final)(input)?;
+		let is_final = is_final.is_some();
+
+		let (input, _) = kw_interface(input)?;
+	
+		let (input, name) = cut(identifier)(input)?;
+		let (input, type_params) = opt(type_param_list)(input)?;
+		let type_params = type_params.unwrap_or(Vec::new());
+		
+		let (input, _) = cut(sym_open_curly)(input)?;
+		let (input, versions) = many0(interface_version_definition)(input)?;
+		let (input, _) = cut(sym_close_curly)(input)?;
+	
+		let name = model::QualifiedName { package: current_package.clone(), name: name, };
+		let imports = imports.clone();
+	
+		let latest_version = latest_version.clone();
+		
+		Ok((input, Box::new(move |model| {
+			let mut type_def = model::InterfaceTypeDefinitionBuilder::new(latest_version, name, type_params, is_final, imports);
+			for adder in versions {
+				adder(&mut type_def)?;
+			}
+
+			model.add_interface(type_def)
+		})))
+	}
+}
+
+
+
 fn top_level_definition(latest_version: BigUint, current_package: model::PackageName, imports: ImportMap) -> impl Fn(&str) -> PResult<&str, Box<TopLevelDefinitionAdder>> {
 	move |input| alt((
 		constant_defn(latest_version.clone(), current_package.clone(), imports.clone()),
 		versioned_type_definition(latest_version.clone(), current_package.clone(), imports.clone()),
-		extern_type_definition(current_package.clone(), imports.clone())
+		extern_type_definition(current_package.clone(), imports.clone()),
+		interface_type_definition(latest_version.clone(), current_package.clone(), imports.clone())
 	))(input)
 }
 

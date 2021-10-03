@@ -84,7 +84,7 @@ pub fn generate_random_value<R: Rng>(random: &mut R, t: LangType) -> Result<Cons
             }
         },
         
-        LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) => Err(GeneratorError::InvalidTypeForConstant)?,
+        LangType::Interface(..) | LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) => Err(GeneratorError::InvalidTypeForConstant)?,
     })
 }
 

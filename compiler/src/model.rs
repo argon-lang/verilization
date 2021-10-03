@@ -147,6 +147,7 @@ pub enum ModelError {
 	DuplicateType(QualifiedName),
 	DuplicateVersion(QualifiedName, BigUint),
 	DuplicateField(QualifiedName, BigUint, String),
+	DuplicateMethod(QualifiedName, BigUint, String),
 	DuplicateLiteralInteger(QualifiedName),
 	DuplicateLiteralString(QualifiedName),
 	DuplicateLiteralSequence(QualifiedName),
@@ -154,6 +155,8 @@ pub enum ModelError {
 	DuplicateLiteralRecord(QualifiedName),
 	DuplicateLiteralRecordField(QualifiedName, String),
 	DuplicateFieldValue(String),
+	DuplicateTypeParameter(QualifiedName, Option<(BigUint, String)>, String),
+	DuplicateMethodParameter(QualifiedName, BigUint, String, String),
 }
 
 impl fmt::Display for ModelError {
@@ -163,6 +166,7 @@ impl fmt::Display for ModelError {
 			ModelError::DuplicateType(name) => write!(f, "Cannot declare type {}. Name is already defined.", name),
 			ModelError::DuplicateVersion(name, version) => write!(f, "Version {} of type {} is already defined.", version, name),
 			ModelError::DuplicateField(name, version, field) => write!(f, "Version {} of type {} already has a field named {}.", version, name, field),
+			ModelError::DuplicateMethod(name, version, method) => write!(f, "Version {} of interface {} already has a method named {}.", version, name, method),
 			ModelError::DuplicateLiteralInteger(type_name) => write!(f, "Type {} already has an integer literal.", type_name),
 			ModelError::DuplicateLiteralString(type_name) => write!(f, "Type {} already has a string literal.", type_name),
 			ModelError::DuplicateLiteralSequence(type_name) => write!(f, "Type {} already has a sequence literal.", type_name),
@@ -170,6 +174,9 @@ impl fmt::Display for ModelError {
 			ModelError::DuplicateLiteralRecord(type_name) => write!(f, "Type {} already has a record literal.", type_name),
 			ModelError::DuplicateLiteralRecordField(type_name, field) => write!(f, "Record literal for type {} already has a field named {}.", type_name, field),
 			ModelError::DuplicateFieldValue(name) => write!(f, "Record constant already has a field named {}.", name),
+			ModelError::DuplicateTypeParameter(type_name, None, param_name) => write!(f, "Duplicate type parameter {} in {}.", param_name, type_name),
+			ModelError::DuplicateTypeParameter(type_name, Some((version, method_name)), param_name) => write!(f, "Duplicate type parameter {} in method {} of {} version {}.", param_name, method_name, type_name, version),
+			ModelError::DuplicateMethodParameter(type_name, version, method_name, param_name) => write!(f, "Duplicate parameter {} in method {} of {} version {}.", param_name, method_name, type_name, version),
 		}
 	}
 }
@@ -358,7 +365,7 @@ impl <'a> Named<'a, Constant> {
 			model: self.model,
 			current_pkg: Some(&self.name.package),
 			imports: Some(&self.value.imports),
-			type_params: None,
+			type_params: Vec::new(),
 		}
 	}
 
@@ -428,15 +435,15 @@ impl <'a> TypeVersionDefinitionBuilder<'a> {
 
 /// The result of looking up a version of a type.
 #[derive(Debug)]
-pub struct TypeVersionInfo<'a> {
+pub struct TypeVersionInfo<T> {
 	pub version: BigUint,
 	pub explicit_version: bool,
-	pub ver_type: &'a TypeVersionDefinition,
+	pub ver_type: T,
 
 	dummy: PhantomData<()>,
 }
 
-impl <'a> Clone for TypeVersionInfo<'a> {
+impl <T: Copy> Clone for TypeVersionInfo<T> {
 	fn clone(&self) -> Self {
 		TypeVersionInfo {
 			version: self.version.clone(),
@@ -504,7 +511,7 @@ impl <'a> Named<'a, VersionedTypeDefinitionData> {
 	}
 
 	/// Gets a version of this type.
-	pub fn versioned(self, version: &BigUint) -> Option<TypeVersionInfo<'a>> {
+	pub fn versioned(self, version: &BigUint) -> Option<TypeVersionInfo<&'a TypeVersionDefinition>> {
 		if version > &self.value.latest_version && !self.value.is_final {
 			None
 		}
@@ -569,7 +576,7 @@ impl <'a> Named<'a, VersionedTypeDefinitionData> {
 			model: self.model,
 			current_pkg: Some(&self.name.package),
 			imports: Some(&self.value.imports),
-			type_params: Some(&self.value.type_params),
+			type_params: vec!(&self.value.type_params),
 		}
 	}
 
@@ -726,7 +733,7 @@ impl <'a> Named<'a, ExternTypeDefinitionData> {
 			model: self.model,
 			current_pkg: Some(&self.name.package),
 			imports: Some(&self.value.imports),
-			type_params: Some(&self.value.type_params),
+			type_params: vec!(&self.value.type_params),
 		}
 	}
 
@@ -736,6 +743,266 @@ impl <'a> Named<'a, ExternTypeDefinitionData> {
 	}
 }
 
+pub struct ParameterInfo {
+	pub name: String,
+	pub param_type: Type,
+}
+
+pub struct OfInterface<'a, A> {
+	interface: Named<'a, InterfaceTypeDefinitionData>,
+	value: &'a A,
+}
+
+impl <'a, A> Clone for OfInterface<'a, A> {
+	fn clone(&self) -> Self {
+		OfInterface {
+			interface: self.interface,
+			value: self.value,
+		}
+	}
+}
+
+impl <'a, A> Copy for OfInterface<'a, A> {}
+
+impl <'a, A> OfInterface<'a, A> {
+	fn new(interface: Named<'a, InterfaceTypeDefinitionData>, value: &'a A) -> OfInterface<'a, A> {
+		OfInterface {
+			interface,
+			value,
+		}
+	}
+}
+
+pub struct InterfaceMethod {
+	type_params: Vec<String>,
+	parameters: Vec<ParameterInfo>,
+	return_type: Type,
+}
+
+pub struct InterfaceVersionDefinition {
+	methods: HashMap<String, InterfaceMethod>,
+}
+
+pub struct InterfaceTypeDefinitionData {
+	latest_version: BigUint,
+	imports: HashMap<String, QualifiedName>,
+	type_params: Vec<String>,
+	versions: HashMap<BigUint, InterfaceVersionDefinition>,
+	is_final: bool,
+}
+
+pub struct InterfaceMethodBuilder<'a> {
+	interface_name: &'a QualifiedName,
+	interface_version: &'a BigUint,
+	method_name: String,
+	type_param_names: HashSet<String>,
+	param_names: HashSet<String>,
+	method: &'a mut InterfaceMethod,
+}
+
+pub struct InterfaceVersionDefinitionBuilder<'a> {
+	name: &'a QualifiedName,
+	version: BigUint,
+	method_names: HashSet<String>,
+	ver: &'a mut InterfaceVersionDefinition,
+}
+
+pub struct InterfaceTypeDefinitionBuilder {
+	name: QualifiedName,
+	data: InterfaceTypeDefinitionData,
+}
+
+impl InterfaceTypeDefinitionBuilder {
+	pub fn new(latest_version: BigUint, name: QualifiedName, type_params: Vec<String>, is_final: bool, imports: HashMap<String, QualifiedName>) -> Self {
+		InterfaceTypeDefinitionBuilder {
+			name: name,
+			data: InterfaceTypeDefinitionData {
+				latest_version,
+				imports,
+				type_params,
+				versions: HashMap::new(),
+				is_final,
+			},
+		}
+	}
+
+	pub fn add_version<'a>(&'a mut self, version: BigUint) -> Result<InterfaceVersionDefinitionBuilder<'a>, ModelError> {
+		match self.data.versions.entry(version.clone()) {
+			std::collections::hash_map::Entry::Occupied(_) => Err(ModelError::DuplicateVersion(self.name.clone(), version)),
+			std::collections::hash_map::Entry::Vacant(entry) => {
+				let ver_type = entry.insert(InterfaceVersionDefinition {
+					methods: HashMap::new(),
+				});
+
+				Ok(InterfaceVersionDefinitionBuilder {
+					name: &self.name,
+					version: version,
+					method_names: HashSet::new(),
+					ver: ver_type,
+				})
+			}
+		}
+	}
+}
+
+impl <'a> InterfaceVersionDefinitionBuilder<'a> {
+	pub fn add_method<'b>(&'b mut self, name: String, return_type: Type) -> Result<InterfaceMethodBuilder<'b>, ModelError> where 'a : 'b {
+		if self.method_names.insert(name.to_ascii_uppercase()) {
+			Ok(match self.ver.methods.entry(name) {
+				std::collections::hash_map::Entry::Occupied(_) => panic!("Should not be occupied since name was missing from method_names."),
+				std::collections::hash_map::Entry::Vacant(entry) => {
+					let name = entry.key().clone();
+					let method = entry.insert(InterfaceMethod {
+						type_params: Vec::new(),
+						parameters: Vec::new(),
+						return_type: return_type,
+					});
+
+					InterfaceMethodBuilder {
+						interface_name: self.name,
+						interface_version: &self.version,
+						method_name: name,
+						type_param_names: HashSet::new(),
+						param_names: HashSet::new(),
+						method,
+					}
+				}
+			})
+		}
+		else {
+			Err(ModelError::DuplicateMethod(self.name.clone(), self.version.clone(), name))
+		}
+	}
+}
+
+impl <'a> InterfaceMethodBuilder<'a> {
+	pub fn add_type_param(&mut self, name: String) -> Result<(), ModelError> {
+		if self.type_param_names.insert(name.to_ascii_uppercase()) {
+			self.method.type_params.push(name);
+			Ok(())
+		}
+		else {
+			Err(ModelError::DuplicateTypeParameter(self.interface_name.clone(), Some((self.interface_version.clone(), self.method_name.clone())), name))
+		}
+	}
+
+	pub fn add_param(&mut self, param: ParameterInfo) -> Result<(), ModelError> {
+		if self.param_names.insert(param.name.to_ascii_uppercase()) {
+			self.method.parameters.push(param);
+			Ok(())
+		}
+		else {
+			Err(ModelError::DuplicateMethodParameter(self.interface_name.clone(), self.interface_version.clone(), self.method_name.clone(), param.name))
+		}
+	}
+}
+
+impl <'a> Named<'a, InterfaceTypeDefinitionData> {
+	/// Gets whether this interface is final.
+	pub fn is_final(&self) -> bool {
+		self.value.is_final
+	}
+
+	/// Gets a version of this interface.
+	pub fn versioned(self, version: &BigUint) -> Option<TypeVersionInfo<OfInterface<'a, InterfaceVersionDefinition>>> {
+		if version > &self.value.latest_version && !self.value.is_final {
+			None
+		}
+		else {
+			self.value.versions.iter()
+				.filter(|(ver, _)| ver <= &version)
+				.max_by_key(|(ver, _)| ver.clone())
+				.map(|(actual_ver, ver_type)| {
+
+					let ver =
+						if self.value.is_final && !self.value.versions.keys().any(|other_ver| other_ver > actual_ver) {
+							actual_ver.clone()
+						}
+						else {
+							version.clone()
+						};
+
+					TypeVersionInfo {
+						version: ver,
+						explicit_version: version == actual_ver,
+						ver_type: OfInterface::new(self, ver_type),
+						dummy: PhantomData {},
+					}
+				})
+		}
+	}
+
+	/// Finds the last explicitly defined version of this interface.
+	pub fn last_explicit_version(self) -> Option<&'a BigUint> {
+		self.value.versions.keys().max()
+	}
+
+	/// Iterates over the versions of this interface.
+	/// 
+	/// Starts at the first version of the interface.
+	/// If the interface is final, ends at the last explicitly defined version.
+	/// If the interface is not final, ends at the latest version of the model.
+	pub fn versions(self) -> InterfaceVersionIterator<'a> {
+		InterfaceVersionIterator {
+			type_def: self,
+			version: BigUint::one(),
+			max_version:
+				if self.value.is_final {
+					self.last_explicit_version().map(|ver| ver.clone()).unwrap_or(BigUint::zero())
+				}
+				else {
+					self.value.latest_version.clone()
+				},
+
+			last_seen_version: None,
+		}
+	}
+
+	/// Gets a scope for this interface.
+	pub fn scope(self) -> Scope<'a> {
+		Scope {
+			model: self.model,
+			current_pkg: Some(&self.name.package),
+			imports: Some(&self.value.imports),
+			type_params: vec!(&self.value.type_params),
+		}
+	}
+
+	/// Gets the type parameters of the interface.
+	pub fn type_params(self) -> &'a Vec<String> {
+		&self.value.type_params
+	}
+}
+
+impl <'a> OfInterface<'a, InterfaceVersionDefinition> {
+	pub fn methods(self) -> HashMap<&'a String, OfInterface<'a, InterfaceMethod>> {
+		let mut result = HashMap::new();
+		for (name, method) in &self.value.methods {
+			result.insert(name, OfInterface::new(self.interface, method));
+		}
+		result
+	}
+}
+
+impl <'a> OfInterface<'a, InterfaceMethod> {
+	pub fn type_params(self) -> &'a Vec<String> {
+		&self.value.type_params
+	}
+
+	pub fn parameters(self) -> &'a Vec<ParameterInfo> {
+		&self.value.parameters
+	}
+
+	pub fn return_type(self) -> &'a Type {
+		&self.value.return_type
+	}
+
+	pub fn scope(self) -> Scope<'a> {
+		let mut scope = self.interface.scope();
+		scope.type_params.push(&self.value.type_params);
+		scope
+	}
+}
 
 
 /// A definition of a type.
@@ -743,6 +1010,7 @@ pub enum TypeDefinition {
 	StructType(VersionedTypeDefinitionData),
 	EnumType(VersionedTypeDefinitionData),
 	ExternType(ExternTypeDefinitionData),
+	InterfaceType(InterfaceTypeDefinitionData),
 }
 
 /// A named definition of a type.
@@ -751,6 +1019,7 @@ pub enum NamedTypeDefinition<'a> {
 	StructType(Named<'a, VersionedTypeDefinitionData>),
 	EnumType(Named<'a, VersionedTypeDefinitionData>),
 	ExternType(Named<'a, ExternTypeDefinitionData>),
+	InterfaceType(Named<'a, InterfaceTypeDefinitionData>),
 }
 
 impl <'a> NamedTypeDefinition<'a> {
@@ -760,6 +1029,7 @@ impl <'a> NamedTypeDefinition<'a> {
 			NamedTypeDefinition::StructType(t) => t.name,
 			NamedTypeDefinition::EnumType(t) => t.name,
 			NamedTypeDefinition::ExternType(t) => t.name,
+			NamedTypeDefinition::InterfaceType(t) => t.name,
 		}
 	}
 
@@ -769,6 +1039,7 @@ impl <'a> NamedTypeDefinition<'a> {
 			NamedTypeDefinition::StructType(t) => &t.value.type_params,
 			NamedTypeDefinition::EnumType(t) => &t.value.type_params,
 			NamedTypeDefinition::ExternType(t) => &t.value.type_params,
+			NamedTypeDefinition::InterfaceType(t) => &t.value.type_params,
 		}
 	}
 
@@ -783,6 +1054,7 @@ impl <'a> NamedTypeDefinition<'a> {
 			NamedTypeDefinition::StructType(t) => t.versioned(version).is_some(),
 			NamedTypeDefinition::EnumType(t) => t.versioned(version).is_some(),
 			NamedTypeDefinition::ExternType(_) => true,
+			NamedTypeDefinition::InterfaceType(t) => t.versioned(version).is_some(),
 		}
 	}
 
@@ -792,6 +1064,7 @@ impl <'a> NamedTypeDefinition<'a> {
 			NamedTypeDefinition::StructType(t) => t.scope(),
 			NamedTypeDefinition::EnumType(t) => t.scope(),
 			NamedTypeDefinition::ExternType(t) => t.scope(),
+			NamedTypeDefinition::InterfaceType(t) => t.scope(),
 		}
 	}
 }
@@ -817,7 +1090,7 @@ pub struct Scope<'a> {
 	model: &'a Verilization,
 	current_pkg: Option<&'a PackageName>,
 	imports: Option<&'a HashMap<String, QualifiedName>>,
-	type_params: Option<&'a Vec<String>>,
+	type_params: Vec<&'a Vec<String>>,
 }
 
 impl <'a> Scope<'a> {
@@ -826,13 +1099,13 @@ impl <'a> Scope<'a> {
 			model: model,
 			current_pkg: None,
 			imports: None,
-			type_params: None,
+			type_params: Vec::new(),
 		}
 	}
 
 	pub fn lookup(&self, mut name: QualifiedName) -> ScopeLookup {
 		if name.package.package.is_empty() {
-			if let Some(type_params) = self.type_params {
+			for type_params in &self.type_params {
 				if type_params.contains(&name.name) {
 					return ScopeLookup::TypeParameter(name.name);
 				}
@@ -882,11 +1155,14 @@ impl <'a> Scope<'a> {
 		name
 	}
 
-	pub fn type_params(&self) -> Vec<String> {
-		match self.type_params {
-			Some(params) => params.clone(),
-			None => Vec::new(),
+	pub fn type_params<'b>(&'b self) -> Vec<&'b String> where 'a : 'b {
+		let mut result = Vec::new();
+		for param_list in &self.type_params {
+			for type_param in *param_list {
+				result.push(type_param);
+			}
 		}
+		result
 	}
 }
 
@@ -961,6 +1237,19 @@ impl Verilization {
 		}
 	}
 
+	/// Adds an interface to the model.
+	pub fn add_interface(&mut self, type_def: InterfaceTypeDefinitionBuilder) -> Result<(), ModelError> {
+		let mut case_name = type_def.name.clone();
+		make_name_uppercase(&mut case_name);
+		if self.names.insert(case_name) {
+			self.type_definitions.insert(type_def.name, TypeDefinition::InterfaceType(type_def.data));
+			Ok(())
+		}
+		else {
+			Err(ModelError::DuplicateType(type_def.name))
+		}
+	}
+
 	/// Finds a constant in the model.
 	pub fn get_constant<'a>(&'a self, name: &QualifiedName) -> Option<Named<'a, Constant>> {
 		let (name, constant) = self.constants.get_key_value(name)?;
@@ -976,6 +1265,7 @@ impl Verilization {
 			TypeDefinition::StructType(t) => NamedTypeDefinition::StructType(Named::new(self, name, t)),
 			TypeDefinition::EnumType(t) => NamedTypeDefinition::EnumType(Named::new(self, name, t)),
 			TypeDefinition::ExternType(t) => NamedTypeDefinition::ExternType(Named::new(self, name,  t)),
+			TypeDefinition::InterfaceType(t) => NamedTypeDefinition::InterfaceType(Named::new(self, name, t)),
 		})
 	}
 
@@ -995,6 +1285,7 @@ impl Verilization {
 			TypeDefinition::StructType(type_def) => self.add_struct_type(VersionedTypeDefinitionBuilder { name: name, t: type_def }),
 			TypeDefinition::EnumType(type_def) => self.add_enum_type(VersionedTypeDefinitionBuilder { name: name, t: type_def }),
 			TypeDefinition::ExternType(type_def) => self.add_extern_type(ExternTypeDefinitionBuilder { name: name, t: type_def, has_integer: false, has_string: false, has_sequence: false, cases: HashSet::new(), has_record: false, }),
+			TypeDefinition::InterfaceType(type_def) => self.add_interface(InterfaceTypeDefinitionBuilder { name: name, data: type_def })
 		})?;
 
 		Ok(())
@@ -1087,6 +1378,7 @@ impl <'a> Iterator for TypeIterator<'a> {
 			TypeDefinition::StructType(t) => NamedTypeDefinition::StructType(Named::new(self.model, name, t)),
 			TypeDefinition::EnumType(t) => NamedTypeDefinition::EnumType(Named::new(self.model, name, t)),
 			TypeDefinition::ExternType(t) => NamedTypeDefinition::ExternType(Named::new(self.model, name, t)),
+			TypeDefinition::InterfaceType(t) => NamedTypeDefinition::InterfaceType(Named::new(self.model, name, t))
 		})
 	}
 }
@@ -1099,7 +1391,7 @@ pub struct TypeVersionIterator<'a> {
 }
 
 impl <'a> Iterator for TypeVersionIterator<'a> {
-	type Item = TypeVersionInfo<'a>;
+	type Item = TypeVersionInfo<&'a TypeVersionDefinition>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		while self.version <= self.max_version {
@@ -1120,6 +1412,44 @@ impl <'a> Iterator for TypeVersionIterator<'a> {
 					version: version,
 					explicit_version: false,
 					ver_type: ver_type,
+					dummy: PhantomData {},
+				});
+			}
+		}
+
+		None
+	}
+}
+
+pub struct InterfaceVersionIterator<'a> {
+	type_def: Named<'a, InterfaceTypeDefinitionData>,
+	version: BigUint,
+	max_version: BigUint,
+	last_seen_version: Option<&'a InterfaceVersionDefinition>,
+}
+
+impl <'a> Iterator for InterfaceVersionIterator<'a> {
+	type Item = TypeVersionInfo<OfInterface<'a, InterfaceVersionDefinition>>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		while self.version <= self.max_version {
+			let version = self.version.clone();
+			self.version += BigUint::one();
+			
+			if let Some(ver_type) = self.type_def.value.versions.get(&version) {
+				self.last_seen_version = Some(ver_type);
+				return Some(TypeVersionInfo {
+					version: version,
+					explicit_version: true,
+					ver_type: OfInterface::new(self.type_def, ver_type),
+					dummy: PhantomData {},
+				});
+			}
+			else if let Some(ver_type) = self.last_seen_version {
+				return Some(TypeVersionInfo {
+					version: version,
+					explicit_version: false,
+					ver_type: OfInterface::new(self.type_def, ver_type),
 					dummy: PhantomData {},
 				});
 			}

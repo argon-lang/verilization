@@ -17,6 +17,7 @@ pub enum TypeCheckError {
     ArityMismatch(usize, usize),
     TypeNotFinal(QualifiedName),
     DuplicateLiteral(QualifiedName),
+    InterfaceTypeNotAllowed(QualifiedName),
 }
 
 struct TypeCheck<'model> {
@@ -114,6 +115,27 @@ impl <'model> TypeCheck<'model> {
         }
     }
 
+    fn check_type_excludes_interfaces(&self, t: &Type) -> Result<(), TypeCheckError> {
+        match self.scope.lookup(t.name.clone()) {
+            ScopeLookup::NamedType(name) => {
+                match self.model.get_type(&name) {
+                    Some(NamedTypeDefinition::InterfaceType(..)) => return Err(TypeCheckError::InterfaceTypeNotAllowed(name)),
+                    Some(_) => (),
+                    None => return Err(TypeCheckError::TypeNotDefined(name)),
+                };
+
+                for arg in &t.args {
+                    self.check_type_excludes_interfaces(&arg)?;
+                }
+
+                Ok(())
+            },
+            ScopeLookup::TypeParameter(_) => {
+                Ok(())
+            }
+        }
+    }
+
     fn check_is_final(&self, version: &BigUint, t: &Type) -> Result<bool, TypeCheckError> {
         Ok(match self.scope.lookup(t.name.clone()) {
             ScopeLookup::NamedType(name) => {
@@ -129,6 +151,16 @@ impl <'model> TypeCheck<'model> {
                     },
 
                     NamedTypeDefinition::ExternType(_) => (),
+
+                    NamedTypeDefinition::InterfaceType(type_def) => {
+                        if !type_def.is_final() {
+                            return Ok(false);
+                        }
+                        
+                        if !(type_def.last_explicit_version().ok_or_else(|| TypeCheckError::CouldNotFindLastVersion(name.clone()))? <= version) {
+                            return Ok(false);
+                        }
+                    },
                 }
 
                 for arg in &t.args {
@@ -250,6 +282,8 @@ impl <'model> TypeCheck<'model> {
                 
         }
     }
+
+
     
 }
 
@@ -262,6 +296,7 @@ fn type_check_versioned_type<'model>(model: &'model Verilization, t: Named<'mode
     for ver in t.versions() {
         for (_, field) in ver.ver_type.fields() {
             tc.check_type(&ver.version, &field.field_type)?;
+            tc.check_type_excludes_interfaces(&field.field_type)?;
         }
     }
 
@@ -323,6 +358,42 @@ fn type_check_extern_type<'model>(model: &'model Verilization, t: Named<'model, 
     Ok(())
 }
 
+fn each_method_sig_type(method: OfInterface<InterfaceMethod>, f: impl Fn(&Type) -> Result<(), TypeCheckError>) -> Result<(), TypeCheckError> {
+    for param in method.parameters() {
+        f(&param.param_type)?;
+    }
+    
+    f(method.return_type())
+}
+
+fn type_check_interface_type<'model>(model: &'model Verilization, t: Named<'model, InterfaceTypeDefinitionData>) -> Result<(), TypeCheckError> {
+    let tc = TypeCheck {
+        model: model,
+        scope: t.scope(),
+    };
+
+    for ver in t.versions() {
+        for (_, method) in ver.ver_type.methods() {
+            each_method_sig_type(method, |sig_type| tc.check_type(&ver.version, sig_type))?;
+        }
+    }
+
+    if t.is_final() {
+        if let Some(last_ver) = t.versions().last() {
+            for (_, method) in last_ver.ver_type.methods() {
+                each_method_sig_type(method, |sig_type| {
+                    if !tc.check_is_final(&last_ver.version, sig_type)? {
+                        return Err(TypeCheckError::TypeNotFinal(t.name().clone()))
+                    }
+                    Ok(())
+                })?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn type_check_constant<'model>(model: &'model Verilization, c: Named<'model, Constant>) -> Result<(), TypeCheckError> {
     let tc = TypeCheck {
         model: model,
@@ -344,6 +415,7 @@ pub fn type_check_verilization(model: &Verilization) -> Result<(), TypeCheckErro
         match t {
             NamedTypeDefinition::StructType(t) | NamedTypeDefinition::EnumType(t) => type_check_versioned_type(model, t)?,
             NamedTypeDefinition::ExternType(t) => type_check_extern_type(model, t)?,
+            NamedTypeDefinition::InterfaceType(t) => type_check_interface_type(model, t)?,
         }
     }
 

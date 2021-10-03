@@ -7,7 +7,7 @@ final struct Int32Wrap {
     }
 }
 
-final struct Box(T) {
+final struct Box<T> {
     version 1 {
         value: T;
     }

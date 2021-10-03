@@ -19,6 +19,7 @@ pub enum VersionedTypeKind {
 pub enum LangType<'model> {
 	Versioned(VersionedTypeKind, &'model model::QualifiedName, BigUint, Vec<LangType<'model>>, LangVerTypeFields<'model>),
 	Extern(&'model model::QualifiedName, Vec<LangType<'model>>, LangExternTypeLiterals<'model>),
+	Interface(&'model model::QualifiedName, BigUint, Vec<LangType<'model>>, LangInterfaceMethods<'model>),
 	TypeParameter(String),
 	Converter(Box<LangType<'model>>, Box<LangType<'model>>),
 	Codec(Box<LangType<'model>>),
@@ -56,8 +57,7 @@ impl <'model> LangType<'model> {
 				let t = match model.get_type(name) {
 					Some(model::NamedTypeDefinition::StructType(t)) => t,
 					Some(model::NamedTypeDefinition::EnumType(t)) => t,
-					Some(model::NamedTypeDefinition::ExternType(_)) => return true,
-					None => return false,
+					_ => panic!("Unexpected resolved type for given language type."),
 				};
 
 				t.is_final() &&
@@ -67,6 +67,17 @@ impl <'model> LangType<'model> {
 
 			LangType::Extern(_, args, _) =>
 				args.iter().all(|arg| arg.is_final_in_version(version, model)),
+
+			LangType::Interface(name, _, args, _) => {
+				match model.get_type(name) {
+					Some(model::NamedTypeDefinition::InterfaceType(t)) => {
+						return t.is_final() &&
+							t.last_explicit_version().iter().all(|last_ver| last_ver <= &version) &&
+							args.iter().all(|arg| arg.is_final_in_version(version, model))
+					},
+					_ => panic!("Unexpected resolved type for given language type."),
+				}
+			},
 
 			LangType::TypeParameter(_) => true,
 
@@ -101,11 +112,23 @@ pub enum LangLiteral<'model> {
 	Record(Vec<LangField<'model>>),
 }
 
+pub struct LangInterfaceMethod<'model> {
+	pub name: &'model String,
+	pub type_params: &'model Vec<String>,
+	pub parameters: Vec<LangInterfaceMethodParameter<'model>>,
+	pub return_type: LangType<'model>,
+}
+
+pub struct LangInterfaceMethodParameter<'model> {
+	pub name: &'model String,
+	pub param_type: LangType<'model>,
+}
+
 pub struct LangVerTypeFields<'model> {
 	model: &'model model::Verilization,
 	type_args: HashMap<String, LangType<'model>>,
 	type_def: Named<'model, model::VersionedTypeDefinitionData>,
-	ver_type: model::TypeVersionInfo<'model>,
+	ver_type: model::TypeVersionInfo<&'model model::TypeVersionDefinition>,
 }
 
 impl <'model> Clone for LangVerTypeFields<'model> {
@@ -200,6 +223,60 @@ impl <'model> LangExternTypeLiterals<'model> {
 	}
 }
 
+pub struct LangInterfaceMethods<'model> {
+	model: &'model model::Verilization,
+	type_args: HashMap<String, LangType<'model>>,
+	type_def: Named<'model, model::InterfaceTypeDefinitionData>,
+	ver_type: model::TypeVersionInfo<model::OfInterface<'model, model::InterfaceVersionDefinition>>,
+}
+
+impl <'model> Clone for LangInterfaceMethods<'model> {
+	fn clone(&self) -> Self {
+		LangInterfaceMethods {
+			model: self.model,
+			type_args: self.type_args.clone(),
+			type_def: self.type_def,
+			ver_type: self.ver_type.clone(),
+		}
+	}
+}
+
+impl <'model> std::fmt::Debug for LangInterfaceMethods<'model> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+		f.debug_struct("LangInterfaceMethods").finish()
+	}
+}
+
+impl <'model> LangInterfaceMethods<'model> {
+	pub fn build(self) -> Result<Vec<LangInterfaceMethod<'model>>, GeneratorError> {
+		let mut methods = Vec::new();
+		
+		for (name, method) in self.ver_type.ver_type.methods() {
+			let scope = method.scope();
+
+			let mut parameters = Vec::new();
+			for param in method.parameters() {
+				let param_type = build_type_impl(self.model, &self.ver_type.version, &param.param_type, &scope, &self.type_args)?;
+				parameters.push(LangInterfaceMethodParameter {
+					name: &param.name,
+					param_type,
+				});
+			}
+
+			let return_type = build_type_impl(self.model, &self.ver_type.version, method.return_type(), &scope, &self.type_args)?;
+
+			methods.push(LangInterfaceMethod {
+				name,
+				type_params: method.type_params(),
+				parameters,
+				return_type,
+			});
+		}
+
+		Ok(methods)
+	}
+}
+
 
 #[derive(Debug)]
 pub enum Operation {
@@ -216,7 +293,8 @@ pub enum Operation {
 #[derive(Debug)]
 pub enum OperationTarget<'model> {
 	VersionedType(&'model model::QualifiedName, BigUint),
-	ExternType(&'model model::QualifiedName)
+	ExternType(&'model model::QualifiedName),
+	InterfaceType(&'model model::QualifiedName, BigUint),
 }
 
 #[derive(Debug)]
@@ -323,6 +401,7 @@ fn requires_conversion<'model, G: Generator<'model>>(gen: &G, t: &model::Type, p
 			},
 
 			Some(model::NamedTypeDefinition::ExternType(_)) => false,
+			Some(model::NamedTypeDefinition::InterfaceType(_)) => false,
 
 			None => true, // Error condition, assume conversion required. Should fail when determining the conversion.
 		},
@@ -396,12 +475,30 @@ fn build_type_impl<'model>(model: &'model model::Verilization, version: &BigUint
 					.collect::<HashMap<_, _>>();
 
 				let literals = LangExternTypeLiterals {
-					model: model,
+					model,
 					type_args: lang_args_map,
-					type_def: type_def,
+					type_def,
 				};
 
 				LangType::Extern(type_def.name(), lang_args, literals)
+			},
+
+			model::NamedTypeDefinition::InterfaceType(type_def) => {
+				let lang_args_map = type_def.type_params().clone().into_iter()
+					.zip(lang_args.clone().into_iter())
+					.collect::<HashMap<_, _>>();
+
+				let ver_type = type_def.versioned(version).ok_or_else(|| GeneratorError::CouldNotFindVersion(name, version.clone()))?;
+				let type_ver = ver_type.version.clone();
+
+				let methods = LangInterfaceMethods {
+					model,
+					type_args: lang_args_map,
+					type_def,
+					ver_type,
+				};
+
+				LangType::Interface(type_def.name(), type_ver, lang_args, methods)
 			},
 		},
 		model::ScopeLookup::TypeParameter(name) => {
@@ -435,6 +532,8 @@ fn is_valid_integer_for_type(n: &BigInt, literals: LangExternTypeLiterals) -> Re
 	}))
 }
 
+const CONNECTION_PARAM_NAME: &'static str = "connection";
+
 pub trait Generator<'model> : Sized {
 	type Lang: GeneratorNameMapping;
 
@@ -443,7 +542,7 @@ pub trait Generator<'model> : Sized {
 
 
 	fn build_type<'gen>(&'gen self, version: &BigUint, t: &model::Type) -> Result<LangType<'model>, GeneratorError> {
-		let type_args = self.scope().type_params().into_iter().map(|param| (param.clone(), LangType::TypeParameter(param))).collect::<HashMap<_, _>>();
+		let type_args = self.scope().type_params().into_iter().map(|param| (param.clone(), LangType::TypeParameter(param.clone()))).collect::<HashMap<_, _>>();
 
 		build_type_impl(self.model(), version, t, self.scope(), &type_args)
 	}
@@ -467,6 +566,19 @@ pub trait Generator<'model> : Sized {
 				LangExpr::InvokeOperation(
 					Operation::TypeCodec,
 					OperationTarget::ExternType(name),
+					args,
+					codec_args,
+				)
+			},
+
+			LangType::Interface(name, version, args, _) => {
+				let codec_args = vec!(
+					LangExpr::Identifier(CONNECTION_PARAM_NAME.to_string())
+				);
+
+				LangExpr::InvokeOperation(
+					Operation::TypeCodec,
+					OperationTarget::InterfaceType(name, version),
 					args,
 					codec_args,
 				)
@@ -521,6 +633,8 @@ pub trait Generator<'model> : Sized {
 						operation = Operation::FinalTypeConverter;
 						target = OperationTarget::ExternType(named_type_def.name());
 					},
+
+					model::NamedTypeDefinition::InterfaceType(_) => panic!("Cannot convert interface type to newer version."),
 				};
 
 				LangExpr::InvokeOperation(
@@ -595,7 +709,8 @@ pub trait Generator<'model> : Sized {
 					)
 				},
 				LangType::Versioned(_, type_name, ..) => return Err(GeneratorError::TypeCannotBeSequence(type_name.clone())),
-				LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForConstant),
+				LangType::Interface(..) | LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) =>
+					return Err(GeneratorError::InvalidTypeForConstant),
 			},
 			
 			model::ConstantValue::Case(case_name, mut args) => match t {
@@ -629,7 +744,8 @@ pub trait Generator<'model> : Sized {
 				},
 
 				LangType::Versioned(VersionedTypeKind::Struct, ..) => return Err(GeneratorError::RecordLiteralNotForStruct),
-				LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForConstant),
+				LangType::Interface(..) | LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) =>
+					return Err(GeneratorError::InvalidTypeForConstant),
 			},
 			
 			model::ConstantValue::Record(record) => match t {
@@ -676,7 +792,7 @@ pub trait Generator<'model> : Sized {
 
 				LangType::Versioned(VersionedTypeKind::Enum, ..) => return Err(GeneratorError::InvalidTypeForConstant),
 				LangType::TypeParameter(_) => return Err(GeneratorError::InvalidTypeForConstant),
-				LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForConstant),
+				LangType::Interface(..) | LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForConstant),
 			},
 			model::ConstantValue::Constant(name) => {
 				match self.scope().lookup(name) {
@@ -838,7 +954,7 @@ pub trait VersionedTypeGenerator<'model> : Generator<'model> {
 	}
 }
 
-fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_kind: VersionedTypeKind, ver_type: &model::TypeVersionInfo<'model>, prev_ver: &BigUint) -> Result<OperationInfo<'model>, GeneratorError> where
+fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_kind: VersionedTypeKind, ver_type: &model::TypeVersionInfo<&'model model::TypeVersionDefinition>, prev_ver: &BigUint) -> Result<OperationInfo<'model>, GeneratorError> where
 	Gen : VersionedTypeGenerator<'model>
 {
 	let version = &ver_type.version;
@@ -1098,13 +1214,13 @@ impl <'model, Lang: GeneratorNameMapping> Generator<'model> for ExternTypeChecke
 
 
 
-
 pub trait GeneratorFactory<'model> {
 	type ConstGen: ConstGenerator<'model>;
 	type VersionedTypeGen: VersionedTypeGenerator<'model>;
 
 	fn create_constant_generator(&self, constant: Named<'model, model::Constant>) -> Result<Option<Self::ConstGen>, GeneratorError>;
-	fn create_versioned_type_generator(&self, t: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Option<Self::ConstGen>, GeneratorError>;
+	fn create_versioned_type_generator(&self, t: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Option<Self::VersionedTypeGen>, GeneratorError>;
+	fn create_interface_type_generator(&self, t: Named<'model, model::InterfaceTypeDefinitionData>) -> Result<Option<Self::VersionedTypeGen>, GeneratorError>;
 }
 
 pub trait GeneratorFactoryGenerate<'model> {
@@ -1153,6 +1269,11 @@ impl <'model, TImpl: GeneratorFactory<'model> + GeneratorNameMapping> GeneratorF
 						}
 					}
 				},
+				model::NamedTypeDefinition::InterfaceType(t) => {
+					if let Some(mut gen) = self.create_interface_type_generator(t)? {
+						gen.generate()?;
+					}
+				}
 			}
 		}
 

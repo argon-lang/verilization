@@ -2,7 +2,7 @@ version 4;
 package genericsTest;
 
 
-enum Either(A, B) {
+enum Either<A, B> {
     version 1 {
         left: A;
         right: B;
@@ -15,7 +15,7 @@ enum Either(A, B) {
     }
 }
 
-struct Pair(A, B) {
+struct Pair<A, B> {
     version 1 {
         left: A;
         right: B;

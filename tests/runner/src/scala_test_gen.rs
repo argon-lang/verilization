@@ -126,6 +126,7 @@ impl TestGenerator for ScalaTestGenerator {
                 model::NamedTypeDefinition::StructType(t) => t,
                 model::NamedTypeDefinition::EnumType(t) => t,
                 model::NamedTypeDefinition::ExternType(_) => continue,
+                model::NamedTypeDefinition::InterfaceType(_) => continue,
             };
 
             let mut gen = ScalaTestCaseGen {

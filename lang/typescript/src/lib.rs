@@ -144,7 +144,7 @@ pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 
 	fn write_type(&mut self, t: &LangType<'model>) -> Result<(), GeneratorError> {
 		Ok(match t {	
-			LangType::Versioned(_, name, version, args, _) => {
+			LangType::Versioned(_, name, version, args, _) | LangType::Interface(name, version, args, _) => {
 				// Only use a qualifier if not a value of the current type.
 				if self.generator_element_name() != Some(name) {
 					self.write_import_name(name)?;
@@ -244,7 +244,7 @@ pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 			},
 			LangExpr::InvokeOperation(op, target, type_args, args) => {
 				match target {
-					OperationTarget::VersionedType(name, version) => {
+					OperationTarget::VersionedType(name, version) | OperationTarget::InterfaceType(name, version) => {
 						// Only use a qualifier if not a value of the current type.
 						if self.generator_element_name() != Some(name) {
 							self.write_import_name(name)?;
@@ -923,6 +923,7 @@ impl Language for TypeScriptLanguage {
 					type_gen.generate()?;		
 				},
 				model::NamedTypeDefinition::ExternType(_) => (),
+				model::NamedTypeDefinition::InterfaceType(..) => (),
 			}
 		}
 
