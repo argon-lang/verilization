@@ -1,7 +1,7 @@
 use verilization_compiler::{lang, model, util, for_sep};
 
 use model::Named;
-use lang::{GeneratorError, Language, OutputHandler};
+use lang::{GeneratorError, Language, LanguageOptions, LanguageOptionsBuilder, OutputHandler};
 use std::ffi::OsString;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -857,58 +857,11 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: model::Gen
 pub struct TypeScriptLanguage {}
 
 impl Language for TypeScriptLanguage {
-	type OptionsBuilder = TSOptionsBuilder;
 	type Options = TSOptions;
 
     fn name() -> &'static str {
         "typescript"
     }
-
-	fn empty_options() -> TSOptionsBuilder {
-		TSOptionsBuilder {
-			output_dir: None,
-			package_mapping: HashMap::new(),
-			library_mapping: HashMap::new(),
-		}
-	}
-
-	fn add_option(builder: &mut TSOptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError> {
-		if name == "out_dir" {
-			if builder.output_dir.is_some() {
-				return Err(GeneratorError::InvalidOptions(String::from("Output directory already specified")))
-			}
-
-			builder.output_dir = Some(value);
-			Ok(())
-		}
-		else if let Some(pkg) = name.strip_prefix("pkg:") {
-			let package = model::PackageName::from_str(pkg);
-
-			if builder.library_mapping.contains_key(&package) || builder.package_mapping.insert(package, value).is_some() {
-				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
-			}
-			Ok(())
-		}
-		else if let Some(pkg) = name.strip_prefix("lib:") {
-			let package = model::PackageName::from_str(pkg);
-
-			if builder.package_mapping.contains_key(&package) || builder.library_mapping.insert(package, value).is_some() {
-				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
-			}
-			Ok(())
-		}
-		else {
-			Err(GeneratorError::InvalidOptions(format!("Unknown option: {}", name)))
-		}
-	}
-
-	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
-		Ok(TSOptions {
-			output_dir: builder.output_dir.ok_or_else(|| GeneratorError::InvalidOptions(String::from("Output directory not specified")))?,
-			package_mapping: builder.package_mapping,
-			library_mapping: builder.library_mapping,
-		})
-	}
 
 	fn generate<Output: for<'output> OutputHandler<'output>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
 		for constant in model.constants() {
@@ -938,4 +891,56 @@ impl Language for TypeScriptLanguage {
 		Ok(())
 	}
 
+}
+
+impl LanguageOptions for TSOptions {
+	type Builder = TSOptionsBuilder;
+
+	fn build(builder: Self::Builder) -> Result<Self, GeneratorError> {
+		Ok(TSOptions {
+			output_dir: builder.output_dir.ok_or_else(|| GeneratorError::InvalidOptions(String::from("Output directory not specified")))?,
+			package_mapping: builder.package_mapping,
+			library_mapping: builder.library_mapping,
+		})
+	}
+}
+
+impl LanguageOptionsBuilder for TSOptionsBuilder {
+	fn empty() -> TSOptionsBuilder {
+		TSOptionsBuilder {
+			output_dir: None,
+			package_mapping: HashMap::new(),
+			library_mapping: HashMap::new(),
+		}
+	}
+
+	fn add(&mut self, name: &str, value: OsString) -> Result<(), GeneratorError> {
+		if name == "out_dir" {
+			if self.output_dir.is_some() {
+				return Err(GeneratorError::InvalidOptions(String::from("Output directory already specified")))
+			}
+
+			self.output_dir = Some(value);
+			Ok(())
+		}
+		else if let Some(pkg) = name.strip_prefix("pkg:") {
+			let package = model::PackageName::from_str(pkg);
+
+			if self.library_mapping.contains_key(&package) || self.package_mapping.insert(package, value).is_some() {
+				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
+			}
+			Ok(())
+		}
+		else if let Some(pkg) = name.strip_prefix("lib:") {
+			let package = model::PackageName::from_str(pkg);
+
+			if self.package_mapping.contains_key(&package) || self.library_mapping.insert(package, value).is_some() {
+				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
+			}
+			Ok(())
+		}
+		else {
+			Err(GeneratorError::InvalidOptions(format!("Unknown option: {}", name)))
+		}
+	}
 }

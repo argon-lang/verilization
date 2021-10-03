@@ -2,7 +2,7 @@ use verilization_compiler::*;
 
 use std::env;
 use std::ffi::OsString;
-use lang::{Language, LanguageRegistry, LanguageHandler};
+use lang::{Language, LanguageOptions, LanguageOptionsBuilder, LanguageRegistry, LanguageHandler};
 
 
 fn command_version() -> Result<i32, VError> {
@@ -33,7 +33,7 @@ impl <Args: Iterator<Item = OsString>> LanguageHandler for ParseGenerateCommand<
 
 	fn run<Lang: Language>(&mut self) -> Self::Result {
 		let mut input_files = Vec::new();
-		let mut lang_options = Lang::empty_options();
+		let mut lang_options = <<Lang::Options as LanguageOptions>::Builder as LanguageOptionsBuilder>::empty();
 	
 	
 		while let Some(arg) = self.args.next() {
@@ -51,7 +51,7 @@ impl <Args: Iterator<Item = OsString>> LanguageHandler for ParseGenerateCommand<
 				arg => {
 					if let Some(option) = arg.strip_prefix("-o:") {
 						if let Some(value) = self.args.next() {
-							Lang::add_option(&mut lang_options, option, value)?;
+							lang_options.add(option, value)?;
 						}
 						else {
 							println!("Missing value for option {}", option);
@@ -66,7 +66,7 @@ impl <Args: Iterator<Item = OsString>> LanguageHandler for ParseGenerateCommand<
 			}
 		}
 	
-		let lang_options = Lang::finalize_options(lang_options)?;
+		let lang_options = Lang::Options::build(lang_options)?;
 	
 		command_generate::<Lang>(input_files, lang_options)
 	}

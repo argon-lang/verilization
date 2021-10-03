@@ -54,27 +54,31 @@ pub trait OutputHandler<'state> {
 /// Defines a language supported by Verilization.
 pub trait Language {
 
-	/// An intermediate step for the language options.
-	type OptionsBuilder;
-
 	/// Finalized options.
-	type Options;
+	type Options : LanguageOptions;
 
 	/// Gets the name of the language.
 	fn name() -> &'static str;
-
-	/// Gets an option builder with no options set.
-	fn empty_options() -> Self::OptionsBuilder;
-
-	/// Sets an option.
-	fn add_option(builder: &mut Self::OptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError>;
-
-	/// Ensures that any required options have been set and finalizes the options.
-	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError>;
 	
 	/// Generates serialization code for the language.
 	fn generate<Output: for<'output> OutputHandler<'output>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError>;
 
+}
+
+pub trait LanguageOptions : Sized {
+	/// An intermediate step for the language options.
+	type Builder : LanguageOptionsBuilder;
+
+	/// Ensures that any required options have been set and creates the options.
+	fn build(builder: Self::Builder) -> Result<Self, GeneratorError>;
+}
+
+pub trait LanguageOptionsBuilder {
+	/// Gets an option builder with no options set.
+	fn empty() -> Self;
+
+	/// Sets an option.
+	fn add(&mut self, name: &str, value: OsString) -> Result<(), GeneratorError>;
 }
 
 pub trait LanguageHandler {

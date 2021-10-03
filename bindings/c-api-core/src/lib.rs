@@ -2,7 +2,7 @@
 //! Most notably for WebAssembly.
 
 use verilization_compiler::{lang, model, parser, load_all_models, VError, MemoryOutputHandler};
-use lang::{GeneratorError, Language, LanguageRegistry, LanguageHandler};
+use lang::{GeneratorError, Language, LanguageOptions, LanguageOptionsBuilder, LanguageRegistry, LanguageHandler};
 
 use std::ffi::{c_void, OsString};
 use std::collections::HashMap;
@@ -210,11 +210,11 @@ impl <'a, Output: for<'output> lang::OutputHandler<'output>> LanguageHandler for
     type Result = Result<(), GeneratorError>;
 
     fn run<Lang: Language>(&mut self) -> Self::Result {
-        let mut lang_options = Lang::empty_options();
+        let mut lang_options = <Lang::Options as LanguageOptions>::Builder::empty();
         for (name, value) in &self.options {
-            Lang::add_option(&mut lang_options, name, OsString::from(value))?;
+            lang_options.add(name, OsString::from(value))?;
         }
-        let lang_options = Lang::finalize_options(lang_options)?;
+        let lang_options = Lang::Options::build(lang_options)?;
     
         Lang::generate(self.verilization, lang_options, self.output)
     }

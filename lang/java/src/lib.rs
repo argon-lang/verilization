@@ -1,7 +1,7 @@
 use verilization_compiler::{model, lang, util, for_sep};
 
 use model::Named;
-use crate::lang::{GeneratorError, Language, OutputHandler};
+use crate::lang::{GeneratorError, Language, LanguageOptions, LanguageOptionsBuilder, OutputHandler};
 use std::ffi::OsString;
 use std::collections::HashMap;
 use std::io::Write;
@@ -847,75 +847,11 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: model::Gen
 pub struct JavaLanguage {}
 
 impl Language for JavaLanguage {
-	type OptionsBuilder = JavaOptionsBuilder;
 	type Options = JavaOptions;
 
     fn name() -> &'static str {
         "java"
     }
-
-	fn empty_options() -> JavaOptionsBuilder {
-		JavaOptionsBuilder {
-			output_dir: None,
-			package_mapping: HashMap::new(),
-			library_mapping: HashMap::new(),
-			extern_mapping: HashMap::new(),
-		}
-	}
-
-	fn add_option(builder: &mut JavaOptionsBuilder, name: &str, value: OsString) -> Result<(), GeneratorError> {
-		if name == "out_dir" {
-			if builder.output_dir.is_some() {
-				return Err(GeneratorError::InvalidOptions(String::from("Output directory already specified")))
-			}
-
-			builder.output_dir = Some(value);
-			Ok(())
-		}
-		else if let Some(pkg) = name.strip_prefix("pkg:") {
-			let package = model::PackageName::from_str(pkg);
-
-            let java_package = model::PackageName::from_str(value.to_str().unwrap());
-
-			if builder.library_mapping.contains_key(&package) || builder.package_mapping.insert(package, java_package).is_some() {
-				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
-			}
-			Ok(())
-		}
-		else if let Some(pkg) = name.strip_prefix("lib:") {
-			let package = model::PackageName::from_str(pkg);
-
-            let java_package = model::PackageName::from_str(value.to_str().unwrap());
-
-			if builder.package_mapping.contains_key(&package) || builder.library_mapping.insert(package, java_package).is_some() {
-				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
-			}
-			Ok(())
-		}
-		else if let Some(extern_name) = name.strip_prefix("extern:") {
-			let qual_name = model::QualifiedName::from_str(extern_name).ok_or_else(|| GeneratorError::InvalidOptions(format!("Invalid extern type name: {}", extern_name)))?;
-
-			let java_name = model::QualifiedName::from_str(value.to_str().unwrap()).ok_or_else(|| GeneratorError::InvalidOptions(format!("Invalid Java type name: {}", value.to_str().unwrap())))?;
-
-			if builder.extern_mapping.insert(qual_name, java_name).is_some() {
-				return Err(GeneratorError::InvalidOptions(format!("Extern type already mapped: {}", extern_name)))
-			}
-
-			Ok(())
-		}
-		else {
-			Err(GeneratorError::InvalidOptions(format!("Unknown option: {}", name)))
-		}
-	}
-
-	fn finalize_options(builder: Self::OptionsBuilder) -> Result<Self::Options, GeneratorError> {
-		Ok(JavaOptions {
-			output_dir: builder.output_dir.ok_or_else(|| GeneratorError::InvalidOptions(String::from("Output directory not specified")))?,
-			package_mapping: builder.package_mapping,
-			library_mapping: builder.library_mapping,
-			extern_mapping: builder.extern_mapping,
-		})
-	}
 
 	fn generate<Output : for<'output> OutputHandler<'output>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
 		for constant in model.constants() {
@@ -937,4 +873,73 @@ impl Language for JavaLanguage {
 		Ok(())
 	}
 
+}
+
+impl LanguageOptions for JavaOptions {
+	type Builder = JavaOptionsBuilder;
+
+	fn build(builder: Self::Builder) -> Result<Self, GeneratorError> {
+		Ok(JavaOptions {
+			output_dir: builder.output_dir.ok_or_else(|| GeneratorError::InvalidOptions(String::from("Output directory not specified")))?,
+			package_mapping: builder.package_mapping,
+			library_mapping: builder.library_mapping,
+			extern_mapping: builder.extern_mapping,
+		})
+	}
+}
+
+impl LanguageOptionsBuilder for JavaOptionsBuilder {
+	fn empty() -> JavaOptionsBuilder {
+		JavaOptionsBuilder {
+			output_dir: None,
+			package_mapping: HashMap::new(),
+			library_mapping: HashMap::new(),
+			extern_mapping: HashMap::new(),
+		}
+	}
+
+	fn add(&mut self, name: &str, value: OsString) -> Result<(), GeneratorError> {
+		if name == "out_dir" {
+			if self.output_dir.is_some() {
+				return Err(GeneratorError::InvalidOptions(String::from("Output directory already specified")))
+			}
+
+			self.output_dir = Some(value);
+			Ok(())
+		}
+		else if let Some(pkg) = name.strip_prefix("pkg:") {
+			let package = model::PackageName::from_str(pkg);
+
+            let java_package = model::PackageName::from_str(value.to_str().unwrap());
+
+			if self.library_mapping.contains_key(&package) || self.package_mapping.insert(package, java_package).is_some() {
+				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
+			}
+			Ok(())
+		}
+		else if let Some(pkg) = name.strip_prefix("lib:") {
+			let package = model::PackageName::from_str(pkg);
+
+            let java_package = model::PackageName::from_str(value.to_str().unwrap());
+
+			if self.package_mapping.contains_key(&package) || self.library_mapping.insert(package, java_package).is_some() {
+				return Err(GeneratorError::InvalidOptions(format!("Package already mapped: {}", pkg)))
+			}
+			Ok(())
+		}
+		else if let Some(extern_name) = name.strip_prefix("extern:") {
+			let qual_name = model::QualifiedName::from_str(extern_name).ok_or_else(|| GeneratorError::InvalidOptions(format!("Invalid extern type name: {}", extern_name)))?;
+
+			let java_name = model::QualifiedName::from_str(value.to_str().unwrap()).ok_or_else(|| GeneratorError::InvalidOptions(format!("Invalid Java type name: {}", value.to_str().unwrap())))?;
+
+			if self.extern_mapping.insert(qual_name, java_name).is_some() {
+				return Err(GeneratorError::InvalidOptions(format!("Extern type already mapped: {}", extern_name)))
+			}
+
+			Ok(())
+		}
+		else {
+			Err(GeneratorError::InvalidOptions(format!("Unknown option: {}", name)))
+		}
+	}
 }
