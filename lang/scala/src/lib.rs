@@ -64,7 +64,6 @@ fn open_scala_file<'output, Output: OutputHandler<'output>>(options: &ScalaOptio
 
 pub trait ScalaGenerator<'model, 'opt> : Generator<'model> + GeneratorWithFile {
 	fn options(&self) -> &'opt ScalaOptions;
-	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model>;
 
 
 	fn scala_package(&self, package: &model::PackageName) -> Result<&'opt model::PackageName, GeneratorError> {
@@ -349,10 +348,6 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaGenerator<'mod
 	fn options(&self) -> &'opt ScalaOptions {
 		self.options
 	}
-
-	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model> {
-		self.constant.referenced_types()
-	}
 }
 
 impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'model> for ScalaConstGenerator<'model, 'opt, 'output, Output> {
@@ -400,16 +395,16 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaConstGenerator
 
 }
 
-struct ScalaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>> {
+struct ScalaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> {
 	options: &'opt ScalaOptions,
 	model: &'model model::Verilization,
 	file: Output::FileHandle,
-	type_def: Named<'model, model::VersionedTypeDefinitionData>,
+	type_def: Named<'model, TypeDef>,
 	scope: model::Scope<'model>,
 	indentation_level: u32,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model> for ScalaTypeGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> Generator<'model> for ScalaTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
 	type Lang = ScalaLanguage;
 
 	fn model(&self) -> &'model model::Verilization {
@@ -421,31 +416,29 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model> f
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> GeneratorWithFile for ScalaTypeGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> GeneratorWithFile for ScalaTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
 	type GeneratorFile = Output::FileHandle;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Indentation for ScalaTypeGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> Indentation for ScalaTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
 	fn indentation_size(&mut self) -> &mut u32 {
 		&mut self.indentation_level
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaGenerator<'model, 'opt> for ScalaTypeGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> ScalaGenerator<'model, 'opt> for ScalaTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
 	fn options(&self) -> &'opt ScalaOptions {
 		self.options
 	}
-
-	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model> {
-		self.type_def.referenced_types()
-	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenerator<'model> for ScalaTypeGenerator<'model, 'opt, 'output, Output> {
-	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: 'model + model::GeneratableType<'model>> TypeGenerator<'model> for ScalaTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
+	type TypeDefinition = TypeDef;
+
+	fn type_def(&self) -> Named<'model, TypeDef> {
 		self.type_def
 	}
 
@@ -556,10 +549,10 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenera
 
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ScalaTypeGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: model::GeneratableType<'model>> ScalaTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
 
 
-	fn open(model: &'model model::Verilization, options: &'opt ScalaOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> {
+	fn open(model: &'model model::Verilization, options: &'opt ScalaOptions, output: &'output mut Output, type_def: Named<'model, TypeDef>) -> Result<Self, GeneratorError> {
 		let file = open_scala_file(options, output, type_def.name())?;
 		Ok(ScalaTypeGenerator {
 			file: file,

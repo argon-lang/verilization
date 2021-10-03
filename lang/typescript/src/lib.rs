@@ -44,9 +44,11 @@ fn make_field_name(field_name: &str) -> String {
 }
 
 pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
+	type ReferencedTypeIterator : Iterator<Item = &'model model::QualifiedName>;
+
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName>;
 	fn options(&self) -> &TSOptions;
-	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model>;
+	fn referenced_types(&self) -> Self::ReferencedTypeIterator;
 	fn current_dir(&self) -> Result<PathBuf, GeneratorError>;
 
 	fn add_user_converter(&mut self, name: String);
@@ -383,6 +385,8 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> GeneratorWithFile f
 }
 
 impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSGenerator<'model> for TSConstGenerator<'model, 'opt, 'output, Output> {
+	type ReferencedTypeIterator = model::ReferencedTypeIteratorVersionedType<'model>;
+	
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName> {
 		Some(self.constant.name())
 	}
@@ -391,7 +395,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSGenerator<'model>
 		self.options
 	}
 
-	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model> {
+	fn referenced_types(&self) -> Self::ReferencedTypeIterator {
 		self.constant.referenced_types()
 	}
 
@@ -443,11 +447,11 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSConstGenerator<'m
 
 }
 
-struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>> {
+struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> {
 	file: Output::FileHandle,
 	model: &'model model::Verilization,
 	options: &'opt TSOptions,
-	type_def: Named<'model, model::VersionedTypeDefinitionData>,
+	type_def: Named<'model, TypeDef>,
 	scope: model::Scope<'model>,
 	versions: HashSet<BigUint>,
 	imported_user_converters: HashSet<String>,
@@ -455,7 +459,7 @@ struct TSTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>> {
 	indentation_level: u32,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> Generator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
 	type Lang = TypeScriptLanguage;
 
 	fn model(&self) -> &'model model::Verilization {
@@ -467,20 +471,22 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model> f
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> GeneratorWithFile for TSTypeGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> GeneratorWithFile for TSTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
 	type GeneratorFile = Output::FileHandle;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Indentation for TSTypeGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> Indentation for TSTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
 	fn indentation_size(&mut self) -> &mut u32 {
 		&mut self.indentation_level
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSGenerator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: model::GeneratableType<'model>> TSGenerator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
+	type ReferencedTypeIterator = TypeDef::ReferencedTypeIterator;
+
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName> {
 		Some(self.type_def.name())
 	}
@@ -489,7 +495,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSGenerator<'model>
 		self.options
 	}
 
-	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model> {
+	fn referenced_types(&self) -> Self::ReferencedTypeIterator {
 		self.type_def.referenced_types()
 	}
 
@@ -502,8 +508,10 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSGenerator<'model>
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenerator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output> {
-	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: 'model + model::GeneratableType<'model>> TypeGenerator<'model> for TSTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
+	type TypeDefinition = TypeDef;
+
+	fn type_def(&self) -> Named<'model, TypeDef> {
 		self.type_def
 	}
 
@@ -644,9 +652,9 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> VersionedTypeGenera
 
 
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> TSTypeGenerator<'model, 'opt, 'output, Output> {
+impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: model::GeneratableType<'model>> TSTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
 
-	fn open(model: &'model model::Verilization, options: &'opt TSOptions, output: &'output mut Output, type_def: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Self, GeneratorError> {
+	fn open(model: &'model model::Verilization, options: &'opt TSOptions, output: &'output mut Output, type_def: Named<'model, TypeDef>) -> Result<Self, GeneratorError> {
 		let file = open_ts_file(options, output, type_def.name())?;
 		Ok(TSTypeGenerator {
 			file: file,

@@ -45,10 +45,6 @@ impl <'model, 'opt, 'output, F: Write, R> JavaGenerator<'model, 'opt> for JavaTe
 	fn options(&self) -> &'opt JavaOptions {
 		self.options
 	}
-
-	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model> {
-		self.type_def.referenced_types()
-	}
 }
 
 impl <'model, 'opt, 'output, F: Write, R: Rng> JavaTestCaseGen<'model, 'opt, 'output, F, R> {

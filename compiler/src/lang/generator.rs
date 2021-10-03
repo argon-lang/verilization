@@ -4,7 +4,7 @@ use crate::model;
 use model::Named;
 
 use std::collections::HashMap;
-use num_bigint::{BigUint, BigInt, Sign};
+use num_bigint::{BigUint, BigInt};
 use num_traits::One;
 use std::io::Write;
 use std::marker::PhantomData;
@@ -858,104 +858,133 @@ pub trait ConstGenerator<'model> : Generator<'model> {
 
 }
 
-pub trait VersionedTypeGenerator<'model> : Generator<'model> {
-	fn type_def(&self) -> Named<'model, model::VersionedTypeDefinitionData>;
+pub trait TypeGenerator<'model> : Generator<'model> {
+	type TypeDefinition : 'model + model::GeneratableType<'model>;
+	fn type_def(&self) -> Named<'model, Self::TypeDefinition>;
 
 	fn write_header(&mut self) -> Result<(), GeneratorError>;
 	fn write_version_header(&mut self, t: LangType<'model>) -> Result<(), GeneratorError>;
 	fn write_operation(&mut self, operation: OperationInfo<'model>) -> Result<(), GeneratorError>;
 	fn write_version_footer(&mut self) -> Result<(), GeneratorError>;
 	fn write_footer(&mut self) -> Result<(), GeneratorError>;
+}
 
+pub trait TypeGeneratorOperations<'model, TypeDef : 'model + model::GeneratableType<'model>> : TypeGenerator<'model, TypeDefinition = TypeDef> {
+	type OperationsState;
 
+	fn prepare_operaitons_state(&self, t: &LangType<'model>, ver_type: &model::TypeVersionInfo<TypeDef::TypeVersionRef>, prev_ver: &Option<BigUint>) -> Result<Self::OperationsState, GeneratorError>;
+	fn generate_operations(&mut self, state: Self::OperationsState, ver_type: &model::TypeVersionInfo<TypeDef::TypeVersionRef>, prev_ver: &Option<BigUint>) -> Result<(), GeneratorError>;
+}
+
+pub trait TypeGeneratorGenerate<'model> {
+	fn generate(&mut self) -> Result<(), GeneratorError>;
+}
+
+impl <'model, TypeDef : 'model + model::GeneratableType<'model>, TImpl : TypeGenerator<'model, TypeDefinition = TypeDef> + TypeGeneratorOperations<'model, TypeDef>> TypeGeneratorGenerate<'model> for TImpl {
 	fn generate(&mut self) -> Result<(), GeneratorError> {
 		self.write_header()?;
 
-		let mut first_version = true;
+		let mut prev_ver = None;
 		
 		for ver_type in self.type_def().versions() {
 			let version = &ver_type.version;
-	
-			let prev_ver: BigInt = BigInt::from_biguint(Sign::Plus, version.clone()) - 1;
-			let prev_ver = prev_ver.to_biguint().unwrap();
 
-			let type_params_as_args = self.type_def().type_params().iter()
-				.map(|param| model::Type { name: model::QualifiedName::from_parts(&[], &param), args: vec!() })
-				.collect::<Vec<_>>();
+			let type_params_as_args = build_type_params_as_args(self.type_def());
 
-			let t = self.build_type(version, &model::Type { name: self.type_def().name().clone(), args: type_params_as_args.clone() })?;
-			let type_kind = match &t {
-				LangType::Versioned(kind, ..) => *kind,
-				_ => return Err(GeneratorError::CouldNotGenerateType),
-			};
+			let t = self.build_type(version, &model::Type { name: self.type_def().name().clone(), args: type_params_as_args })?;
 
-			let is_final_last_version = t.is_final_in_version(version, self.model());
-
-
-			if is_final_last_version {
-				if let LangType::Versioned(_, _, _, _, ref fields) = t {
-					for field in fields.build()? {
-						if !field.field_type.is_final_in_version(version, self.model()) {
-							return Err(GeneratorError::TypeNotFinal)
-						}
-					}
-				}
-			}
-
+			let op_state = self.prepare_operaitons_state(&t, &ver_type, &prev_ver)?;
 
 			self.write_version_header(t)?;
 
-			// Converter for latest version of final type with type parameters
-			if is_final_last_version && !self.type_def().type_params().is_empty() {
-				self.write_operation(build_converter_operation_common(self, Operation::FinalTypeConverter, type_kind, &ver_type, version)?)?;
-			}
-			
-			// Conversion from previous version
-			if !first_version { // Skip when there is no prevous version.
-				self.write_operation(build_converter_operation_common(self, Operation::FromPreviousVersion(prev_ver.clone()), type_kind, &ver_type, &prev_ver)?)?;
-			}
-
-			// Codec
-			{
-				let mut codec_params = Vec::new();
-
-				for param in self.type_def().type_params() {
-					let param_type = LangType::TypeParameter(param.clone());
-
-					codec_params.push((Self::Lang::codec_codec_param_name(param), LangType::Codec(Box::new(param_type.clone()))));
-				}
-
-				let obj_type = self.build_type(version, &model::Type { name: self.type_def().name().clone(), args: type_params_as_args })?;
-
-				let codec_type = LangType::Codec(Box::new(obj_type.clone()));
-
-				let op = OperationInfo {
-					operation: Operation::TypeCodec,
-					version: version.clone(),
-					type_params: self.type_def().type_params().clone(),
-					params: codec_params,
-					result: codec_type,
-					implementation: LangExprStmt::CreateCodec {
-						t: obj_type.clone(),
-						read: Box::new(codec_read_implementation(self, obj_type.clone())?),
-						write: Box::new(codec_write_implementation(self, obj_type)?),
-					},
-				};
-
-				self.write_operation(op)?;
-			}
+			self.generate_operations(op_state, &ver_type, &prev_ver)?;
 
 
 			self.write_version_footer()?;
-			first_version = false;
+			prev_ver = Some(version.clone());
 		}
 
 		self.write_footer()
 	}
 }
 
+fn build_type_params_as_args<'model, TypeDef : model::GeneratableType<'model>>(type_def: Named<'model, TypeDef>) -> Vec<model::Type> {
+	type_def.type_params().iter()
+		.map(|param| model::Type { name: model::QualifiedName::from_parts(&[], &param), args: vec!() })
+		.collect::<Vec<_>>()
+}
+
+pub struct VersionedTypeGeneratorOperationsState {
+	is_final_last_version: bool,
+	type_kind: VersionedTypeKind,
+}
+
+impl <'model, TImpl : TypeGenerator<'model, TypeDefinition = model::VersionedTypeDefinitionData>> TypeGeneratorOperations<'model, model::VersionedTypeDefinitionData> for TImpl {
+	type OperationsState = VersionedTypeGeneratorOperationsState;
+
+	fn prepare_operaitons_state(&self, t: &LangType<'model>, ver_type: &model::TypeVersionInfo<&'model model::TypeVersionDefinition>, _prev_ver: &Option<BigUint>) -> Result<Self::OperationsState, GeneratorError> {
+		let version = &ver_type.version;
+
+		Ok(VersionedTypeGeneratorOperationsState {
+			is_final_last_version: t.is_final_in_version(version, self.model()),
+			type_kind: match &t {
+				LangType::Versioned(kind, ..) => *kind,
+				_ => return Err(GeneratorError::CouldNotGenerateType),
+			}
+		})
+	}
+	fn generate_operations(&mut self, state: Self::OperationsState, ver_type: &model::TypeVersionInfo<&'model model::TypeVersionDefinition>, prev_ver: &Option<BigUint>) -> Result<(), GeneratorError> {
+		let version = &ver_type.version;
+		
+
+		// Converter for latest version of final type with type parameters
+		if state.is_final_last_version && !self.type_def().type_params().is_empty() {
+			self.write_operation(build_converter_operation_common(self, Operation::FinalTypeConverter, state.type_kind, &ver_type, version)?)?;
+		}
+		
+		// Conversion from previous version
+		if let Some(prev_ver) = prev_ver { // Skip when there is no prevous version.
+			self.write_operation(build_converter_operation_common(self, Operation::FromPreviousVersion(prev_ver.clone()), state.type_kind, &ver_type, &prev_ver)?)?;
+		}
+
+		// Codec
+		{
+			let type_params_as_args = build_type_params_as_args(self.type_def());
+			let mut codec_params = Vec::new();
+
+			for param in self.type_def().type_params() {
+				let param_type = LangType::TypeParameter(param.clone());
+
+				codec_params.push((Self::Lang::codec_codec_param_name(param), LangType::Codec(Box::new(param_type.clone()))));
+			}
+
+			let obj_type = self.build_type(version, &model::Type { name: self.type_def().name().clone(), args: type_params_as_args })?;
+
+			let codec_type = LangType::Codec(Box::new(obj_type.clone()));
+
+			let op = OperationInfo {
+				operation: Operation::TypeCodec,
+				version: version.clone(),
+				type_params: self.type_def().type_params().clone(),
+				params: codec_params,
+				result: codec_type,
+				implementation: LangExprStmt::CreateCodec {
+					t: obj_type.clone(),
+					read: Box::new(codec_read_implementation(self, obj_type.clone())?),
+					write: Box::new(codec_write_implementation(self, obj_type)?),
+				},
+			};
+
+			self.write_operation(op)?;
+		}
+
+		Ok(())
+	}
+}
+
+
 fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_kind: VersionedTypeKind, ver_type: &model::TypeVersionInfo<&'model model::TypeVersionDefinition>, prev_ver: &BigUint) -> Result<OperationInfo<'model>, GeneratorError> where
-	Gen : VersionedTypeGenerator<'model>
+	Gen : TypeGenerator<'model>
 {
 	let version = &ver_type.version;
 
@@ -1068,7 +1097,7 @@ fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_
 
 
 fn codec_read_implementation<'model, Gen>(gen: &Gen, t: LangType<'model>) -> Result<LangStmt<'model>, GeneratorError> where
-	Gen : VersionedTypeGenerator<'model>
+	Gen : TypeGenerator<'model>
 {
 	Ok(match t {
 		LangType::Versioned(VersionedTypeKind::Struct, _, version, type_args, fields) => {
@@ -1116,7 +1145,7 @@ fn codec_read_implementation<'model, Gen>(gen: &Gen, t: LangType<'model>) -> Res
 }
 
 fn codec_write_implementation<'model, Gen>(gen: &Gen, t: LangType<'model>) -> Result<LangStmt<'model>, GeneratorError> where
-	Gen : VersionedTypeGenerator<'model>
+	Gen : TypeGenerator<'model>
 {
 	Ok(match t.clone() {
 		LangType::Versioned(VersionedTypeKind::Struct, _, version, _, fields) => {
@@ -1216,18 +1245,19 @@ impl <'model, Lang: GeneratorNameMapping> Generator<'model> for ExternTypeChecke
 
 pub trait GeneratorFactory<'model> {
 	type ConstGen: ConstGenerator<'model>;
-	type VersionedTypeGen: VersionedTypeGenerator<'model>;
+	type VersionedTypeGen: TypeGeneratorGenerate<'model>;
+	type InterfaceTypeGen: TypeGeneratorGenerate<'model>;
 
 	fn create_constant_generator(&self, constant: Named<'model, model::Constant>) -> Result<Option<Self::ConstGen>, GeneratorError>;
 	fn create_versioned_type_generator(&self, t: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Option<Self::VersionedTypeGen>, GeneratorError>;
-	fn create_interface_type_generator(&self, t: Named<'model, model::InterfaceTypeDefinitionData>) -> Result<Option<Self::VersionedTypeGen>, GeneratorError>;
+	fn create_interface_type_generator(&self, t: Named<'model, model::InterfaceTypeDefinitionData>) -> Result<Option<Self::InterfaceTypeGen>, GeneratorError>;
 }
 
-pub trait GeneratorFactoryGenerate<'model> {
+pub trait CodeGenerator<'model> {
 	fn generate(&self, model: &'model model::Verilization) -> Result<(), GeneratorError>;
 }
 
-impl <'model, TImpl: GeneratorFactory<'model> + GeneratorNameMapping> GeneratorFactoryGenerate<'model> for TImpl {
+impl <'model, TImpl: GeneratorFactory<'model> + GeneratorNameMapping> CodeGenerator<'model> for TImpl {
 	fn generate(&self, model: &'model model::Verilization) -> Result<(), GeneratorError> {
 		for constant in model.constants() {
 			if let Some(mut gen) = self.create_constant_generator(constant)? {

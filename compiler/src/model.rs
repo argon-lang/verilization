@@ -345,8 +345,8 @@ impl <'a> Named<'a, Constant> {
 	}
 
 	/// Iterates over types referenced in the type of the constant.
-	pub fn referenced_types(self) -> ReferencedTypeIterator<'a> {
-		ReferencedTypeIterator::from_type(&self.value.value_type)
+	pub fn referenced_types(self) -> ReferencedTypeIteratorVersionedType<'a> {
+		ReferencedTypeIteratorVersionedType::from_type(&self.value.value_type)
 	}
 
 	/// Iterates over the versions of the constant from the first version to the latest version of the model.
@@ -455,6 +455,79 @@ impl <T: Copy> Clone for TypeVersionInfo<T> {
 	}
 }
 
+pub trait GeneratableType<'a> : Sized {
+	type TypeVersionRef : Copy;
+	type TypeVersionIterator : Iterator<Item = TypeVersionInfo<Self::TypeVersionRef>>;
+	type ReferencedTypeIterator : Iterator<Item = &'a QualifiedName>;
+
+	/// Gets whether this type is final.
+	fn is_final(&'a self) -> bool;
+
+	/// Gets a version of this type.
+	fn versioned(named: Named<'a, Self>, version: &BigUint) -> Option<TypeVersionInfo<Self::TypeVersionRef>>;
+
+	/// Finds the last explicitly defined version of this type.
+	fn last_explicit_version(&'a self) -> Option<&'a BigUint>;
+
+	/// Iterates over types referenced in the field types of this type.
+	fn referenced_types(&'a self) -> Self::ReferencedTypeIterator;
+
+	/// Iterates over the versions of this type.
+	/// 
+	/// Starts at the first version of the type.
+	/// If the type is final, ends at the last explicitly defined version.
+	/// If the type is not final, ends at the latest version of the model.
+	fn versions(named: Named<'a, Self>) -> Self::TypeVersionIterator;
+
+	/// Gets the imports that are in scope for this type.
+	fn imports(&'a self) -> &'a HashMap<String, QualifiedName>;
+
+	/// Gets the parameters of the type.
+	fn type_params(&'a self) -> &'a Vec<String>;
+}
+
+impl <'a, TypeDef: GeneratableType<'a>> Named<'a, TypeDef> {
+	pub fn is_final(self) -> bool {
+		self.value.is_final()
+	}
+
+	pub fn versioned(self, version: &BigUint) -> Option<TypeVersionInfo<TypeDef::TypeVersionRef>> {
+		TypeDef::versioned(self, version)
+	}
+
+	pub fn last_explicit_version(self) -> Option<&'a BigUint> {
+		self.value.last_explicit_version()
+	}
+
+	pub fn referenced_types(self) -> TypeDef::ReferencedTypeIterator {
+		self.value.referenced_types()
+	}
+
+	/// Iterates over the versions of this type.
+	/// 
+	/// Starts at the first version of the type.
+	/// If the type is final, ends at the last explicitly defined version.
+	/// If the type is not final, ends at the latest version of the model.
+	pub fn versions(self) -> TypeDef::TypeVersionIterator {
+		TypeDef::versions(self)
+	}
+
+	/// Gets a scope for the type.
+	pub fn scope(self) -> Scope<'a> {
+		Scope {
+			model: self.model,
+			current_pkg: Some(&self.name.package),
+			imports: Some(&self.value.imports()),
+			type_params: vec!(&self.value.type_params()),
+		}
+	}
+
+	/// Gets the parameters of the type.
+	pub fn type_params(self) -> &'a Vec<String> {
+		self.value.type_params()
+	}
+}
+
 /// Defines a versioned type. Could be a struct or enum.
 #[derive(Debug)]
 pub struct VersionedTypeDefinitionData {
@@ -503,26 +576,27 @@ impl VersionedTypeDefinitionBuilder {
 	}
 }
 
-impl <'a> Named<'a, VersionedTypeDefinitionData> {
+impl <'a> GeneratableType<'a> for VersionedTypeDefinitionData {
+	type TypeVersionRef = &'a TypeVersionDefinition;
+	type TypeVersionIterator = VersionedTypeVersionIterator<'a>;
+	type ReferencedTypeIterator = ReferencedTypeIteratorVersionedType<'a>;
 
-	/// Gets whether this type is final.
-	pub fn is_final(&self) -> bool {
-		self.value.is_final
+	fn is_final(&'a self) -> bool {
+		self.is_final
 	}
 
-	/// Gets a version of this type.
-	pub fn versioned(self, version: &BigUint) -> Option<TypeVersionInfo<&'a TypeVersionDefinition>> {
-		if version > &self.value.latest_version && !self.value.is_final {
+	fn versioned(named: Named<'a, VersionedTypeDefinitionData>, version: &BigUint) -> Option<TypeVersionInfo<&'a TypeVersionDefinition>> {
+		if version > &named.value.latest_version && !named.value.is_final {
 			None
 		}
 		else {
-			self.value.versions.iter()
+			named.value.versions.iter()
 				.filter(|(ver, _)| ver <= &version)
 				.max_by_key(|(ver, _)| ver.clone())
 				.map(|(actual_ver, ver_type)| {
 
 					let ver =
-						if self.value.is_final && !self.value.versions.keys().any(|other_ver| other_ver > actual_ver) {
+						if named.value.is_final && !named.value.versions.keys().any(|other_ver| other_ver > actual_ver) {
 							actual_ver.clone()
 						}
 						else {
@@ -539,50 +613,36 @@ impl <'a> Named<'a, VersionedTypeDefinitionData> {
 		}
 	}
 
-	/// Finds the last explicitly defined version of this type.
-	pub fn last_explicit_version(self) -> Option<&'a BigUint> {
-		self.value.versions.keys().max()
+	fn last_explicit_version(&'a self) -> Option<&'a BigUint> {
+		self.versions.keys().max()
 	}
 
-	/// Iterates over types referenced in the field types of this type.
-	pub fn referenced_types(self) -> ReferencedTypeIterator<'a> {
-		ReferencedTypeIterator::from_versions(&self.value.versions)
+	fn referenced_types(&'a self) -> ReferencedTypeIteratorVersionedType<'a> {
+		ReferencedTypeIteratorVersionedType::from_versions(&self.versions)
 	}
 
-	/// Iterates over the versions of this type.
-	/// 
-	/// Starts at the first version of the type.
-	/// If the type is final, ends at the last explicitly defined version.
-	/// If the type is not final, ends at the latest version of the model.
-	pub fn versions(self) -> TypeVersionIterator<'a> {
-		TypeVersionIterator {
-			type_def: self,
+	fn versions(named: Named<'a, Self>) -> VersionedTypeVersionIterator<'a> {
+		VersionedTypeVersionIterator {
+			type_def: named,
 			version: BigUint::one(),
 			max_version:
-				if self.value.is_final {
-					self.last_explicit_version().map(|ver| ver.clone()).unwrap_or(BigUint::zero())
+				if named.value.is_final {
+					named.last_explicit_version().map(|ver| ver.clone()).unwrap_or(BigUint::zero())
 				}
 				else {
-					self.value.latest_version.clone()
+					named.value.latest_version.clone()
 				},
 
 			last_seen_version: None,
 		}
 	}
 
-	/// Gets a scope for the type.
-	pub fn scope(self) -> Scope<'a> {
-		Scope {
-			model: self.model,
-			current_pkg: Some(&self.name.package),
-			imports: Some(&self.value.imports),
-			type_params: vec!(&self.value.type_params),
-		}
+	fn imports(&'a self) -> &'a HashMap<String, QualifiedName> {
+		&self.imports
 	}
 
-	/// Gets the parameters of the type.
-	pub fn type_params(self) -> &'a Vec<String> {
-		&self.value.type_params
+	fn type_params(&'a self) -> &'a Vec<String> {
+		&self.type_params
 	}
 }
 
@@ -897,25 +957,27 @@ impl <'a> InterfaceMethodBuilder<'a> {
 	}
 }
 
-impl <'a> Named<'a, InterfaceTypeDefinitionData> {
-	/// Gets whether this interface is final.
-	pub fn is_final(&self) -> bool {
-		self.value.is_final
+impl <'a> GeneratableType<'a> for InterfaceTypeDefinitionData {
+	type TypeVersionRef = OfInterface<'a, InterfaceVersionDefinition>;
+	type TypeVersionIterator = InterfaceVersionIterator<'a>;
+	type ReferencedTypeIterator = ReferencedTypeIteratorInterfaceType<'a>;
+
+	fn is_final(&'a self) -> bool {
+		self.is_final
 	}
 
-	/// Gets a version of this interface.
-	pub fn versioned(self, version: &BigUint) -> Option<TypeVersionInfo<OfInterface<'a, InterfaceVersionDefinition>>> {
-		if version > &self.value.latest_version && !self.value.is_final {
+	fn versioned(named: Named<'a, InterfaceTypeDefinitionData>, version: &BigUint) -> Option<TypeVersionInfo<OfInterface<'a, InterfaceVersionDefinition>>> {
+		if version > &named.value.latest_version && !named.value.is_final {
 			None
 		}
 		else {
-			self.value.versions.iter()
+			named.value.versions.iter()
 				.filter(|(ver, _)| ver <= &version)
 				.max_by_key(|(ver, _)| ver.clone())
 				.map(|(actual_ver, ver_type)| {
 
 					let ver =
-						if self.value.is_final && !self.value.versions.keys().any(|other_ver| other_ver > actual_ver) {
+						if named.value.is_final && !named.value.versions.keys().any(|other_ver| other_ver > actual_ver) {
 							actual_ver.clone()
 						}
 						else {
@@ -925,52 +987,43 @@ impl <'a> Named<'a, InterfaceTypeDefinitionData> {
 					TypeVersionInfo {
 						version: ver,
 						explicit_version: version == actual_ver,
-						ver_type: OfInterface::new(self, ver_type),
+						ver_type: OfInterface::new(named, ver_type),
 						dummy: PhantomData {},
 					}
 				})
 		}
 	}
 
-	/// Finds the last explicitly defined version of this interface.
-	pub fn last_explicit_version(self) -> Option<&'a BigUint> {
-		self.value.versions.keys().max()
+	fn last_explicit_version(&'a self) -> Option<&'a BigUint> {
+		self.versions.keys().max()
 	}
 
-	/// Iterates over the versions of this interface.
-	/// 
-	/// Starts at the first version of the interface.
-	/// If the interface is final, ends at the last explicitly defined version.
-	/// If the interface is not final, ends at the latest version of the model.
-	pub fn versions(self) -> InterfaceVersionIterator<'a> {
+	fn referenced_types(&'a self) -> ReferencedTypeIteratorInterfaceType<'a> {
+		ReferencedTypeIteratorInterfaceType::from_versions(&self.versions)
+	}
+
+	fn versions(named: Named<'a, InterfaceTypeDefinitionData>) -> InterfaceVersionIterator<'a> {
 		InterfaceVersionIterator {
-			type_def: self,
+			type_def: named,
 			version: BigUint::one(),
 			max_version:
-				if self.value.is_final {
-					self.last_explicit_version().map(|ver| ver.clone()).unwrap_or(BigUint::zero())
+				if named.value.is_final {
+					named.last_explicit_version().map(|ver| ver.clone()).unwrap_or(BigUint::zero())
 				}
 				else {
-					self.value.latest_version.clone()
+					named.value.latest_version.clone()
 				},
 
 			last_seen_version: None,
 		}
 	}
 
-	/// Gets a scope for this interface.
-	pub fn scope(self) -> Scope<'a> {
-		Scope {
-			model: self.model,
-			current_pkg: Some(&self.name.package),
-			imports: Some(&self.value.imports),
-			type_params: vec!(&self.value.type_params),
-		}
+	fn imports(&'a self) -> &'a HashMap<String, QualifiedName> {
+		&self.imports
 	}
-
-	/// Gets the type parameters of the interface.
-	pub fn type_params(self) -> &'a Vec<String> {
-		&self.value.type_params
+	
+	fn type_params(&'a self) -> &'a Vec<String> {
+		&self.type_params
 	}
 }
 
@@ -1383,14 +1436,14 @@ impl <'a> Iterator for TypeIterator<'a> {
 	}
 }
 
-pub struct TypeVersionIterator<'a> {
+pub struct VersionedTypeVersionIterator<'a> {
 	type_def: Named<'a, VersionedTypeDefinitionData>,
 	version: BigUint,
 	max_version: BigUint,
 	last_seen_version: Option<&'a TypeVersionDefinition>,
 }
 
-impl <'a> Iterator for TypeVersionIterator<'a> {
+impl <'a> Iterator for VersionedTypeVersionIterator<'a> {
 	type Item = TypeVersionInfo<&'a TypeVersionDefinition>;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -1460,7 +1513,7 @@ impl <'a> Iterator for InterfaceVersionIterator<'a> {
 }
 
 
-pub struct ReferencedTypeIterator<'a> {
+pub struct ReferencedTypeIteratorVersionedType<'a> {
 	seen_types: HashSet<&'a QualifiedName>,
 	ver_iter: std::collections::hash_map::Values<'a, BigUint, TypeVersionDefinition>,
 	field_iter: std::slice::Iter<'a, (String, FieldInfo)>,
@@ -1472,7 +1525,7 @@ lazy_static! {
 }
 const REF_TYPE_ITER_EMPTY_FIELD_SLICE: &[(String, FieldInfo)] = &[];
 
-impl <'a> Iterator for ReferencedTypeIterator<'a> {
+impl <'a> Iterator for ReferencedTypeIteratorVersionedType<'a> {
 	type Item = &'a QualifiedName;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -1483,7 +1536,7 @@ impl <'a> Iterator for ReferencedTypeIterator<'a> {
 					if self.seen_types.insert(&arg.name) {
 						return Some(&arg.name);
 					}
-			}
+				}
 				else {
 					self.arg_iters.pop();
 				}
@@ -1502,9 +1555,9 @@ impl <'a> Iterator for ReferencedTypeIterator<'a> {
 	}
 }
 
-impl <'a> ReferencedTypeIterator<'a> {
-	fn from_versions(versions: &'a HashMap<BigUint, TypeVersionDefinition>) -> ReferencedTypeIterator<'a> {
-		ReferencedTypeIterator {
+impl <'a> ReferencedTypeIteratorVersionedType<'a> {
+	fn from_versions(versions: &'a HashMap<BigUint, TypeVersionDefinition>) -> ReferencedTypeIteratorVersionedType<'a> {
+		ReferencedTypeIteratorVersionedType {
 			seen_types: HashSet::new(),
 			ver_iter: versions.values(),
 			field_iter: REF_TYPE_ITER_EMPTY_FIELD_SLICE.iter(),
@@ -1512,8 +1565,8 @@ impl <'a> ReferencedTypeIterator<'a> {
 		}
 	}
 
-	fn from_type(t: &'a Type) -> ReferencedTypeIterator<'a> {
-		ReferencedTypeIterator {
+	fn from_type(t: &'a Type) -> ReferencedTypeIteratorVersionedType<'a> {
+		ReferencedTypeIteratorVersionedType {
 			seen_types: HashSet::new(),
 			ver_iter: REF_TYPE_ITER_EMPTY_VER_MAP.values(),
 			field_iter: REF_TYPE_ITER_EMPTY_FIELD_SLICE.iter(),
@@ -1521,3 +1574,69 @@ impl <'a> ReferencedTypeIterator<'a> {
 		}
 	}
 }
+
+
+
+pub struct ReferencedTypeIteratorInterfaceType<'a> {
+	seen_types: HashSet<&'a QualifiedName>,
+	current_method_type_params: Vec<&'a String>,
+	ver_iter: std::collections::hash_map::Values<'a, BigUint, InterfaceVersionDefinition>,
+	method_iter: std::collections::hash_map::Values<'a, String, InterfaceMethod>,
+	arg_iters: Vec<std::slice::Iter<'a, Type>>,
+}
+
+lazy_static! {
+	static ref REF_TYPE_ITER_EMPTY_INTERFACE_METHOD_MAP: HashMap<String, InterfaceMethod> = HashMap::new();
+}
+
+impl <'a> Iterator for ReferencedTypeIteratorInterfaceType<'a> {
+	type Item = &'a QualifiedName;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		loop {
+			while let Some(arg_iter) = self.arg_iters.last_mut() {
+				if let Some(arg) = arg_iter.next() {
+					self.arg_iters.push(arg.args.iter());
+
+					let is_method_type_param = arg.name.package.package.is_empty() && self.current_method_type_params.contains(&&arg.name.name);
+
+					if !is_method_type_param && self.seen_types.insert(&arg.name) {
+						return Some(&arg.name);
+					}
+				}
+				else {
+					self.arg_iters.pop();
+				}
+			}
+
+			if let Some(method) = self.method_iter.next() {
+				self.current_method_type_params.clear();
+				self.current_method_type_params.extend(&method.type_params);
+
+				self.arg_iters.push(std::slice::from_ref(&method.return_type).iter());
+				for param in &method.parameters {
+					self.arg_iters.push(std::slice::from_ref(&param.param_type).iter());
+				}
+			}
+			else if let Some(ver_type) = self.ver_iter.next() {
+				self.method_iter = ver_type.methods.values();
+			}
+			else {
+				return None;
+			}
+		}
+	}
+}
+
+impl <'a> ReferencedTypeIteratorInterfaceType<'a> {
+	fn from_versions(versions: &'a HashMap<BigUint, InterfaceVersionDefinition>) -> ReferencedTypeIteratorInterfaceType<'a> {
+		ReferencedTypeIteratorInterfaceType {
+			seen_types: HashSet::new(),
+			current_method_type_params: Vec::new(),
+			ver_iter: versions.values(),
+			method_iter: REF_TYPE_ITER_EMPTY_INTERFACE_METHOD_MAP.values(),
+			arg_iters: Vec::new(),
+		}
+	}
+}
+

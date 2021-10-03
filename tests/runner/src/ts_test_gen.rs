@@ -46,6 +46,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model> for TSTestCa
 }
 
 impl <'model, 'opt, 'state, 'output, F: Write, R> TSGenerator<'model> for TSTestCaseGen<'model, 'opt, 'state, 'output, F, R> {
+    type ReferencedTypeIterator = model::ReferencedTypeIteratorVersionedType<'model>;
 
 	fn generator_element_name(&self) -> Option<&'model model::QualifiedName> {
 		None
@@ -55,7 +56,7 @@ impl <'model, 'opt, 'state, 'output, F: Write, R> TSGenerator<'model> for TSTest
 		self.options
 	}
 
-	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model> {
+	fn referenced_types(&self) -> model::ReferencedTypeIteratorVersionedType<'model> {
 		self.type_def.referenced_types()
 	}
 

@@ -46,10 +46,6 @@ impl <'model, 'opt, 'output, F: Write, R> ScalaGenerator<'model, 'opt> for Scala
 	fn options(&self) -> &'opt ScalaOptions {
 		self.options
 	}
-
-	fn referenced_types(&self) -> model::ReferencedTypeIterator<'model> {
-		self.type_def.referenced_types()
-	}
 }
 
 impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
