@@ -13,41 +13,41 @@ use std::io::Write;
 use rand::Rng;
 use crate::value_generator::{generate_random_value, write_constant_value};
 
-struct JavaTestCaseGen<'model, 'opt, 'output, F, R> {
-    file: &'output mut F,
-    options: &'opt JavaOptions,
-    random: &'model mut R,
-    model: &'model Verilization,
-	type_def: Named<'model, model::VersionedTypeDefinitionData>,
-	scope: model::Scope<'model>,
+struct JavaTestCaseGen<'a, F, R> {
+    file: &'a mut F,
+    options: &'a JavaOptions,
+    random: &'a mut R,
+    model: &'a Verilization,
+	type_def: Named<'a, model::VersionedTypeDefinitionData>,
+	scope: model::Scope<'a>,
 }
 
 
-impl <'model, 'opt, 'state, 'output, F: Write, R> GeneratorWithFile for JavaTestCaseGen<'model, 'opt, 'output, F, R> {
+impl <'a, F: Write, R> GeneratorWithFile for JavaTestCaseGen<'a, F, R> {
 	type GeneratorFile = F;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model> for JavaTestCaseGen<'model, 'opt, 'output, F, R> {
+impl <'a, F: Write, R> Generator<'a> for JavaTestCaseGen<'a, F, R> {
     type Lang = verilization_lang_java::JavaLanguage;
-	fn model(&self) -> &'model model::Verilization {
+	fn model(&self) -> &'a model::Verilization {
 		self.model
 	}
 
-	fn scope(&self) -> &model::Scope<'model> {
+	fn scope(&self) -> &model::Scope<'a> {
 		&self.scope
 	}
 }
 
-impl <'model, 'opt, 'output, F: Write, R> JavaGenerator<'model, 'opt> for JavaTestCaseGen<'model, 'opt, 'output, F, R> {
-	fn options(&self) -> &'opt JavaOptions {
+impl <'a, F: Write, R> JavaGenerator<'a> for JavaTestCaseGen<'a, F, R> {
+	fn options(&self) -> &'a JavaOptions {
 		self.options
 	}
 }
 
-impl <'model, 'opt, 'output, F: Write, R: Rng> JavaTestCaseGen<'model, 'opt, 'output, F, R> {
+impl <'a, F: Write, R: Rng> JavaTestCaseGen<'a, F, R> {
     fn generate(&mut self) -> Result<(), VError> {
         for ver in self.type_def.versions() {
             self.versioned_type(&ver.version)?;

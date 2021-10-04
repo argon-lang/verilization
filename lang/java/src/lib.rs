@@ -43,13 +43,13 @@ fn make_field_name(field_name: &str) -> String {
 }
 
 
-fn java_package_impl<'opt>(options: &'opt JavaOptions, package: &model::PackageName) -> Result<&'opt model::PackageName, GeneratorError> {
+fn java_package_impl<'a>(options: &'a JavaOptions, package: &model::PackageName) -> Result<&'a model::PackageName, GeneratorError> {
 	options.package_mapping.get(&package)
 		.or_else(|| options.library_mapping.get(&package))
 		.ok_or_else(|| GeneratorError::UnmappedPackage(package.clone()))
 }
 
-fn open_java_file<'output, Output: OutputHandler<'output>>(options: &JavaOptions, output: &'output mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle, GeneratorError> {
+fn open_java_file<'a, Output: OutputHandler<'a>>(options: &JavaOptions, output: &'a mut Output, name: &model::QualifiedName) -> Result<Output::FileHandle, GeneratorError> {
 	let java_pkg = java_package_impl(options, &name.package)?;
 	let mut path = PathBuf::from(&options.output_dir);
 	for part in &java_pkg.package {
@@ -66,10 +66,10 @@ enum ResultHandling {
 	Yield,
 }
 
-pub trait JavaGenerator<'model, 'opt> : Generator<'model> + GeneratorWithFile {
-	fn options(&self) -> &'opt JavaOptions;
+pub trait JavaGenerator<'a> : Generator<'a> + GeneratorWithFile {
+	fn options(&self) -> &'a JavaOptions;
 
-	fn java_package(&self, package: &model::PackageName) -> Result<&'opt model::PackageName, GeneratorError> {
+	fn java_package(&self, package: &model::PackageName) -> Result<&'a model::PackageName, GeneratorError> {
 		java_package_impl(self.options(), package)
 	}
 
@@ -101,7 +101,7 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model> + GeneratorWithFile {
 		Ok(())
 	}
 	
-	fn write_type_args(&mut self, args: &Vec<LangType<'model>>) -> Result<(), GeneratorError> {
+	fn write_type_args(&mut self, args: &Vec<LangType<'a>>) -> Result<(), GeneratorError> {
 		if !args.is_empty() {
 			write!(self.file(), "<")?;
 			for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
@@ -141,7 +141,7 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model> + GeneratorWithFile {
 		})
 	}
 	
-	fn write_type(&mut self, t: &LangType<'model>, erased: bool) -> Result<(), GeneratorError> {
+	fn write_type(&mut self, t: &LangType<'a>, erased: bool) -> Result<(), GeneratorError> {
 		Ok(match t {
 			LangType::Versioned(_, name, version, args, _) | LangType::Interface(name, version, args, _) => {
 				self.write_qual_name(name)?;
@@ -182,7 +182,7 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model> + GeneratorWithFile {
 		})
 	}
 
-	fn write_args(&mut self, args: &Vec<LangExpr<'model>>) -> Result<(), GeneratorError> {
+	fn write_args(&mut self, args: &Vec<LangExpr<'a>>) -> Result<(), GeneratorError> {
 		if !args.is_empty() {
 			write!(self.file(), "(")?;
 			for_sep!(arg, args, { write!(self.file(), ", ")?; }, {
@@ -209,7 +209,7 @@ pub trait JavaGenerator<'model, 'opt> : Generator<'model> + GeneratorWithFile {
 		Ok(())
 	}
 	
-	fn write_expr(&mut self, expr: &LangExpr<'model>) -> Result<(), GeneratorError> {
+	fn write_expr(&mut self, expr: &LangExpr<'a>) -> Result<(), GeneratorError> {
 		match expr {
 			LangExpr::Identifier(name) => write!(self.file(), "{}", name)?,
 			LangExpr::IntegerLiteral(n) => {
@@ -346,41 +346,41 @@ impl GeneratorNameMapping for JavaLanguage {
 }
 
 
-struct JavaConstGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>> {
+struct JavaConstGenerator<'a, Output: OutputHandler<'a>> {
 	file: Output::FileHandle,
-	model: &'model model::Verilization,
-	options: &'opt JavaOptions,
-	constant: Named<'model, model::Constant>,
-	scope: model::Scope<'model>,
+	model: &'a model::Verilization,
+	options: &'a JavaOptions,
+	constant: Named<'a, model::Constant>,
+	scope: model::Scope<'a>,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> Generator<'model> for JavaConstGenerator<'model, 'opt, 'output, Output> {
+impl <'a, Output: OutputHandler<'a>> Generator<'a> for JavaConstGenerator<'a, Output> {
 	type Lang = JavaLanguage;
 
-	fn model(&self) -> &'model model::Verilization {
+	fn model(&self) -> &'a model::Verilization {
 		self.model
 	}
 
-	fn scope(&self) -> &model::Scope<'model> {
+	fn scope(&self) -> &model::Scope<'a> {
 		&self.scope
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> GeneratorWithFile for JavaConstGenerator<'model, 'opt, 'output, Output> {
+impl <'a, Output: OutputHandler<'a>> GeneratorWithFile for JavaConstGenerator<'a, Output> {
 	type GeneratorFile = Output::FileHandle;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaGenerator<'model, 'opt> for JavaConstGenerator<'model, 'opt, 'output, Output> {
-	fn options(&self) -> &'opt JavaOptions {
+impl <'a, Output: OutputHandler<'a>> JavaGenerator<'a> for JavaConstGenerator<'a, Output> {
+	fn options(&self) -> &'a JavaOptions {
 		self.options
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'model> for JavaConstGenerator<'model, 'opt, 'output, Output> {
-	fn constant(&self) -> Named<'model, model::Constant> {
+impl <'a, Output: OutputHandler<'a>> ConstGenerator<'a> for JavaConstGenerator<'a, Output> {
+	fn constant(&self) -> Named<'a, model::Constant> {
 		self.constant
 	}
 
@@ -393,7 +393,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'mod
 		Ok(())
 	}
 
-	fn write_constant(&mut self, version_name: String, t: LangType<'model>, value: LangExpr<'model>) -> Result<(), GeneratorError> {
+	fn write_constant(&mut self, version_name: String, t: LangType<'a>, value: LangExpr<'a>) -> Result<(), GeneratorError> {
 		write!(self.file, "\tpublic static final ")?;
 		self.write_type(&t, false)?;
 		write!(self.file, " {} = ", version_name)?;
@@ -409,9 +409,9 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> ConstGenerator<'mod
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaConstGenerator<'model, 'opt, 'output, Output> {
+impl <'a, Output: OutputHandler<'a>> JavaConstGenerator<'a, Output> {
 
-	fn open(model: &'model model::Verilization, options: &'opt JavaOptions, output: &'output mut Output, constant: Named<'model, model::Constant>) -> Result<Self, GeneratorError> {
+	fn open(model: &'a model::Verilization, options: &'a JavaOptions, output: &'a mut Output, constant: Named<'a, model::Constant>) -> Result<Self, GeneratorError> {
 		let file = open_java_file(options, output, constant.name())?;
 		Ok(JavaConstGenerator {
 			file: file,
@@ -423,50 +423,50 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>> JavaConstGenerator<
 	}
 }
 
-struct JavaTypeGenerator<'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> {
+struct JavaTypeGenerator<'a, Output: OutputHandler<'a>, TypeDef> {
 	file: Output::FileHandle,
-	model: &'model model::Verilization,
-	options: &'opt JavaOptions,
-	type_def: Named<'model, TypeDef>,
-	scope: model::Scope<'model>,
+	model: &'a model::Verilization,
+	options: &'a JavaOptions,
+	type_def: Named<'a, TypeDef>,
+	scope: model::Scope<'a>,
 	indentation_level: u32,
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> Generator<'model> for JavaTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
+impl <'a, Output: OutputHandler<'a>, TypeDef> Generator<'a> for JavaTypeGenerator<'a, Output, TypeDef> {
 	type Lang = JavaLanguage;
 
-	fn model(&self) -> &'model model::Verilization {
+	fn model(&self) -> &'a model::Verilization {
 		self.model
 	}
 
-	fn scope(&self) -> &model::Scope<'model> {
+	fn scope(&self) -> &model::Scope<'a> {
 		&self.scope
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> GeneratorWithFile for JavaTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
+impl <'a, Output: OutputHandler<'a>, TypeDef> GeneratorWithFile for JavaTypeGenerator<'a, Output, TypeDef> {
 	type GeneratorFile = Output::FileHandle;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> Indentation for JavaTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
+impl <'a, Output: OutputHandler<'a>, TypeDef> Indentation for JavaTypeGenerator<'a, Output, TypeDef> {
 	fn indentation_size(&mut self) -> &mut u32 {
 		&mut self.indentation_level
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef> JavaGenerator<'model, 'opt> for JavaTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
-	fn options(&self) -> &'opt JavaOptions {
+impl <'a, Output: OutputHandler<'a>, TypeDef> JavaGenerator<'a> for JavaTypeGenerator<'a, Output, TypeDef> {
+	fn options(&self) -> &'a JavaOptions {
 		self.options
 	}
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: 'model + model::GeneratableType<'model>> TypeGenerator<'model> for JavaTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
+impl <'a, Output: OutputHandler<'a>, TypeDef: 'a + model::GeneratableType<'a>> TypeGenerator<'a> for JavaTypeGenerator<'a, Output, TypeDef> {
 	type TypeDefinition = TypeDef;
 
-	fn type_def(&self) -> Named<'model, TypeDef> {
+	fn type_def(&self) -> Named<'a, TypeDef> {
 		self.type_def
 	}
 
@@ -480,7 +480,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: 'model + m
 		Ok(())
 	}
 
-	fn write_version_header(&mut self, t: LangType<'model>) -> Result<(), GeneratorError> {
+	fn write_version_header(&mut self, t: LangType<'a>) -> Result<(), GeneratorError> {
 		match t {
 			LangType::Versioned(VersionedTypeKind::Struct, _, version, _, fields) => {
 				self.write_indent()?;
@@ -525,7 +525,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: 'model + m
 		Ok(())
 	}
 
-	fn write_operation(&mut self, operation: OperationInfo<'model>) -> Result<(), GeneratorError> {
+	fn write_operation(&mut self, operation: OperationInfo<'a>) -> Result<(), GeneratorError> {
 		let is_func = !operation.type_params.is_empty() || !operation.params.is_empty();
 
 		self.write_indent()?;
@@ -584,8 +584,8 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: 'model + m
 }
 
 
-fn write_enum_case_type<'model, 'opt, Gen>(gen: &mut Gen, value_type: &LangType<'model>, case_name: &str) -> Result<(), GeneratorError> where
-	Gen : JavaGenerator<'model, 'opt> + GeneratorWithFile
+fn write_enum_case_type<'a, Gen>(gen: &mut Gen, value_type: &LangType<'a>, case_name: &str) -> Result<(), GeneratorError> where
+	Gen : JavaGenerator<'a> + GeneratorWithFile
 {
 	match value_type {
 		LangType::Versioned(VersionedTypeKind::Enum, name, version, args, _) => {
@@ -605,10 +605,10 @@ fn write_enum_case_type<'model, 'opt, Gen>(gen: &mut Gen, value_type: &LangType<
 	Ok(())
 }
 
-impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: model::GeneratableType<'model>> JavaTypeGenerator<'model, 'opt, 'output, Output, TypeDef> {
+impl <'a, Output: OutputHandler<'a>, TypeDef: model::GeneratableType<'a>> JavaTypeGenerator<'a, Output, TypeDef> {
 
 
-	fn open(model: &'model model::Verilization, options: &'opt JavaOptions, output: &'output mut Output, type_def: Named<'model, TypeDef>) -> Result<Self, GeneratorError> {
+	fn open(model: &'a model::Verilization, options: &'a JavaOptions, output: &'a mut Output, type_def: Named<'a, TypeDef>) -> Result<Self, GeneratorError> {
 		let file = open_java_file(options, output, type_def.name())?;
 		Ok(JavaTypeGenerator {
 			file: file,
@@ -620,7 +620,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: model::Gen
 		})
 	}
 
-	fn write_expr_statement(&mut self, stmt: &LangExprStmt<'model>, is_expr: bool) -> Result<(), GeneratorError> {
+	fn write_expr_statement(&mut self, stmt: &LangExprStmt<'a>, is_expr: bool) -> Result<(), GeneratorError> {
 		if !is_expr {
 			self.write_indent()?;
 			write!(self.file, "return ")?;
@@ -717,7 +717,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: model::Gen
 		}
 	}
 
-	fn write_statement(&mut self, stmt: &LangStmt<'model>, result_handling: ResultHandling) -> Result<(), GeneratorError> {
+	fn write_statement(&mut self, stmt: &LangStmt<'a>, result_handling: ResultHandling) -> Result<(), GeneratorError> {
 		match stmt {
 			LangStmt::Expr(exprs, result_expr) => {
 				for expr in exprs {
@@ -846,6 +846,7 @@ impl <'model, 'opt, 'output, Output: OutputHandler<'output>, TypeDef: model::Gen
 
 pub struct JavaLanguage {}
 
+
 impl Language for JavaLanguage {
 	type Options = JavaOptions;
 
@@ -854,23 +855,12 @@ impl Language for JavaLanguage {
     }
 
 	fn generate<Output : for<'output> OutputHandler<'output>>(model: &model::Verilization, options: Self::Options, output: &mut Output) -> Result<(), GeneratorError> {
-		for constant in model.constants() {
-			let mut const_gen = JavaConstGenerator::open(model, &options, output, constant)?;
-			const_gen.generate()?;
-		}
-
-		for t in model.types() {
-			match t {
-				model::NamedTypeDefinition::StructType(t) | model::NamedTypeDefinition::EnumType(t) => {
-					let mut type_gen = JavaTypeGenerator::open(model, &options, output, t)?;
-					type_gen.generate()?;		
-				},
-				model::NamedTypeDefinition::ExternType(_) => (),
-				model::NamedTypeDefinition::InterfaceType(..) => (),
-			}
-		}
-
-		Ok(())
+		let mut codegen = JavaCodeGenerator {
+			model,
+			options: &options,
+			output,
+		};
+		codegen.generate(model)
 	}
 
 }
@@ -943,3 +933,28 @@ impl LanguageOptionsBuilder for JavaOptionsBuilder {
 		}
 	}
 }
+
+struct JavaCodeGenerator<'a, Output> {
+	model: &'a model::Verilization,
+	options: &'a JavaOptions,
+	output: &'a mut Output,
+}
+
+impl <'a, 'b, Output : OutputHandler<'a>> GeneratorFactory<'a> for JavaCodeGenerator<'b, Output> {
+	type ConstGen = JavaConstGenerator<'a, Output>;
+	type VersionedTypeGen = JavaTypeGenerator<'a, Output, model::VersionedTypeDefinitionData>;
+	type InterfaceTypeGen = JavaTypeGenerator<'a, Output, model::InterfaceTypeDefinitionData>;
+
+	fn create_constant_generator(&'a mut self, constant: Named<'a, model::Constant>) -> Result<Self::ConstGen, GeneratorError> {
+		JavaConstGenerator::open(self.model, self.options, self.output, constant)
+	}
+
+	fn create_versioned_type_generator(&'a mut self, t: Named<'a, model::VersionedTypeDefinitionData>) -> Result<Self::VersionedTypeGen, GeneratorError> {
+		JavaTypeGenerator::open(self.model, self.options, self.output, t)
+	}
+
+	fn create_interface_type_generator(&'a mut self, t: Named<'a, model::InterfaceTypeDefinitionData>) -> Result<Self::InterfaceTypeGen, GeneratorError> {
+		JavaTypeGenerator::open(self.model, self.options, self.output, t)
+	}
+}
+

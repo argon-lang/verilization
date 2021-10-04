@@ -983,6 +983,22 @@ impl <'model, TImpl : TypeGenerator<'model, TypeDefinition = model::VersionedTyp
 }
 
 
+pub struct InterfaceTypeGeneratorOperationsState {
+}
+
+impl <'model, TImpl : TypeGenerator<'model, TypeDefinition = model::InterfaceTypeDefinitionData>> TypeGeneratorOperations<'model, model::InterfaceTypeDefinitionData> for TImpl {
+	type OperationsState = InterfaceTypeGeneratorOperationsState;
+
+	fn prepare_operaitons_state(&self, _t: &LangType<'model>, _ver_type: &model::TypeVersionInfo<model::OfInterface<'model, model::InterfaceVersionDefinition>>, _prev_ver: &Option<BigUint>) -> Result<Self::OperationsState, GeneratorError> {
+		Ok(InterfaceTypeGeneratorOperationsState {
+		})
+	}
+	fn generate_operations(&mut self, _state: Self::OperationsState, _ver_type: &model::TypeVersionInfo<model::OfInterface<'model, model::InterfaceVersionDefinition>>, _prev_ver: &Option<BigUint>) -> Result<(), GeneratorError> {
+		Ok(())
+	}
+}
+
+
 fn build_converter_operation_common<'model, Gen>(gen: &Gen, op: Operation, type_kind: VersionedTypeKind, ver_type: &model::TypeVersionInfo<&'model model::TypeVersionDefinition>, prev_ver: &BigUint) -> Result<OperationInfo<'model>, GeneratorError> where
 	Gen : TypeGenerator<'model>
 {
@@ -1243,66 +1259,37 @@ impl <'model, Lang: GeneratorNameMapping> Generator<'model> for ExternTypeChecke
 
 
 
-pub trait GeneratorFactory<'model> {
-	type ConstGen: ConstGenerator<'model>;
-	type VersionedTypeGen: TypeGeneratorGenerate<'model>;
-	type InterfaceTypeGen: TypeGeneratorGenerate<'model>;
+pub trait GeneratorFactory<'a> {
+	type ConstGen: ConstGenerator<'a>;
+	type VersionedTypeGen: TypeGeneratorGenerate<'a>;
+	type InterfaceTypeGen: TypeGeneratorGenerate<'a>;
 
-	fn create_constant_generator(&self, constant: Named<'model, model::Constant>) -> Result<Option<Self::ConstGen>, GeneratorError>;
-	fn create_versioned_type_generator(&self, t: Named<'model, model::VersionedTypeDefinitionData>) -> Result<Option<Self::VersionedTypeGen>, GeneratorError>;
-	fn create_interface_type_generator(&self, t: Named<'model, model::InterfaceTypeDefinitionData>) -> Result<Option<Self::InterfaceTypeGen>, GeneratorError>;
+	fn create_constant_generator(&'a mut self, constant: Named<'a, model::Constant>) -> Result<Self::ConstGen, GeneratorError>;
+	fn create_versioned_type_generator(&'a mut self, t: Named<'a, model::VersionedTypeDefinitionData>) -> Result<Self::VersionedTypeGen, GeneratorError>;
+	fn create_interface_type_generator(&'a mut self, t: Named<'a, model::InterfaceTypeDefinitionData>) -> Result<Self::InterfaceTypeGen, GeneratorError>;
 }
 
-pub trait CodeGenerator<'model> {
-	fn generate(&self, model: &'model model::Verilization) -> Result<(), GeneratorError>;
+pub trait CodeGenerator<'a> {
+	fn generate(&'a mut self, model: &'a model::Verilization) -> Result<(), GeneratorError>;
 }
 
-impl <'model, TImpl: GeneratorFactory<'model> + GeneratorNameMapping> CodeGenerator<'model> for TImpl {
-	fn generate(&self, model: &'model model::Verilization) -> Result<(), GeneratorError> {
+impl <'a, TImpl: for<'b> GeneratorFactory<'b>> CodeGenerator<'a> for TImpl {
+	fn generate(&'a mut self, model: &'a model::Verilization) -> Result<(), GeneratorError> {
 		for constant in model.constants() {
-			if let Some(mut gen) = self.create_constant_generator(constant)? {
-				gen.generate()?;
-			}
+			let mut gen = self.create_constant_generator(constant)?;
+			gen.generate()?;
 		}
 
 		for t in model.types() {
 			match t {
 				model::NamedTypeDefinition::StructType(t) | model::NamedTypeDefinition::EnumType(t) => {
-					if let Some(mut gen) = self.create_versioned_type_generator(t)? {
-						gen.generate()?;
-					}
+					let mut gen = self.create_versioned_type_generator(t)?;
+					gen.generate()?;
 				},
-				model::NamedTypeDefinition::ExternType(t) => {
-					let tc = ExternTypeChecker::<Self> {
-						model: model,
-						scope: t.scope(),
-						dummy_lang: PhantomData {},
-					};
-
-					let check_extern_literal_type = |lit_type: &model::Type| -> Result<(), GeneratorError> {
-						let lang_type = tc.build_type(&BigUint::one(), lit_type)?;
-						if !lang_type.is_final_in_version(&BigUint::one(), model) {
-							return Err(GeneratorError::TypeNotFinal)
-						}
-
-						Ok(())
-					};
-
-
-					for literal in t.literals() {
-						match literal {
-							model::ExternLiteralSpecifier::Integer(..) => (),
-							model::ExternLiteralSpecifier::String => (),
-							model::ExternLiteralSpecifier::Sequence(elem_type) => check_extern_literal_type(elem_type)?,
-							model::ExternLiteralSpecifier::Case(_, param_types) => param_types.iter().try_for_each(check_extern_literal_type)?,
-							model::ExternLiteralSpecifier::Record(fields) => fields.iter().try_for_each(|(_, field)| check_extern_literal_type(&field.field_type))?,
-						}
-					}
-				},
+				model::NamedTypeDefinition::ExternType(_) => (),
 				model::NamedTypeDefinition::InterfaceType(t) => {
-					if let Some(mut gen) = self.create_interface_type_generator(t)? {
-						gen.generate()?;
-					}
+					let mut gen = self.create_interface_type_generator(t)?;
+					gen.generate()?;
 				}
 			}
 		}

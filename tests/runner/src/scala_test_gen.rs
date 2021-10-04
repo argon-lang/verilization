@@ -13,42 +13,42 @@ use std::io::Write;
 use rand::Rng;
 use crate::value_generator::{generate_random_value, write_constant_value};
 
-struct ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
-    file: &'output mut F,
-    options: &'opt ScalaOptions,
-    random: &'model mut R,
-    model: &'model Verilization,
-	type_def: Named<'model, model::VersionedTypeDefinitionData>,
-	scope: model::Scope<'model>,
+struct ScalaTestCaseGen<'a, F, R> {
+    file: &'a mut F,
+    options: &'a ScalaOptions,
+    random: &'a mut R,
+    model: &'a Verilization,
+	type_def: Named<'a, model::VersionedTypeDefinitionData>,
+	scope: model::Scope<'a>,
 }
 
 
-impl <'model, 'opt, 'state, 'output, F: Write, R> GeneratorWithFile for ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
+impl <'a, F: Write, R> GeneratorWithFile for ScalaTestCaseGen<'a, F, R> {
 	type GeneratorFile = F;
 	fn file(&mut self) -> &mut Self::GeneratorFile {
 		&mut self.file
 	}
 }
 
-impl <'model, 'opt, 'state, 'output, F: Write, R> Generator<'model> for ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
+impl <'a, F: Write, R> Generator<'a> for ScalaTestCaseGen<'a, F, R> {
     type Lang = verilization_lang_scala::ScalaLanguage;
 
-	fn model(&self) -> &'model model::Verilization {
+	fn model(&self) -> &'a model::Verilization {
 		self.model
 	}
 
-	fn scope(&self) -> &model::Scope<'model> {
+	fn scope(&self) -> &model::Scope<'a> {
 		&self.scope
 	}
 }
 
-impl <'model, 'opt, 'output, F: Write, R> ScalaGenerator<'model, 'opt> for ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
-	fn options(&self) -> &'opt ScalaOptions {
+impl <'a, F: Write, R> ScalaGenerator<'a> for ScalaTestCaseGen<'a, F, R> {
+	fn options(&self) -> &'a ScalaOptions {
 		self.options
 	}
 }
 
-impl <'model, 'opt, 'output, F: Write, R: Rng> ScalaTestCaseGen<'model, 'opt, 'output, F, R> {
+impl <'a, F: Write, R: Rng> ScalaTestCaseGen<'a, F, R> {
 
     fn generate(&mut self) -> Result<(), VError> {
         for ver in self.type_def.versions() {

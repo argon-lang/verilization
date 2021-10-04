@@ -65,6 +65,7 @@ pub trait Language {
 
 }
 
+
 pub trait LanguageOptions : Sized {
 	/// An intermediate step for the language options.
 	type Builder : LanguageOptionsBuilder;
