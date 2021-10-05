@@ -1,0 +1,9 @@
+version 1;
+package interfaceExample;
+
+interface TestInterface {
+    version 1 {
+        identity<A>(a: A): A;
+        add(x: u32, y: u32): u32;
+    }
+}

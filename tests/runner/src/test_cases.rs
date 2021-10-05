@@ -17,6 +17,7 @@ pub const TEST_CASE_FILES: &[&str] = &[
     "final",
     "generics",
     "enum_versions",
+    "interface_example",
 ];
 
 

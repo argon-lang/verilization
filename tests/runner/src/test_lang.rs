@@ -41,6 +41,7 @@ impl TestLanguage for verilization_lang_typescript::TypeScriptLanguage {
                 ( PackageName::from_parts(&["enum", "versions"]), OsString::from("enum/versions") ),
                 ( PackageName::from_parts(&["genericsTest"]), OsString::from("genericsTest") ),
                 ( PackageName::from_parts(&["finalTest"]), OsString::from("finalTest") ),
+                ( PackageName::from_parts(&["interfaceExample"]), OsString::from("interfaceExample") ),
             ])),
             library_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( PackageName::from_parts(&[]), OsString::from("@verilization/runtime") ),
@@ -86,6 +87,7 @@ impl TestLanguage for verilization_lang_java::JavaLanguage {
                 ( PackageName::from_parts(&["enum", "versions"]), PackageName::from_parts(&["enum_", "versions"]) ),
                 ( PackageName::from_parts(&["genericsTest"]), PackageName::from_parts(&["genericsTest"]) ),
                 ( PackageName::from_parts(&["finalTest"]), PackageName::from_parts(&["finalTest"]) ),
+                ( PackageName::from_parts(&["interfaceExample"]), PackageName::from_parts(&["interfaceExample"]) ),
             ])),
             library_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( PackageName::from_parts(&[]), PackageName::from_parts(&["dev", "argon", "verilization", "runtime"]) ),
@@ -148,6 +150,7 @@ impl TestLanguage for verilization_lang_scala::ScalaLanguage {
                 ( PackageName::from_parts(&["enum", "versions"]), PackageName::from_parts(&["enum_", "versions"]) ),
                 ( PackageName::from_parts(&["genericsTest"]), PackageName::from_parts(&["genericsTest"]) ),
                 ( PackageName::from_parts(&["finalTest"]), PackageName::from_parts(&["finalTest"]) ),
+                ( PackageName::from_parts(&["interfaceExample"]), PackageName::from_parts(&["interfaceExample"]) ),
             ])),
             library_mapping: HashMap::<_, _>::from_iter(IntoIter::new([
                 ( PackageName::from_parts(&[]), PackageName::from_parts(&["dev", "argon", "verilization", "scala_runtime"]) ),

@@ -254,16 +254,22 @@ impl <'model> LangInterfaceMethods<'model> {
 		for (name, method) in self.ver_type.ver_type.methods() {
 			let scope = method.scope();
 
+			let mut type_args = self.type_args.clone();
+			for type_param in method.type_params() {
+				type_args.insert(type_param.clone(), LangType::TypeParameter(type_param.clone()));
+			}
+
+
 			let mut parameters = Vec::new();
 			for param in method.parameters() {
-				let param_type = build_type_impl(self.model, &self.ver_type.version, &param.param_type, &scope, &self.type_args)?;
+				let param_type = build_type_impl(self.model, &self.ver_type.version, &param.param_type, &scope, &type_args)?;
 				parameters.push(LangInterfaceMethodParameter {
 					name: &param.name,
 					param_type,
 				});
 			}
 
-			let return_type = build_type_impl(self.model, &self.ver_type.version, method.return_type(), &scope, &self.type_args)?;
+			let return_type = build_type_impl(self.model, &self.ver_type.version, method.return_type(), &scope, &type_args)?;
 
 			methods.push(LangInterfaceMethod {
 				name,

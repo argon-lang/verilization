@@ -367,13 +367,14 @@ fn each_method_sig_type(method: OfInterface<InterfaceMethod>, f: impl Fn(&Type) 
 }
 
 fn type_check_interface_type<'model>(model: &'model Verilization, t: Named<'model, InterfaceTypeDefinitionData>) -> Result<(), TypeCheckError> {
-    let tc = TypeCheck {
-        model: model,
-        scope: t.scope(),
-    };
 
     for ver in t.versions() {
         for (_, method) in ver.ver_type.methods() {
+            let tc = TypeCheck {
+                model: model,
+                scope: method.scope(),
+            };
+
             each_method_sig_type(method, |sig_type| tc.check_type(&ver.version, sig_type))?;
         }
     }
@@ -381,6 +382,11 @@ fn type_check_interface_type<'model>(model: &'model Verilization, t: Named<'mode
     if t.is_final() {
         if let Some(last_ver) = t.versions().last() {
             for (_, method) in last_ver.ver_type.methods() {
+                let tc = TypeCheck {
+                    model: model,
+                    scope: method.scope(),
+                };
+
                 each_method_sig_type(method, |sig_type| {
                     if !tc.check_is_final(&last_ver.version, sig_type)? {
                         return Err(TypeCheckError::TypeNotFinal(t.name().clone()))

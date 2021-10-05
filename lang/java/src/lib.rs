@@ -519,6 +519,33 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: 'a + model::GeneratableType<'a>> T
 					writeln!(self.file, " {{}}")?;
 				}
 			},
+			LangType::Interface(_, version, _, methods) => {
+				self.write_indent()?;
+				write!(self.file, "public static interface V{}", version)?;
+				self.write_type_params(self.type_def().type_params())?;
+				writeln!(self.file, " {{")?;
+
+				self.indent_increase();
+
+				let methods = methods.build()?;
+
+				for method in methods {
+					self.write_indent()?;
+					write!(self.file, "public ")?;
+					self.write_type_params(&method.type_params)?;
+					if !method.type_params.is_empty() {
+						write!(self.file, " ")?;
+					}
+					self.write_type(&method.return_type, false)?;
+					write!(self.file, " {}", make_field_name(method.name))?;
+					write!(self.file, "(")?;
+					for_sep!(param, method.parameters, { write!(self.file, ", ")? }, {
+						self.write_type(&param.param_type, false)?;
+						write!(self.file, " {}", param.name)?;
+					});
+					writeln!(self.file, ");")?;
+				}
+			},
 			_ => return Err(GeneratorError::CouldNotGenerateType)
 		}
 

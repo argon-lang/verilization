@@ -251,7 +251,7 @@ fn version_directive(input: &str) -> PResult<&str, BigUint> {
 // Ex: package hello.world;
 fn package_directive(input: &str) -> PResult<&str, model::PackageName> {
 	let (input, _) = kw_package(input)?;
-	let (input, pkg) = separated_list1(sym_dot, identifier)(input)?;
+	let (input, pkg) = cut(separated_list1(sym_dot, identifier))(input)?;
 	let (input, _) = sym_semicolon(input)?;
 
 	Ok((input, model::PackageName { package: pkg }))

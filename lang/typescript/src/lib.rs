@@ -528,6 +528,7 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: 'a + model::GeneratableType<'a>> T
 		match t.clone() {
 			LangType::Versioned(VersionedTypeKind::Struct, _, ver, _, fields) => {
 				version = ver;
+
 				write!(self.file, "export interface V{}", version)?;
 				self.write_type_params(self.type_def().type_params())?;
 				writeln!(self.file, " {{")?;
@@ -543,6 +544,7 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: 'a + model::GeneratableType<'a>> T
 			},
 			LangType::Versioned(VersionedTypeKind::Enum, _, ver, _, fields) => {
 				version = ver;
+
 				write!(self.file, "export type V{}", version)?;
 				self.write_type_params(self.type_def().type_params())?;
 				write!(self.file, " = ")?;
@@ -567,6 +569,35 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: 'a + model::GeneratableType<'a>> T
 				self.indent_decrease();
 		
 				writeln!(self.file, ";")?;
+			},
+			LangType::Interface(_, ver, _, methods) => {
+				version = ver;
+
+				self.write_indent()?;
+				write!(self.file, "interface V{}", version)?;
+				self.write_type_params(self.type_def().type_params())?;
+				writeln!(self.file, " {{")?;
+
+				self.indent_increase();
+
+				let methods = methods.build()?;
+
+				for method in methods {
+					self.write_indent()?;
+					write!(self.file, "{}", make_field_name(method.name))?;
+					self.write_type_params(&method.type_params)?;
+					write!(self.file, "(")?;
+					for_sep!(param, method.parameters, { write!(self.file, ", ")? }, {
+						write!(self.file, "{}: ", param.name)?;
+						self.write_type(&param.param_type)?;
+					});
+					write!(self.file, "): ")?;
+					self.write_type(&method.return_type)?;
+					writeln!(self.file, ";")?;
+				}
+
+				self.indent_decrease();
+				writeln!(self.file, "}}")?;
 			},
 
 			_ => return Err(GeneratorError::CouldNotGenerateType)
