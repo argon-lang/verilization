@@ -62,6 +62,21 @@ fn open_scala_file<'a, Output: OutputHandler<'a>>(options: &ScalaOptions, output
 }
 
 
+fn write_operation_target<'a, Gen : ScalaGenerator<'a>>(gen: &mut Gen, target: &OperationTarget) -> Result<(), GeneratorError> {
+	match target {
+		OperationTarget::VersionedType(name, version) | OperationTarget::InterfaceType(name, version) => {
+			gen.write_qual_name(name)?;
+			write!(gen.file(), ".V{}", version)?;
+		},
+		OperationTarget::ExternType(name) => {
+			gen.write_qual_name(name)?;
+		},
+	}
+
+	Ok(())
+}
+
+
 pub trait ScalaGenerator<'a> : Generator<'a> + GeneratorWithFile {
 	fn options(&self) -> &'a ScalaOptions;
 
@@ -113,10 +128,20 @@ pub trait ScalaGenerator<'a> : Generator<'a> + GeneratorWithFile {
 	
 	fn write_type(&mut self, t: &LangType<'a>) -> Result<(), GeneratorError> {
 		Ok(match t {
-			LangType::Versioned(_, name, version, args, _) | LangType::Interface(name, version, args, _) => {
+			LangType::Versioned(_, name, version, args, _) => {
 				self.write_qual_name(&name)?;
 				write!(self.file(), ".V{}", version)?;
 				self.write_type_args(args)?;
+			},
+			
+			LangType::Interface(name, version, args, _) => {
+				self.write_qual_name(&name)?;
+				write!(self.file(), ".V{}[R, E", version)?;
+				for t in args {
+					write!(self.file(), ", ")?;
+					self.write_type(t)?;
+				}
+				write!(self.file(), "]")?;
 			},
 
 			LangType::Extern(name, args, _) => {
@@ -141,6 +166,9 @@ pub trait ScalaGenerator<'a> : Generator<'a> + GeneratorWithFile {
 				self.write_type(&*t)?;
 				write!(self.file(), "]")?;
 			},
+
+			LangType::RemoteObjectId => write!(self.file(), "{}.RemoteObjectId", RUNTIME_PACKAGE)?,
+			LangType::RemoteConnection => write!(self.file(), "{}.RemoteConnection[R, E]", RUNTIME_PACKAGE)?,
 		})
 	}
 
@@ -166,6 +194,7 @@ pub trait ScalaGenerator<'a> : Generator<'a> + GeneratorWithFile {
 			Operation::FromSequence => write!(self.file(), "fromSequence")?,
 			Operation::FromRecord(_) => write!(self.file(), "fromRecord")?,
 			Operation::FromCase(name) => write!(self.file(), "fromCase{}", make_type_name(name))?,
+			Operation::CreateRemoteWrapper => write!(self.file(), "createRemoteWrapper")?,
 		}
 
 		Ok(())
@@ -209,29 +238,21 @@ pub trait ScalaGenerator<'a> : Generator<'a> + GeneratorWithFile {
 				self.write_type(t)?;
 				write!(self.file(), "]")?;
 			},
-			LangExpr::ReadDiscriminator => write!(self.file(), "{}.Nat.codec.read(reader)", RUNTIME_PACKAGE)?,
-			LangExpr::WriteDiscriminator(value) => write!(self.file(), "{}.Nat.codec.write(writer, {})", RUNTIME_PACKAGE, value)?,
+			LangExpr::ReadDiscriminator => write!(self.file(), "{}.Nat.codec.read({})", RUNTIME_PACKAGE, ScalaLanguage::format_reader_name())?,
+			LangExpr::WriteDiscriminator(value) => write!(self.file(), "{}.Nat.codec.write({}, {})", RUNTIME_PACKAGE, ScalaLanguage::format_writer_name(), value)?,
 			LangExpr::CodecRead { codec } => {
 				self.write_expr(&*codec)?;
-				write!(self.file(), ".read(reader)")?;
+				write!(self.file(), ".read({})", ScalaLanguage::format_reader_name())?;
 			},
 			LangExpr::CodecWrite { codec, value } => {
 				self.write_expr(&*codec)?;
-				write!(self.file(), ".write(writer, ")?;
+				write!(self.file(), ".write({}, ", ScalaLanguage::format_writer_name())?;
 				self.write_expr(value)?;
 				write!(self.file(), ")")?;
 			},
 			LangExpr::InvokeOperation(op, target, type_args, args) => {
-				match target {
-					OperationTarget::VersionedType(name, version) | OperationTarget::InterfaceType(name, version) => {
-						self.write_qual_name(name)?;
-						write!(self.file(), ".V{}.", version)?;
-					},
-					OperationTarget::ExternType(name) => {
-						self.write_qual_name(name)?;
-						write!(self.file(), ".")?;
-					},
-				}
+				write_operation_target(self, target)?;
+				write!(self.file(), ".")?;
 				self.write_operation_name(op)?;
 				self.write_type_args(type_args)?;
 				match op {
@@ -280,6 +301,20 @@ pub trait ScalaGenerator<'a> : Generator<'a> + GeneratorWithFile {
 				self.write_expr(value)?;
 				write!(self.file(), ".{}", make_field_name(field_name))?;
 			},
+			LangExpr::ReadRemoteObject { object_type_target, connection } => {
+				self.write_expr(connection)?;
+				write!(self.file(), ".readObject(")?;
+				write_operation_target(self, object_type_target)?;
+				write!(self.file(), ".createRemoteWrapper(")?;
+				self.write_expr(connection)?;
+				write!(self.file(), "))")?;
+			},
+			LangExpr::WriteRemoteObject { object, connection } => {
+				self.write_expr(connection)?;
+				write!(self.file(), ".writeObject(")?;
+				self.write_expr(object)?;
+				write!(self.file(), ")")?;
+			},
 		}
 
 		Ok(())
@@ -306,6 +341,22 @@ impl GeneratorNameMapping for ScalaLanguage {
 
 	fn codec_write_value_name() -> &'static str {
 		"value"
+	}
+
+	fn format_writer_name() -> &'static str {
+		"writer"
+	}
+
+	fn format_reader_name() -> &'static str {
+		"reader"
+	}
+
+	fn connection_name() -> &'static str {
+		"connection"
+	}
+
+	fn object_id_name() -> &'static str {
+		"objectId"
 	}
 
 	fn codec_codec_param_name(param: &str) -> String {
@@ -498,9 +549,11 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: 'a + model::GeneratableType<'a>> T
 			},
 			LangType::Interface(_, version, _, methods) => {
 				self.write_indent()?;
-				write!(self.file, "trait V{}", version)?;
-				self.write_type_params(self.type_def().type_params())?;
-				writeln!(self.file, " {{")?;
+				write!(self.file, "trait V{}[R, E", version)?;
+				for t in self.type_def().type_params() {
+					write!(self.file, ", {}", t)?;
+				}
+				writeln!(self.file, "] {{")?;
 
 				self.indent_increase();
 
@@ -511,14 +564,29 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: 'a + model::GeneratableType<'a>> T
 					write!(self.file, "def {}", make_field_name(method.name))?;
 					self.write_type_params(&method.type_params)?;
 					write!(self.file, "(")?;
+
+					for_sep!(type_param, method.type_params, { write!(self.file, ", ")? }, {
+						write!(self.file, "{}_codec: {}.Codec[{}]", type_param, RUNTIME_PACKAGE, type_param)?;
+					});
+					if !method.type_params.is_empty() && !method.parameters.is_empty() {
+						write!(self.file, ", ")?;
+					}
 					for_sep!(param, method.parameters, { write!(self.file, ", ")? }, {
 						write!(self.file, "{}: ", param.name)?;
 						self.write_type(&param.param_type)?;
 					});
-					write!(self.file, "): ")?;
+					write!(self.file, "): zio.ZIO[R, E, ")?;
 					self.write_type(&method.return_type)?;
-					writeln!(self.file)?;
+					writeln!(self.file, "]")?;
 				}
+
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
+
+				self.write_indent()?;
+				writeln!(self.file, "object V{} {{", version)?;
+				self.indent_increase();
 			},
 			_ => return Err(GeneratorError::CouldNotGenerateType)
 		}
@@ -527,7 +595,17 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: 'a + model::GeneratableType<'a>> T
 	}
 
 	fn write_operation(&mut self, operation: OperationInfo<'a>) -> Result<(), GeneratorError> {
-		let is_func = !operation.type_params.is_empty() || !operation.params.is_empty();
+		let mut type_params = Vec::new();
+		if operation.params.iter().any(|(_, param)| match param { LangType::RemoteConnection => true, _ => false, }) {
+			type_params.push("R");
+			type_params.push("E");
+		}
+		for type_param in &operation.type_params {
+			type_params.push(type_param);
+		}
+
+
+		let is_func = !type_params.is_empty() || !operation.params.is_empty();
 
 		self.write_indent()?;
 		if is_func {
@@ -538,7 +616,7 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: 'a + model::GeneratableType<'a>> T
 		}
 
 		self.write_operation_name(&operation.operation)?;
-		self.write_type_params(&operation.type_params)?;
+		self.write_type_params(&type_params)?;
 		if is_func {
 			write!(self.file, "(")?;
 			for_sep!((param_name, param), operation.params, { write!(self.file, ", ")?; }, {
@@ -603,14 +681,14 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: model::GeneratableType<'a>> ScalaT
 
 
 				self.write_indent()?;
-				write!(self.file, "override def read[R, E](reader: {}.FormatReader[R, E]): zio.ZIO[R, E, ", RUNTIME_PACKAGE)?;
+				write!(self.file, "override def read[R, E]({}: {}.FormatReader[R, E]): zio.ZIO[R, E, ", ScalaLanguage::format_reader_name(), RUNTIME_PACKAGE)?;
 				self.write_type(&t)?;
 				write!(self.file, "] = ")?;
 				
 				self.write_statement(*read, true)?;
 
 				self.write_indent()?;
-				write!(self.file, "override def write[R, E](writer: {}.FormatWriter[R, E], value: ", RUNTIME_PACKAGE)?;
+				write!(self.file, "override def write[R, E]({}: {}.FormatWriter[R, E], value: ", ScalaLanguage::format_writer_name(), RUNTIME_PACKAGE)?;
 				self.write_type(&t)?;
 				write!(self.file, "): zio.ZIO[R, E, Unit] = ")?;
 
@@ -642,6 +720,61 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: model::GeneratableType<'a>> ScalaT
 				self.indent_decrease();
 				self.write_indent()?;
 				writeln!(self.file, "}};")?;
+			},
+
+			LangExprStmt::CreateRemoteWrapper { t, connection, id, methods } => {
+				write!(self.file, "new {}.RemoteObject[R, E](", RUNTIME_PACKAGE)?;
+				self.write_expr(&connection)?;
+				write!(self.file, ", ")?;
+				self.write_expr(&id)?;
+				write!(self.file, ") with ")?;
+				self.write_type(&t)?;
+				writeln!(self.file, " {{")?;
+				self.indent_increase();
+
+
+				for method in methods {
+					self.write_indent()?;
+					write!(self.file, "override def {}", method.name)?;
+
+					self.write_type_params(&method.type_params)?;
+
+					write!(self.file, "(")?;
+					for_sep!(type_param, method.type_params, { write!(self.file, ", ")? }, {
+						write!(self.file, "{}_codec: {}.Codec[{}]", type_param, RUNTIME_PACKAGE, type_param)?;
+					});
+					if !method.type_params.is_empty() && !method.parameters.is_empty() {
+						write!(self.file, ", ")?;
+					}
+					for_sep!(param, &method.parameters, { write!(self.file, ", ")? }, {
+						write!(self.file, "{}: ", param.name)?;
+						self.write_type(&param.param_type)?;
+					});
+					write!(self.file, "): zio.ZIO[R, E, ")?;
+					self.write_type(&method.return_type)?;
+					writeln!(self.file, "] =")?;
+					self.indent_increase();
+
+					
+					self.write_indent()?;
+					write!(self.file(), "this.remote_connection.invokeMethod(this.object_id, \"{}\", _root_.scala.collection.immutable.Seq[{}.RemoteConnection.MethodArgument[_]](", method.name, RUNTIME_PACKAGE)?;
+					for_sep!(param, &method.parameters, { write!(self.file(), ", ")?; }, {
+						write!(self.file(), "new {}.RemoteConnection.MethodArgument[", RUNTIME_PACKAGE)?;
+						self.write_type(&param.param_type)?;
+						write!(self.file(), "]({}, ", param.name)?;
+						self.write_expr(&self.build_codec(param.param_type.clone())?)?;
+						write!(self.file(), ")")?;
+					});
+					write!(self.file(), "), ")?;
+					self.write_expr(&self.build_codec(method.return_type.clone())?)?;
+					writeln!(self.file(), ")")?;
+
+					self.indent_decrease();
+				}
+
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
 			},
 		}
 
@@ -876,11 +1009,11 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: model::GeneratableType<'a>> ScalaT
 		Ok(())
 	}
 
-	fn write_type_params(&mut self, params: &Vec<String>) -> Result<(), GeneratorError> {
+	fn write_type_params<S: AsRef<str>>(&mut self, params: &Vec<S>) -> Result<(), GeneratorError> {
 		if !params.is_empty() {
 			write!(self.file, "[")?;
 			for_sep!(param, params, { write!(self.file, ", ")?; }, {
-				write!(self.file, "{}", param)?;
+				write!(self.file, "{}", param.as_ref())?;
 			});
 			write!(self.file, "]")?;
 		}

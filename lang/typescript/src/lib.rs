@@ -43,6 +43,26 @@ fn make_field_name(field_name: &str) -> String {
 	name
 }
 
+
+fn write_operation_target<'a, Gen : TSGenerator<'a>>(gen: &mut Gen, target: &OperationTarget) -> Result<(), GeneratorError> {
+	match target {
+		OperationTarget::VersionedType(name, version) | OperationTarget::InterfaceType(name, version) => {
+			// Only use a qualifier if not a value of the current type.
+			if gen.generator_element_name() != Some(name) {
+				gen.write_import_name(name)?;
+				write!(gen.file(), ".")?;
+			}
+	
+			write!(gen.file(), "V{}", version)?;
+		},
+		OperationTarget::ExternType(name) => {
+			gen.write_import_name(name)?;
+		},
+	}
+
+	Ok(())
+}
+
 pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 	type ReferencedTypeIterator : Iterator<Item = &'model model::QualifiedName>;
 
@@ -181,6 +201,9 @@ pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 				self.write_type(&*t)?;
 				write!(self.file(), ">")?;
 			},
+
+			LangType::RemoteObjectId => write!(self.file(), "RemoteObjectId")?,
+			LangType::RemoteConnection => write!(self.file(), "RemoteConnection")?,
 		})
 	}
 
@@ -194,6 +217,7 @@ pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 			Operation::FromSequence => write!(self.file(), "fromSequence")?,
 			Operation::FromRecord(_) => write!(self.file(), "fromRecord")?,
 			Operation::FromCase(name) => write!(self.file(), "fromCase{}", make_type_name(name))?,
+			Operation::CreateRemoteWrapper => write!(self.file(), "createRemoteWrapper")?,
 		}
 
 		Ok(())
@@ -245,21 +269,8 @@ pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 				write!(self.file(), ")")?;
 			},
 			LangExpr::InvokeOperation(op, target, type_args, args) => {
-				match target {
-					OperationTarget::VersionedType(name, version) | OperationTarget::InterfaceType(name, version) => {
-						// Only use a qualifier if not a value of the current type.
-						if self.generator_element_name() != Some(name) {
-							self.write_import_name(name)?;
-							write!(self.file(), ".")?;
-						}
-			
-						write!(self.file(), "V{}.", version)?;
-					},
-					OperationTarget::ExternType(name) => {
-						self.write_import_name(name)?;
-						write!(self.file(), ".")?;
-					},
-				}
+				write_operation_target(self, target)?;
+				write!(self.file(), ".")?;
 				self.write_operation_name(op)?;
 				self.write_type_args(type_args)?;
 
@@ -310,6 +321,20 @@ pub trait TSGenerator<'model> : Generator<'model> + GeneratorWithFile {
 				self.write_expr(value)?;
 				write!(self.file(), ".{}", make_field_name(field_name))?;
 			},
+			LangExpr::ReadRemoteObject { object_type_target, connection } => {
+				self.write_expr(connection)?;
+				write!(self.file(), ".readObject(")?;
+				write_operation_target(self, object_type_target)?;
+				write!(self.file(), ".createRemoteWrapper(")?;
+				self.write_expr(connection)?;
+				write!(self.file(), "))")?;
+			},
+			LangExpr::WriteRemoteObject { object, connection } => {
+				self.write_expr(connection)?;
+				write!(self.file(), ".writeObject(")?;
+				self.write_expr(object)?;
+				write!(self.file(), ")")?;
+			},
 		}
 
 		Ok(())
@@ -335,6 +360,22 @@ impl GeneratorNameMapping for TypeScriptLanguage {
 
 	fn codec_write_value_name() -> &'static str {
 		"value"
+	}
+
+	fn format_writer_name() -> &'static str {
+		"writer"
+	}
+
+	fn format_reader_name() -> &'static str {
+		"reader"
+	}
+
+	fn connection_name() -> &'static str {
+		"connection"
+	}
+
+	fn object_id_name() -> &'static str {
+		"objectId"
 	}
 
 	fn codec_codec_param_name(param: &str) -> String {
@@ -516,7 +557,7 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: 'a + model::GeneratableType<'a>> T
 	}
 
 	fn write_header(&mut self) -> Result<(), GeneratorError> {
-		writeln!(self.file, "import {{Codec, FormatWriter, FormatReader, Converter, natCodec}} from \"@verilization/runtime\";")?;
+		writeln!(self.file, "import {{Codec, FormatWriter, FormatReader, Converter, natCodec, RemoteObjectId, RemoteConnection, RemoteObject}} from \"@verilization/runtime\";")?;
 		self.write_imports()?;
 		
 		Ok(())
@@ -587,13 +628,19 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: 'a + model::GeneratableType<'a>> T
 					write!(self.file, "{}", make_field_name(method.name))?;
 					self.write_type_params(&method.type_params)?;
 					write!(self.file, "(")?;
+					for_sep!(type_param, method.type_params, { write!(self.file, ", ")? }, {
+						write!(self.file, "{}_codec: Codec<{}>", type_param, type_param)?;
+					});
+					if !method.type_params.is_empty() && !method.parameters.is_empty() {
+						write!(self.file, ", ")?;
+					}
 					for_sep!(param, method.parameters, { write!(self.file, ", ")? }, {
 						write!(self.file, "{}: ", param.name)?;
 						self.write_type(&param.param_type)?;
 					});
-					write!(self.file, "): ")?;
+					write!(self.file, "): Promise<")?;
 					self.write_type(&method.return_type)?;
-					writeln!(self.file, ";")?;
+					writeln!(self.file, ">;")?;
 				}
 
 				self.indent_decrease();
@@ -741,7 +788,7 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: model::GeneratableType<'a>> TSType
 				self.indent_decrease();
 				self.write_indent()?;
 				writeln!(self.file, "}};")?;
-			}
+			},
 
 			LangExprStmt::CreateConverter { from_type, to_type, body } => {
 				writeln!(self.file, "{{")?;
@@ -763,7 +810,69 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: model::GeneratableType<'a>> TSType
 				self.indent_decrease();
 				self.write_indent()?;
 				writeln!(self.file, "}};")?;
-			}
+			},
+
+			LangExprStmt::CreateRemoteWrapper { t, connection, id, methods } => {
+				write!(self.file, "((): (RemoteObject & ")?;
+				self.write_type(t)?;
+				writeln!(self.file, ") => ({{")?;
+				self.indent_increase();
+
+				self.write_indent()?;
+				write!(self.file, "[RemoteObject.connectionSymbol]: ")?;
+				self.write_expr(connection)?;
+				writeln!(self.file, ",")?;
+
+				self.write_indent()?;
+				write!(self.file, "[RemoteObject.objectIdSymbol]: ")?;
+				self.write_expr(id)?;
+				writeln!(self.file, ",")?;
+
+
+				for method in methods {
+					self.write_indent()?;
+					write!(self.file, "{}", method.name)?;
+
+					self.write_type_params(&method.type_params)?;
+
+					write!(self.file, "(")?;
+					for_sep!(type_param, method.type_params, { write!(self.file, ", ")? }, {
+						write!(self.file, "{}_codec: Codec<{}>", type_param, type_param)?;
+					});
+					if !method.type_params.is_empty() && !method.parameters.is_empty() {
+						write!(self.file, ", ")?;
+					}
+					for_sep!(param, &method.parameters, { write!(self.file, ", ")? }, {
+						write!(self.file, "{}: ", param.name)?;
+						self.write_type(&param.param_type)?;
+					});
+					write!(self.file, "): Promise<")?;
+					self.write_type(&method.return_type)?;
+					writeln!(self.file, "> {{")?;
+					self.indent_increase();
+					
+					self.write_indent()?;
+					write!(self.file(), "return this[RemoteObject.connectionSymbol].invokeMethod(this[RemoteObject.objectIdSymbol], \"{}\", [", method.name)?;
+					for_sep!(param, &method.parameters, { write!(self.file(), ", ")?; }, {
+						write!(self.file(), "RemoteConnection.wrapArgument<")?;
+						self.write_type(&param.param_type)?;
+						write!(self.file(), ">({{ value: {}, codec: ", param.name)?;
+						self.write_expr(&self.build_codec(param.param_type.clone())?)?;
+						write!(self.file(), "}})")?;
+					});
+					write!(self.file(), "], ")?;
+					self.write_expr(&self.build_codec(method.return_type.clone())?)?;
+					writeln!(self.file(), ")")?;
+
+					self.indent_decrease();
+					self.write_indent()?;
+					writeln!(self.file(), "}},")?;
+				}
+
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}))();")?;
+			},
 		}
 
 		Ok(())

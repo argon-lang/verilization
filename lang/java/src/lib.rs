@@ -60,6 +60,22 @@ fn open_java_file<'a, Output: OutputHandler<'a>>(options: &JavaOptions, output: 
 	Ok(output.create_file(path)?)
 }
 
+
+fn write_operation_target<'a, Gen : JavaGenerator<'a>>(gen: &mut Gen, target: &OperationTarget) -> Result<(), GeneratorError> {
+	match target {
+		OperationTarget::VersionedType(name, version) | OperationTarget::InterfaceType(name, version) => {
+			gen.write_qual_name(name)?;
+			write!(gen.file(), ".V{}", version)?;
+		},
+		OperationTarget::ExternType(name) => {
+			gen.write_qual_name(name)?;
+		},
+	}
+
+	Ok(())
+}
+
+
 #[derive(Copy, Clone)]
 enum ResultHandling {
 	Return,
@@ -179,6 +195,9 @@ pub trait JavaGenerator<'a> : Generator<'a> + GeneratorWithFile {
 				self.write_type(&*t, true)?;
 				write!(self.file(), ">")?;
 			},
+
+			LangType::RemoteObjectId => write!(self.file(), "{}.RemoteObjectId", RUNTIME_PACKAGE)?,
+			LangType::RemoteConnection => write!(self.file(), "{}.RemoteConnection", RUNTIME_PACKAGE)?,
 		})
 	}
 
@@ -204,6 +223,7 @@ pub trait JavaGenerator<'a> : Generator<'a> + GeneratorWithFile {
 			Operation::FromSequence => write!(self.file(), "fromSequence")?,
 			Operation::FromRecord(_) => write!(self.file(), "fromRecord")?,
 			Operation::FromCase(name) => write!(self.file(), "fromCase{}", make_type_name(name))?,
+			Operation::CreateRemoteWrapper => write!(self.file(), "createRemoteWrapper")?,
 		}
 
 		Ok(())
@@ -260,16 +280,8 @@ pub trait JavaGenerator<'a> : Generator<'a> + GeneratorWithFile {
 				write!(self.file(), ")")?;
 			},
 			LangExpr::InvokeOperation(op, target, type_args, args) => {
-				match target {
-					OperationTarget::VersionedType(name, version) | OperationTarget::InterfaceType(name, version) => {
-						self.write_qual_name(name)?;
-						write!(self.file(), ".V{}.", version)?;
-					},
-					OperationTarget::ExternType(name) => {
-						self.write_qual_name(name)?;
-						write!(self.file(), ".")?;
-					},
-				}
+				write_operation_target(self, target)?;
+				write!(self.file(), ".")?;
 				self.write_type_args(type_args)?;
 				self.write_operation_name(op)?;
 				self.write_args(args)?;
@@ -309,6 +321,20 @@ pub trait JavaGenerator<'a> : Generator<'a> + GeneratorWithFile {
 				self.write_expr(value)?;
 				write!(self.file(), ".{}", make_field_name(field_name))?;
 			},
+			LangExpr::ReadRemoteObject { object_type_target, connection } => {
+				self.write_expr(connection)?;
+				write!(self.file(), ".readObject(")?;
+				write_operation_target(self, object_type_target)?;
+				write!(self.file(), ".createRemoteWrapper(")?;
+				self.write_expr(connection)?;
+				write!(self.file(), "))")?;
+			},
+			LangExpr::WriteRemoteObject { object, connection } => {
+				self.write_expr(connection)?;
+				write!(self.file(), ".writeObject(")?;
+				self.write_expr(object)?;
+				write!(self.file(), ")")?;
+			},
 		}
 
 		Ok(())
@@ -334,6 +360,22 @@ impl GeneratorNameMapping for JavaLanguage {
 
 	fn codec_write_value_name() -> &'static str {
 		"value"
+	}
+
+	fn format_writer_name() -> &'static str {
+		"writer"
+	}
+
+	fn format_reader_name() -> &'static str {
+		"reader"
+	}
+
+	fn connection_name() -> &'static str {
+		"connection"
+	}
+
+	fn object_id_name() -> &'static str {
+		"objectId"
 	}
 
 	fn codec_codec_param_name(param: &str) -> String {
@@ -539,11 +581,17 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: 'a + model::GeneratableType<'a>> T
 					self.write_type(&method.return_type, false)?;
 					write!(self.file, " {}", make_field_name(method.name))?;
 					write!(self.file, "(")?;
+					for_sep!(type_param, method.type_params, { write!(self.file, ", ")? }, {
+						write!(self.file, "{}.Codec<{}> {}_codec", RUNTIME_PACKAGE, type_param, type_param)?;
+					});
+					if !method.type_params.is_empty() && !method.parameters.is_empty() {
+						write!(self.file, ", ")?;
+					}
 					for_sep!(param, method.parameters, { write!(self.file, ", ")? }, {
 						self.write_type(&param.param_type, false)?;
 						write!(self.file, " {}", param.name)?;
 					});
-					writeln!(self.file, ");")?;
+					writeln!(self.file, ") throws java.io.IOException;")?;
 				}
 			},
 			_ => return Err(GeneratorError::CouldNotGenerateType)
@@ -730,6 +778,98 @@ impl <'a, Output: OutputHandler<'a>, TypeDef: model::GeneratableType<'a>> JavaTy
 				self.indent_decrease();
 				self.write_indent()?;
 				writeln!(self.file, "}};")?;
+			},
+
+			LangExprStmt::CreateRemoteWrapper { t, connection, id, methods } => {
+				writeln!(self.file, "switch(0) {{")?;
+				self.indent_increase();
+
+				self.write_indent()?;
+				writeln!(self.file, "default -> {{")?;
+				self.indent_increase();
+
+				self.write_indent()?;
+				write!(self.file, "final class RemoteWrapper extends {}.RemoteObject implements ", RUNTIME_PACKAGE)?;
+				self.write_type(t, false)?;
+				writeln!(self.file, " {{")?;
+				self.indent_increase();
+
+				self.write_indent()?;
+				writeln!(self.file, "public RemoteWrapper({}.RemoteConnection connection, {}.RemoteObjectId id) {{", RUNTIME_PACKAGE, RUNTIME_PACKAGE)?;
+				self.indent_increase();
+
+				self.write_indent()?;
+				writeln!(self.file, "super(connection, id);")?;
+
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
+
+
+				for method in methods {
+					self.write_indent()?;
+					writeln!(self.file, "@Override")?;
+
+					self.write_indent()?;
+					write!(self.file, "public ")?;
+					self.write_type_params(&method.type_params)?;
+					if !method.type_params.is_empty() {
+						write!(self.file, " ")?;
+					}
+
+					self.write_type(&method.return_type, false)?;
+
+					write!(self.file, " {}(", method.name)?;
+					for_sep!(type_param, method.type_params, { write!(self.file, ", ")? }, {
+						write!(self.file, "{}.Codec<{}> {}_codec", RUNTIME_PACKAGE, type_param, type_param)?;
+					});
+					if !method.type_params.is_empty() && !method.parameters.is_empty() {
+						write!(self.file, ", ")?;
+					}
+					for_sep!(param, &method.parameters, { write!(self.file, ", ")? }, {
+						self.write_type(&param.param_type, false)?;
+						write!(self.file, " {}", param.name)?;
+					});
+					writeln!(self.file, ") throws java.io.IOException {{")?;
+					self.indent_increase();
+					
+					self.write_indent()?;
+					write!(self.file(), "return this.connection.invokeMethod(this.id, \"{}\", new {}.RemoteConnection.MethodArgument<?>[] {{", method.name, RUNTIME_PACKAGE)?;
+					for_sep!(param, &method.parameters, { write!(self.file(), ", ")?; }, {
+						write!(self.file(), "new {}.RemoteConnection.MethodArgument<", RUNTIME_PACKAGE)?;
+						self.write_type(&param.param_type, true)?;
+						write!(self.file(), ">({}, ", param.name)?;
+						self.write_expr(&self.build_codec(param.param_type.clone())?)?;
+						write!(self.file(), ")")?;
+					});
+					write!(self.file(), "}}, ")?;
+					self.write_expr(&self.build_codec(method.return_type.clone())?)?;
+					writeln!(self.file(), ");")?;
+
+					self.indent_decrease();
+					self.write_indent()?;
+					writeln!(self.file, "}}")?;
+				}
+
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
+
+				self.write_indent()?;
+				write!(self.file, "yield new RemoteWrapper(")?;
+				self.write_expr(&connection)?;
+				write!(self.file, ", ")?;
+				self.write_expr(&id)?;
+				writeln!(self.file, ");")?;
+
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}}")?;
+
+				self.indent_decrease();
+				self.write_indent()?;
+				writeln!(self.file, "}};")?;
+
 			},
 
 		}

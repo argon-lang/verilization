@@ -23,6 +23,8 @@ pub enum LangType<'model> {
 	TypeParameter(String),
 	Converter(Box<LangType<'model>>, Box<LangType<'model>>),
 	Codec(Box<LangType<'model>>),
+	RemoteObjectId,
+	RemoteConnection,
 }
 
 impl <'model> LangType<'model> {
@@ -81,11 +83,7 @@ impl <'model> LangType<'model> {
 
 			LangType::TypeParameter(_) => true,
 
-			LangType::Converter(from, to) =>
-				from.is_final_in_version(version, model) && to.is_final_in_version(version, model),
-
-			LangType::Codec(elem) =>
-				elem.is_final_in_version(version, model),
+			LangType::RemoteObjectId | LangType::RemoteConnection | LangType::Converter(..) | LangType::Codec(_) => false,
 		}
 	}
 }
@@ -112,6 +110,7 @@ pub enum LangLiteral<'model> {
 	Record(Vec<LangField<'model>>),
 }
 
+#[derive(Clone)]
 pub struct LangInterfaceMethod<'model> {
 	pub name: &'model String,
 	pub type_params: &'model Vec<String>,
@@ -119,6 +118,7 @@ pub struct LangInterfaceMethod<'model> {
 	pub return_type: LangType<'model>,
 }
 
+#[derive(Clone)]
 pub struct LangInterfaceMethodParameter<'model> {
 	pub name: &'model String,
 	pub param_type: LangType<'model>,
@@ -294,6 +294,7 @@ pub enum Operation {
 	FromSequence,
 	FromCase(String),
 	FromRecord(Vec<String>),
+	CreateRemoteWrapper,
 }
 
 #[derive(Debug)]
@@ -334,6 +335,14 @@ pub enum LangExpr<'model> {
 	CreateStruct(&'model model::QualifiedName, BigUint, Vec<LangType<'model>>, Vec<(&'model String, LangExpr<'model>)>),
 	CreateEnum(&'model model::QualifiedName, BigUint, Vec<LangType<'model>>, &'model String, Box<LangExpr<'model>>),
 	StructField(&'model model::QualifiedName, BigUint, &'model String, Box<LangExpr<'model>>),
+	ReadRemoteObject {
+		object_type_target: OperationTarget<'model>,
+		connection: Box<LangExpr<'model>>,
+	},
+	WriteRemoteObject {
+		object: Box<LangExpr<'model>>,
+		connection: Box<LangExpr<'model>>,
+	},
 }
 
 pub struct OperationInfo<'model> {
@@ -362,6 +371,12 @@ pub enum LangExprStmt<'model> {
 		from_type: LangType<'model>,
 		to_type: LangType<'model>,
 		body: Box<LangStmt<'model>>,
+	},
+	CreateRemoteWrapper {
+		t: LangType<'model>,
+		connection: LangExpr<'model>,
+		id: LangExpr<'model>,
+		methods: Vec<LangInterfaceMethod<'model>>,
 	},
 }
 
@@ -423,6 +438,11 @@ pub trait GeneratorNameMapping {
 
 	fn codec_write_value_name() -> &'static str;
 	fn codec_codec_param_name(param: &str) -> String;
+
+	fn format_writer_name() -> &'static str;
+	fn format_reader_name() -> &'static str;
+	fn connection_name() -> &'static str;
+	fn object_id_name() -> &'static str;
 	
 	fn constant_version_name(version: &BigUint) -> String;
 }
@@ -538,8 +558,6 @@ fn is_valid_integer_for_type(n: &BigInt, literals: LangExternTypeLiterals) -> Re
 	}))
 }
 
-const CONNECTION_PARAM_NAME: &'static str = "connection";
-
 pub trait Generator<'model> : Sized {
 	type Lang: GeneratorNameMapping;
 
@@ -578,9 +596,14 @@ pub trait Generator<'model> : Sized {
 			},
 
 			LangType::Interface(name, version, args, _) => {
-				let codec_args = vec!(
-					LangExpr::Identifier(CONNECTION_PARAM_NAME.to_string())
+				let mut codec_args = vec!(
+					LangExpr::Identifier(Self::Lang::object_id_name().to_string())
 				);
+
+				for arg in &args {
+					codec_args.push(self.build_codec(arg.clone())?);
+				}
+
 
 				LangExpr::InvokeOperation(
 					Operation::TypeCodec,
@@ -592,7 +615,7 @@ pub trait Generator<'model> : Sized {
 
 			LangType::TypeParameter(name) => LangExpr::Identifier(Self::Lang::codec_codec_param_name(&name)),
 
-			LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForCodec),
+			LangType::RemoteObjectId | LangType::RemoteConnection | LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForCodec),
 		})
 	}
 
@@ -715,7 +738,9 @@ pub trait Generator<'model> : Sized {
 					)
 				},
 				LangType::Versioned(_, type_name, ..) => return Err(GeneratorError::TypeCannotBeSequence(type_name.clone())),
-				LangType::Interface(..) | LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) =>
+				LangType::RemoteObjectId | LangType::RemoteConnection |
+				LangType::Interface(..) | LangType::TypeParameter(_) |
+				LangType::Codec(_) | LangType::Converter(_, _) =>
 					return Err(GeneratorError::InvalidTypeForConstant),
 			},
 			
@@ -750,7 +775,9 @@ pub trait Generator<'model> : Sized {
 				},
 
 				LangType::Versioned(VersionedTypeKind::Struct, ..) => return Err(GeneratorError::RecordLiteralNotForStruct),
-				LangType::Interface(..) | LangType::TypeParameter(_) | LangType::Codec(_) | LangType::Converter(_, _) =>
+				LangType::RemoteObjectId | LangType::RemoteConnection |
+				LangType::Interface(..) | LangType::TypeParameter(_) |
+				LangType::Codec(_) | LangType::Converter(_, _) =>
 					return Err(GeneratorError::InvalidTypeForConstant),
 			},
 			
@@ -797,8 +824,9 @@ pub trait Generator<'model> : Sized {
 				},
 
 				LangType::Versioned(VersionedTypeKind::Enum, ..) => return Err(GeneratorError::InvalidTypeForConstant),
-				LangType::TypeParameter(_) => return Err(GeneratorError::InvalidTypeForConstant),
-				LangType::Interface(..) | LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForConstant),
+				LangType::RemoteObjectId | LangType::RemoteConnection |
+				LangType::Interface(..) | LangType::TypeParameter(_) |
+				LangType::Codec(_) | LangType::Converter(_, _) => return Err(GeneratorError::InvalidTypeForConstant),
 			},
 			model::ConstantValue::Constant(name) => {
 				match self.scope().lookup(name) {
@@ -989,17 +1017,56 @@ impl <'model, TImpl : TypeGenerator<'model, TypeDefinition = model::VersionedTyp
 }
 
 
-pub struct InterfaceTypeGeneratorOperationsState {
+pub struct InterfaceTypeGeneratorOperationsState<'model> {
+	t: LangType<'model>,
 }
 
 impl <'model, TImpl : TypeGenerator<'model, TypeDefinition = model::InterfaceTypeDefinitionData>> TypeGeneratorOperations<'model, model::InterfaceTypeDefinitionData> for TImpl {
-	type OperationsState = InterfaceTypeGeneratorOperationsState;
+	type OperationsState = InterfaceTypeGeneratorOperationsState<'model>;
 
-	fn prepare_operaitons_state(&self, _t: &LangType<'model>, _ver_type: &model::TypeVersionInfo<model::OfInterface<'model, model::InterfaceVersionDefinition>>, _prev_ver: &Option<BigUint>) -> Result<Self::OperationsState, GeneratorError> {
+	fn prepare_operaitons_state(&self, t: &LangType<'model>, _ver_type: &model::TypeVersionInfo<model::OfInterface<'model, model::InterfaceVersionDefinition>>, _prev_ver: &Option<BigUint>) -> Result<Self::OperationsState, GeneratorError> {
 		Ok(InterfaceTypeGeneratorOperationsState {
+			t: t.clone(),
 		})
 	}
-	fn generate_operations(&mut self, _state: Self::OperationsState, _ver_type: &model::TypeVersionInfo<model::OfInterface<'model, model::InterfaceVersionDefinition>>, _prev_ver: &Option<BigUint>) -> Result<(), GeneratorError> {
+	fn generate_operations(&mut self, state: Self::OperationsState, ver_type: &model::TypeVersionInfo<model::OfInterface<'model, model::InterfaceVersionDefinition>>, _prev_ver: &Option<BigUint>) -> Result<(), GeneratorError> {
+		let version = &ver_type.version;
+
+		// Create Remote Wrapper
+		{
+			let mut params = Vec::new();
+
+			params.push((TImpl::Lang::connection_name().to_string(), LangType::RemoteConnection));
+			params.push((TImpl::Lang::object_id_name().to_string(), LangType::RemoteObjectId));
+
+			for param in self.type_def().type_params() {
+				let param_type = LangType::TypeParameter(param.clone());
+
+				params.push((Self::Lang::codec_codec_param_name(param), LangType::Codec(Box::new(param_type.clone()))));
+			}
+
+			let methods = match &state.t {
+				LangType::Interface(_, _, _, methods) => methods.clone().build()?,
+				_ => return Err(GeneratorError::CouldNotGenerateType),
+			};
+
+			let op = OperationInfo {
+				operation: Operation::CreateRemoteWrapper,
+				version: version.clone(),
+				type_params: self.type_def().type_params().clone(),
+				params,
+				result: state.t.clone(),
+				implementation: LangExprStmt::CreateRemoteWrapper {
+					t: state.t,
+					connection: LangExpr::Identifier(TImpl::Lang::connection_name().to_string()),
+					id: LangExpr::Identifier(TImpl::Lang::object_id_name().to_string()),
+					methods,
+				},
+			};
+
+			self.write_operation(op)?;
+		}
+
 		Ok(())
 	}
 }
