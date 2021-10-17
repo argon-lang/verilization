@@ -19,15 +19,17 @@ fn build_file_map(path: &Path, rel_path: &Path, map: &mut HashMap<OsString, [u8;
         }
     }
     else {
-        let mut file = File::open(path)?;
         let mut hash = sha2::Sha256::default();
-        let mut buf = [0u8; 4096];
-
-        let mut len = file.read(&mut buf)?;
-
-        while len > 0 {
-            hash.update(&buf[0..len]);
-            len = file.read(&mut buf)?;
+        {
+            let mut file = File::open(path)?;
+            let mut buf = [0u8; 4096];
+    
+            let mut len = file.read(&mut buf)?;
+    
+            while len > 0 {
+                hash.update(&buf[0..len]);
+                len = file.read(&mut buf)?;
+            }
         }
 
         let hash = hash.finalize();

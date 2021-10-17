@@ -840,7 +840,7 @@ pub struct InterfaceMethod {
 }
 
 pub struct InterfaceVersionDefinition {
-	methods: HashMap<String, InterfaceMethod>,
+	methods: Vec<(String, InterfaceMethod)>,
 }
 
 pub struct InterfaceTypeDefinitionData {
@@ -854,7 +854,7 @@ pub struct InterfaceTypeDefinitionData {
 pub struct InterfaceMethodBuilder<'a> {
 	interface_name: &'a QualifiedName,
 	interface_version: &'a BigUint,
-	method_name: String,
+	method_name: &'a mut String,
 	type_param_names: HashSet<String>,
 	param_names: HashSet<String>,
 	method: &'a mut InterfaceMethod,
@@ -891,7 +891,7 @@ impl InterfaceTypeDefinitionBuilder {
 			std::collections::hash_map::Entry::Occupied(_) => Err(ModelError::DuplicateVersion(self.name.clone(), version)),
 			std::collections::hash_map::Entry::Vacant(entry) => {
 				let ver_type = entry.insert(InterfaceVersionDefinition {
-					methods: HashMap::new(),
+					methods: Vec::new(),
 				});
 
 				Ok(InterfaceVersionDefinitionBuilder {
@@ -908,25 +908,22 @@ impl InterfaceTypeDefinitionBuilder {
 impl <'a> InterfaceVersionDefinitionBuilder<'a> {
 	pub fn add_method<'b>(&'b mut self, name: String, return_type: Type) -> Result<InterfaceMethodBuilder<'b>, ModelError> where 'a : 'b {
 		if self.method_names.insert(name.to_ascii_uppercase()) {
-			Ok(match self.ver.methods.entry(name) {
-				std::collections::hash_map::Entry::Occupied(_) => panic!("Should not be occupied since name was missing from method_names."),
-				std::collections::hash_map::Entry::Vacant(entry) => {
-					let name = entry.key().clone();
-					let method = entry.insert(InterfaceMethod {
-						type_params: Vec::new(),
-						parameters: Vec::new(),
-						return_type: return_type,
-					});
+			let method = InterfaceMethod {
+				type_params: Vec::new(),
+				parameters: Vec::new(),
+				return_type: return_type,
+			};
 
-					InterfaceMethodBuilder {
-						interface_name: self.name,
-						interface_version: &self.version,
-						method_name: name,
-						type_param_names: HashSet::new(),
-						param_names: HashSet::new(),
-						method,
-					}
-				}
+			self.ver.methods.push((name, method));
+			let (name, method) = self.ver.methods.last_mut().unwrap();
+
+			Ok(InterfaceMethodBuilder {
+				interface_name: self.name,
+				interface_version: &self.version,
+				method_name: name,
+				type_param_names: HashSet::new(),
+				param_names: HashSet::new(),
+				method,
 			})
 		}
 		else {
@@ -1028,10 +1025,10 @@ impl <'a> GeneratableType<'a> for InterfaceTypeDefinitionData {
 }
 
 impl <'a> OfInterface<'a, InterfaceVersionDefinition> {
-	pub fn methods(self) -> HashMap<&'a String, OfInterface<'a, InterfaceMethod>> {
-		let mut result = HashMap::new();
+	pub fn methods(self) -> Vec<(&'a String, OfInterface<'a, InterfaceMethod>)> {
+		let mut result = Vec::new();
 		for (name, method) in &self.value.methods {
-			result.insert(name, OfInterface::new(self.interface, method));
+			result.push((name, OfInterface::new(self.interface, method)));
 		}
 		result
 	}
@@ -1581,13 +1578,11 @@ pub struct ReferencedTypeIteratorInterfaceType<'a> {
 	seen_types: HashSet<&'a QualifiedName>,
 	current_method_type_params: Vec<&'a String>,
 	ver_iter: std::collections::hash_map::Values<'a, BigUint, InterfaceVersionDefinition>,
-	method_iter: std::collections::hash_map::Values<'a, String, InterfaceMethod>,
+	method_iter: std::slice::Iter<'a, (String, InterfaceMethod)>,
 	arg_iters: Vec<std::slice::Iter<'a, Type>>,
 }
 
-lazy_static! {
-	static ref REF_TYPE_ITER_EMPTY_INTERFACE_METHOD_MAP: HashMap<String, InterfaceMethod> = HashMap::new();
-}
+const REF_TYPE_ITER_EMPTY_INTERFACE_METHODS_SLICE: &[(String, InterfaceMethod)] = &[];
 
 impl <'a> Iterator for ReferencedTypeIteratorInterfaceType<'a> {
 	type Item = &'a QualifiedName;
@@ -1609,7 +1604,7 @@ impl <'a> Iterator for ReferencedTypeIteratorInterfaceType<'a> {
 				}
 			}
 
-			if let Some(method) = self.method_iter.next() {
+			if let Some((_, method)) = self.method_iter.next() {
 				self.current_method_type_params.clear();
 				self.current_method_type_params.extend(&method.type_params);
 
@@ -1619,7 +1614,7 @@ impl <'a> Iterator for ReferencedTypeIteratorInterfaceType<'a> {
 				}
 			}
 			else if let Some(ver_type) = self.ver_iter.next() {
-				self.method_iter = ver_type.methods.values();
+				self.method_iter = ver_type.methods.iter();
 			}
 			else {
 				return None;
@@ -1634,7 +1629,7 @@ impl <'a> ReferencedTypeIteratorInterfaceType<'a> {
 			seen_types: HashSet::new(),
 			current_method_type_params: Vec::new(),
 			ver_iter: versions.values(),
-			method_iter: REF_TYPE_ITER_EMPTY_INTERFACE_METHOD_MAP.values(),
+			method_iter: REF_TYPE_ITER_EMPTY_INTERFACE_METHODS_SLICE.iter(),
 			arg_iters: Vec::new(),
 		}
 	}
