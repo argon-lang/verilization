@@ -21,6 +21,12 @@ lazy val scalaRuntime = crossProject(JSPlatform, JVMPlatform).in(file("."))
         homepage := Some(url("https://github.com/argon-lang/verilization")),
         licenses := Seq("Apache 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt")),
 
+        scalacOptions ++= Seq(
+            "-deprecation",
+        ),
+
+        crossScalaVersions := List("3.1.0", "2.13.7", "2.12.15"),
+
         scmInfo := Some(
             ScmInfo(
                 url("https://github.com/argon-lang/verilization"),
@@ -38,12 +44,9 @@ lazy val scalaRuntime = crossProject(JSPlatform, JVMPlatform).in(file("."))
         ),
 
 
-        libraryDependencies += "dev.zio" %%% "zio" % "1.0.5",
+        libraryDependencies += "dev.zio" %%% "zio" % "2.0.0-M6-2",
     )
-    .jvmSettings(
-        crossScalaVersions := List("2.13.5", "2.12.13"),
-    )
-    .jsSettings(
-        crossScalaVersions := List("2.13.5", "2.12.13"),
-    )
+
+lazy val scalaRuntimeJVM = scalaRuntime.jvm
+lazy val scalaRuntimeJS = scalaRuntime.js
 

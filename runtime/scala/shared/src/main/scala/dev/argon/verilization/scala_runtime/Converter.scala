@@ -1,5 +1,6 @@
 package dev.argon.verilization.scala_runtime
 
+@FunctionalInterface
 trait Converter[A, B] {
     def convert(prev: A): B
 }

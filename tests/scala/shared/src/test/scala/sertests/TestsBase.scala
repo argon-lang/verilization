@@ -27,8 +27,8 @@ abstract class TestsBase extends DefaultRunnableSpec {
     override def spec: ZSpec[Environment, Failure] =
         suite("Verilization tests")(testCases.zipWithIndex.flatMap { case (testCase, i) =>
             Seq(
-                testM(s"test $i encode")(encodeTest(testCase)),
-                testM(s"test $i decode")(decodeTest(testCase)),
+                test(s"test $i encode")(encodeTest(testCase)),
+                test(s"test $i decode")(decodeTest(testCase)),
             )
         }: _*)
 }

@@ -8,7 +8,7 @@ object Option {
     def fromCaseNone[A](): Option[A] = None
 
     def converter[A, B](elementConverter: Converter[A, B]): Converter[SOption[A], SOption[B]] = elementConverter match {
-        case elementConverter: IdentityConverter[A] => new IdentityConverter[SOption[A]]
+        case _: IdentityConverter[_] => new IdentityConverter[SOption[A]]
         case _ => new Converter[SOption[A], SOption[B]] {
             override def convert(prev: SOption[A]): SOption[B] = prev.map(elementConverter.convert)
         }
@@ -26,6 +26,6 @@ object Option {
             }
 
         override def write[R, E](writer: FormatWriter[R, E], value: SOption[A]): ZIO[R, E, Unit] =
-            U8.codec.write(writer, if(value.isDefined) 1 else 0) *> ZIO.foreach_(value) { elem => elementCodec.write(writer, elem) }
+            U8.codec.write(writer, if(value.isDefined) 1 else 0) *> ZIO.foreachDiscard(value) { elem => elementCodec.write(writer, elem) }
     }
 }

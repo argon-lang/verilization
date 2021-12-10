@@ -6,7 +6,7 @@ object List {
     def fromSequence[A](seq: A*): Chunk[A] = Chunk.fromIterable(seq)
 
     def converter[A, B](elementConverter: Converter[A, B]): Converter[Chunk[A], Chunk[B]] = elementConverter match {
-        case elementConverter: IdentityConverter[A] => new IdentityConverter[Chunk[A]]
+        case _: IdentityConverter[_] => new IdentityConverter[Chunk[A]]
         case _ => new Converter[Chunk[A], Chunk[B]] {
             override def convert(prev: Chunk[A]): Chunk[B] = prev.map(elementConverter.convert)
         }
@@ -15,19 +15,19 @@ object List {
     def codec[A](elementCodec: Codec[A]): Codec[Chunk[A]] = new Codec[Chunk[A]] {
         override def read[R, E](reader: FormatReader[R, E]): ZIO[R, E, Chunk[A]] =
             Nat.codec.read(reader).flatMap { length =>
-                IO.effectTotal { length.bigInteger.intValueExact }
+                IO.succeed { length.bigInteger.intValueExact }
             }.flatMap { length =>
-                IO.effectTotal { ChunkBuilder.make[A](length) }.flatMap { chunkBuilder =>
+                IO.succeed { ChunkBuilder.make[A](length) }.flatMap { chunkBuilder =>
                     elementCodec.read(reader)
-                        .flatMap { a => IO.effectTotal { chunkBuilder += a } }
+                        .flatMap { a => IO.succeed { chunkBuilder += a } }
                         .repeatN(length)
                         .flatMap { _ =>
-                            IO.effectTotal { chunkBuilder.result() }
+                            IO.succeed { chunkBuilder.result() }
                         }
                 }
             }
 
         override def write[R, E](writer: FormatWriter[R, E], value: Chunk[A]): ZIO[R, E, Unit] =
-            Nat.codec.write(writer, value.size) *> ZIO.foreach_(value) { elem => elementCodec.write(writer, elem) }
+            Nat.codec.write(writer, value.size) *> ZIO.foreachDiscard(value) { elem => elementCodec.write(writer, elem) }
     }
 }
