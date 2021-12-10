@@ -7,12 +7,13 @@ use output_comparison::{run_generator, print_file_map};
 use std::ffi::OsString;
 use std::process::Command;
 use std::process::Stdio;
+use std::sync::Mutex;
+use lazy_static::lazy_static;
 
 use test_generator::test_resources;
 
-struct GeneratorCommand {
-    build_cmd: Command,
-    run_cmd: Command,
+lazy_static! {
+	static ref BUILD_FLAG: Mutex<bool> = Mutex::default();
 }
 
 
@@ -44,7 +45,31 @@ fn run_command_check_exit(mut command: Command) -> Result<(), VError> {
 }
 
 
+fn build_bindings() -> Result<(), VError> {
+    let mut build_flag = BUILD_FLAG.lock().unwrap();
+
+    if !*build_flag {
+        let mut build = Command::new("cargo");
+        build.arg("build");
+        build.current_dir("../../compiler-cli");
+        run_command_check_exit(build)?;
+        
+        let mut build = Command::new("npm");
+        build.arg("run");
+        build.arg("build");
+        build.current_dir("../../bindings/typescript");
+        run_command_check_exit(build)?;
+        
+        *build_flag = true;
+    }
+
+    Ok(())
+}
+
+
 fn run_test_case<Lang: TestLanguage>(model_file: &str) -> Result<(), VError> {
+    build_bindings()?;
+
     let model_file = format!("../../{}", model_file);
     let expected_files = run_generator(|path| -> Result<(), VError> {
         let mut input_files = vec!(model_file.clone());
@@ -59,57 +84,34 @@ fn run_test_case<Lang: TestLanguage>(model_file: &str) -> Result<(), VError> {
     })?;
 
     let mut commands = Vec::new();
-    {
-        let mut build = Command::new("cargo");
-        build.arg("build");
-        build.current_dir("../../compiler-cli");
-
-        
-        let mut run = Command::new("cargo");
-        run.arg("run");
-        run.arg("-p");
-        run.arg("verilization-compiler-cli");
-        run.arg("--");
-
-        commands.push(GeneratorCommand {
-            build_cmd: build,
-            run_cmd: run,
-        });
-    }
-    {
-        let mut build = Command::new("npm");
-        build.arg("run");
-        build.arg("build");
-        build.current_dir("../../bindings/typescript");
-
-        
-        let mut run = Command::new("node");
-        run.arg("../../bindings/typescript/lib/cli.js");
-
-        commands.push(GeneratorCommand {
-            build_cmd: build,
-            run_cmd: run,
-        });
-    }
+    
+    let mut run = Command::new("cargo");
+    run.arg("run");
+    run.arg("-p");
+    run.arg("verilization-compiler-cli");
+    run.arg("--");
+    commands.push(run);
 
 
-    for cmd in commands {
-        run_command_check_exit(cmd.build_cmd)?;
+    let mut run = Command::new("node");
+    run.arg("../../bindings/typescript/lib/cli.js");
+    commands.push(run);
 
-        let mut run = cmd.run_cmd;
+
+    for mut cmd in commands {
         let gen_files = run_generator(|path| {
             let options = Lang::test_options_dir(OsString::from(path));
             
-            run.arg("generate");
-            run.arg(Lang::name());
-            run.arg("-i");
-            run.arg(model_file.clone());
+            cmd.arg("generate");
+            cmd.arg(Lang::name());
+            cmd.arg("-i");
+            cmd.arg(model_file.clone());
             for rt_file in test_cases::RUNTIME_FILES {
-                run.arg("-i");
-                run.arg(format!("{}/{}.verilization", test_cases::RUNTIME_DIR, rt_file));
+                cmd.arg("-i");
+                cmd.arg(format!("{}/{}.verilization", test_cases::RUNTIME_DIR, rt_file));
             }
-            Lang::append_options(&mut run, &options);
-            run_command_check_exit(run)
+            Lang::append_options(&mut cmd, &options);
+            run_command_check_exit(cmd)
         })?;
 
         

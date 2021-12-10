@@ -509,6 +509,7 @@ name = "verilization-test-runner"
 version = "0.1.0"
 dependencies = [
  "hex-literal",
+ "lazy_static",
  "num-bigint",
  "num-traits",
  "rand 0.8.3",
