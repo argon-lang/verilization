@@ -9,6 +9,6 @@
     "@verilization/runtime": "file:../../runtime/typescript"
   },
   "devDependencies": {
-    "typescript": "^4.2.3"
+    "typescript": "^4.6.0-dev.20211210"
   }
 }
